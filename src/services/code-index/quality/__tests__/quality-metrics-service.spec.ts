@@ -37,7 +37,7 @@ describe("QualityMetricsService", () => {
 					{
 						directTests: 2,
 						integrationTests: 1,
-					},
+					} as any,
 				],
 				relationships: [],
 			})
@@ -59,7 +59,7 @@ describe("QualityMetricsService", () => {
 					{
 						directTests: 0,
 						integrationTests: 0,
-					},
+					} as any,
 				],
 				relationships: [],
 			})
@@ -81,7 +81,7 @@ describe("QualityMetricsService", () => {
 					{
 						directTests: 5,
 						integrationTests: 2,
-					},
+					} as any,
 				],
 				relationships: [],
 			})
@@ -97,7 +97,7 @@ describe("QualityMetricsService", () => {
 					{
 						directTests: 0,
 						integrationTests: 3,
-					},
+					} as any,
 				],
 				relationships: [],
 			})
@@ -157,6 +157,9 @@ describe("QualityMetricsService", () => {
 				{
 					id: "result1",
 					score: 0.9,
+					hybridScore: 0.9,
+					vectorScore: 0.85,
+					bm25Score: 0.95,
 					payload: {
 						filePath: "/test/file.ts",
 						identifier: "testFunction",
@@ -171,12 +174,21 @@ describe("QualityMetricsService", () => {
 			// Mock finding node ID
 			vi.mocked(mockNeo4jService.executeQuery)
 				.mockResolvedValueOnce({
-					nodes: [{ id: "node-123" }],
+					nodes: [
+						{
+							id: "node-123",
+							type: "function",
+							name: "testFunction",
+							filePath: "/test/file.ts",
+							startLine: 1,
+							endLine: 3,
+						},
+					],
 					relationships: [],
 				})
 				// Mock coverage query
 				.mockResolvedValueOnce({
-					nodes: [{ directTests: 2, integrationTests: 1 }],
+					nodes: [{ directTests: 2, integrationTests: 1 } as any],
 					relationships: [],
 				})
 
@@ -201,6 +213,9 @@ describe("QualityMetricsService", () => {
 			const largeResults = Array(30).fill({
 				id: "result",
 				score: 0.9,
+				hybridScore: 0.9,
+				vectorScore: 0.85,
+				bm25Score: 0.95,
 				payload: { filePath: "/test/file.ts" },
 			})
 
