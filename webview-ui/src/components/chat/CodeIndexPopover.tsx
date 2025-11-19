@@ -324,9 +324,43 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 			} else if (event.data.type === "codeIndexSettingsSaved") {
 				if (event.data.success) {
 					setSaveStatus("saved")
-					// Update initial settings to match current settings after successful save
-					// This ensures hasUnsavedChanges becomes false
-					const savedSettings = { ...currentSettingsRef.current }
+					// CRITICAL: Use the settings returned from the backend, not currentSettingsRef
+					// The backend returns the actual saved state including neo4jEnabled
+					// Merge with current settings to preserve secret fields that weren't sent
+					const backendSettings = event.data.settings || {}
+					const savedSettings = {
+						...currentSettingsRef.current,
+						// Override with backend values for non-secret fields
+						codebaseIndexEnabled:
+							backendSettings.codebaseIndexEnabled ?? currentSettingsRef.current.codebaseIndexEnabled,
+						codebaseIndexQdrantUrl:
+							backendSettings.codebaseIndexQdrantUrl ?? currentSettingsRef.current.codebaseIndexQdrantUrl,
+						codebaseIndexEmbedderProvider:
+							backendSettings.codebaseIndexEmbedderProvider ??
+							currentSettingsRef.current.codebaseIndexEmbedderProvider,
+						codebaseIndexEmbedderBaseUrl:
+							backendSettings.codebaseIndexEmbedderBaseUrl ??
+							currentSettingsRef.current.codebaseIndexEmbedderBaseUrl,
+						codebaseIndexEmbedderModelId:
+							backendSettings.codebaseIndexEmbedderModelId ??
+							currentSettingsRef.current.codebaseIndexEmbedderModelId,
+						codebaseIndexEmbedderModelDimension:
+							backendSettings.codebaseIndexEmbedderModelDimension ??
+							currentSettingsRef.current.codebaseIndexEmbedderModelDimension,
+						codebaseIndexSearchMaxResults:
+							backendSettings.codebaseIndexSearchMaxResults ??
+							currentSettingsRef.current.codebaseIndexSearchMaxResults,
+						codebaseIndexSearchMinScore:
+							backendSettings.codebaseIndexSearchMinScore ??
+							currentSettingsRef.current.codebaseIndexSearchMinScore,
+						codebaseIndexOpenAiCompatibleBaseUrl:
+							backendSettings.codebaseIndexOpenAiCompatibleBaseUrl ??
+							currentSettingsRef.current.codebaseIndexOpenAiCompatibleBaseUrl,
+						// Neo4j settings from backend (CRITICAL - this is what was missing!)
+						neo4jEnabled: backendSettings.neo4jEnabled ?? currentSettingsRef.current.neo4jEnabled,
+						neo4jUri: backendSettings.neo4jUri ?? currentSettingsRef.current.neo4jUri,
+						neo4jUsername: backendSettings.neo4jUsername ?? currentSettingsRef.current.neo4jUsername,
+					}
 					setInitialSettings(savedSettings)
 					// Also update current settings to maintain consistency
 					setCurrentSettings(savedSettings)
