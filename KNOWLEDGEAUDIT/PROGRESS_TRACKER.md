@@ -118,12 +118,12 @@
 ## Phase 5: Neo4j Integration
 
 **Status:** 🔄 In Progress
-**Progress:** 3/5 tasks complete (60%)
+**Progress:** 4/5 tasks complete (80%)
 
 - [x] Task 5.1: Set Up Neo4j Configuration ✅ **COMPLETE**
 - [x] Task 5.2: Install Neo4j Driver ✅ **COMPLETE**
 - [x] Task 5.3: Create Neo4j Service ✅ **COMPLETE**
-- [ ] Task 5.4: Create Graph Indexer
+- [x] Task 5.4: Create Graph Indexer ✅ **COMPLETE**
 - [ ] Task 5.5: Integrate Neo4j into Pipeline
 
 **Blockers:** None
