@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
-import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo } from "../interfaces"
+import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo, TestMetadata, TestTarget } from "../interfaces"
 import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
 import {
 	MAX_BLOCK_CHARS,
@@ -205,6 +205,9 @@ export class CodeParser implements ICodeParser {
 		// Phase 3: Extract file-level imports once
 		const fileImports = this.extractFileImports(tree)
 
+		// Phase 10, Task 2: Detect if this is a test file
+		const testMetadata = this.detectTestFile(filePath, tree, ext)
+
 		// Process captures if not empty
 		const queue: Node[] = Array.from(captures).map((capture) => capture.node)
 
@@ -324,6 +327,7 @@ export class CodeParser implements ICodeParser {
 							documentation,
 							imports: fileImports.length > 0 ? fileImports : undefined, // Phase 3: Include imports (Rule 4)
 							calls, // Phase 10: Include function calls
+							testMetadata, // Phase 10, Task 2: Include test metadata
 						})
 					}
 				}
@@ -1009,6 +1013,321 @@ export class CodeParser implements ICodeParser {
 		}
 
 		return null
+	}
+
+	/**
+	 * Phase 10, Task 2: Detect if a file is a test file
+	 * Uses multi-layered detection: file path, imports, and AST content
+	 */
+	private detectTestFile(filePath: string, tree: any, ext: string): TestMetadata | undefined {
+		// Layer 1: File path pattern matching (30% weight)
+		const pathScore = this.scoreTestFilePath(filePath, ext)
+
+		// Layer 2: Import analysis (40% weight)
+		const importScore = this.scoreTestImports(tree, ext)
+
+		// Layer 3: AST content analysis (30% weight)
+		const contentScore = this.scoreTestContent(tree, ext)
+
+		// Combine scores
+		const totalScore = pathScore * 0.3 + importScore * 0.4 + contentScore * 0.3
+
+		if (totalScore < 0.5) {
+			return undefined // Not a test file
+		}
+
+		return {
+			isTest: true,
+			testFramework: this.detectTestFramework(tree, ext),
+			testType: this.inferTestType(filePath),
+			testTargets: [], // Will be populated later
+		}
+	}
+
+	/**
+	 * Score test file path patterns by language
+	 */
+	private scoreTestFilePath(filePath: string, ext: string): number {
+		const fileName = path.basename(filePath)
+		const dirPath = path.dirname(filePath)
+
+		const patterns = this.getTestFilePatterns(ext)
+
+		for (const pattern of patterns) {
+			if (pattern.test(fileName) || pattern.test(dirPath)) {
+				return 0.8
+			}
+		}
+
+		return 0.0
+	}
+
+	/**
+	 * Get test file patterns by language/extension
+	 */
+	private getTestFilePatterns(ext: string): RegExp[] {
+		const patterns: Record<string, RegExp[]> = {
+			ts: [/\.test\.tsx?$/, /\.spec\.tsx?$/, /__tests__/, /\/tests?\//, /\/spec\//],
+			tsx: [/\.test\.tsx?$/, /\.spec\.tsx?$/, /__tests__/, /\/tests?\//, /\/spec\//],
+			js: [/\.test\.jsx?$/, /\.spec\.jsx?$/, /__tests__/, /\/tests?\//, /\/spec\//],
+			jsx: [/\.test\.jsx?$/, /\.spec\.jsx?$/, /__tests__/, /\/tests?\//, /\/spec\//],
+			py: [/^test_.*\.py$/, /.*_test\.py$/, /\/tests?\//, /\/test\//],
+			go: [/_test\.go$/],
+			rs: [/\.rs$/], // Rust tests are in same files with #[test]
+			java: [/Test\.java$/, /Tests\.java$/, /\/test\//, /src\/test\//],
+			cs: [/Tests?\.cs$/, /\/Tests?\//],
+			rb: [/_spec\.rb$/, /^test_.*\.rb$/, /.*_test\.rb$/, /\/spec\//, /\/test\//],
+			php: [/Test\.php$/, /\.test\.php$/, /\/tests?\//],
+			swift: [/Tests\.swift$/, /\/Tests\//],
+		}
+
+		return patterns[ext] || []
+	}
+
+	/**
+	 * Score test imports (detect test framework imports)
+	 */
+	private scoreTestImports(tree: any, ext: string): number {
+		const rootNode = tree.rootNode
+		const imports = this.extractImportSources(rootNode)
+
+		const frameworkMap: Record<string, string[]> = {
+			ts: ["vitest", "jest", "@jest/globals", "mocha", "jasmine", "ava", "tape", "@testing-library"],
+			tsx: ["vitest", "jest", "@jest/globals", "mocha", "jasmine", "ava", "tape", "@testing-library"],
+			js: ["vitest", "jest", "mocha", "jasmine", "ava", "tape"],
+			jsx: ["vitest", "jest", "mocha", "jasmine", "ava", "tape"],
+			py: ["pytest", "unittest", "nose2", "nose"],
+			go: ["testing", "github.com/stretchr/testify", "github.com/onsi/ginkgo", "github.com/onsi/gomega"],
+			java: ["org.junit.jupiter", "org.junit", "org.testng"],
+			cs: ["NUnit.Framework", "Xunit", "Microsoft.VisualStudio.TestTools.UnitTesting"],
+			rb: ["rspec", "minitest"],
+			php: ["PHPUnit", "Pest"],
+			swift: ["XCTest"],
+		}
+
+		const frameworks = frameworkMap[ext] || []
+
+		for (const importSource of imports) {
+			for (const framework of frameworks) {
+				if (importSource.includes(framework)) {
+					return 0.9
+				}
+			}
+		}
+
+		return 0.0
+	}
+
+	/**
+	 * Extract import sources from AST
+	 */
+	private extractImportSources(node: any): string[] {
+		const sources: string[] = []
+
+		const findImports = (n: any) => {
+			if (!n) return
+
+			if (n.type === "import_statement" || n.type === "import_from_statement") {
+				const sourceNode = n.childForFieldName("source")
+				if (sourceNode) {
+					sources.push(sourceNode.text.replace(/['"]/g, ""))
+				}
+			}
+
+			for (const child of n.children || []) {
+				findImports(child)
+			}
+		}
+
+		findImports(node)
+		return sources
+	}
+
+	/**
+	 * Score test content (detect test-specific function calls)
+	 */
+	private scoreTestContent(tree: any, ext: string): number {
+		const rootNode = tree.rootNode
+		const testPatterns: Record<string, string[]> = {
+			ts: ["describe", "it", "test", "expect", "beforeEach", "afterEach"],
+			tsx: ["describe", "it", "test", "expect", "beforeEach", "afterEach"],
+			js: ["describe", "it", "test", "expect", "beforeEach", "afterEach"],
+			jsx: ["describe", "it", "test", "expect", "beforeEach", "afterEach"],
+			py: ["def test_", "class Test", "@pytest", "@patch"],
+			go: ["func Test", "func Benchmark"],
+			rs: ["#[test]", "#[cfg(test)]"],
+			java: ["@Test", "@Before", "@After"],
+			cs: ["[Test]", "[Fact]", "[Theory]", "[TestMethod]"],
+			rb: ["describe", "it", "context", "def test_"],
+			php: ["public function test", "class.*Test extends"],
+			swift: ["func test", "class.*Tests.*XCTestCase"],
+		}
+
+		const patterns = testPatterns[ext] || []
+		const text = rootNode.text
+
+		for (const pattern of patterns) {
+			if (text.includes(pattern)) {
+				return 0.8
+			}
+		}
+
+		return 0.0
+	}
+
+	/**
+	 * Detect test framework from imports and content
+	 */
+	private detectTestFramework(tree: any, ext: string): string | undefined {
+		const rootNode = tree.rootNode
+		const imports = this.extractImportSources(rootNode)
+
+		const frameworkMap: Record<string, Record<string, string>> = {
+			ts: {
+				vitest: "vitest",
+				jest: "jest",
+				"@jest/globals": "jest",
+				mocha: "mocha",
+				jasmine: "jasmine",
+				ava: "ava",
+				tape: "tape",
+			},
+			tsx: {
+				vitest: "vitest",
+				jest: "jest",
+				"@jest/globals": "jest",
+				mocha: "mocha",
+				jasmine: "jasmine",
+			},
+			js: { vitest: "vitest", jest: "jest", mocha: "mocha", jasmine: "jasmine", ava: "ava", tape: "tape" },
+			jsx: { vitest: "vitest", jest: "jest", mocha: "mocha", jasmine: "jasmine" },
+			py: { pytest: "pytest", unittest: "unittest", nose2: "nose2", nose: "nose" },
+			go: {
+				testing: "go-testing",
+				"github.com/stretchr/testify": "testify",
+				"github.com/onsi/ginkgo": "ginkgo",
+			},
+			java: { "org.junit.jupiter": "junit5", "org.junit": "junit4", "org.testng": "testng" },
+			cs: {
+				"NUnit.Framework": "nunit",
+				Xunit: "xunit",
+				"Microsoft.VisualStudio.TestTools.UnitTesting": "mstest",
+			},
+			rb: { rspec: "rspec", minitest: "minitest" },
+			php: { PHPUnit: "phpunit", Pest: "pest" },
+			swift: { XCTest: "xctest" },
+		}
+
+		const languageFrameworks = frameworkMap[ext] || {}
+
+		for (const importSource of imports) {
+			for (const [pattern, framework] of Object.entries(languageFrameworks)) {
+				if (importSource.includes(pattern)) {
+					return framework
+				}
+			}
+		}
+
+		return undefined
+	}
+
+	/**
+	 * Infer test type from file path
+	 */
+	private inferTestType(filePath: string): TestMetadata["testType"] {
+		const lowerPath = filePath.toLowerCase()
+
+		if (lowerPath.includes("e2e") || lowerPath.includes("end-to-end")) {
+			return "e2e"
+		}
+		if (lowerPath.includes("integration") || lowerPath.includes("int.test")) {
+			return "integration"
+		}
+		if (lowerPath.includes("snapshot") || lowerPath.includes(".snap")) {
+			return "snapshot"
+		}
+		if (lowerPath.includes("benchmark") || lowerPath.includes("perf") || lowerPath.includes("performance")) {
+			return "benchmark"
+		}
+		if (lowerPath.includes("unit")) {
+			return "unit"
+		}
+
+		// Default to unit test if in test directory
+		return "unit"
+	}
+
+	/**
+	 * Extract test targets from imports (highest confidence method)
+	 */
+	private extractTargetsFromImports(testBlock: CodeBlock, allBlocks: CodeBlock[]): TestTarget[] {
+		const targets: TestTarget[] = []
+
+		if (!testBlock.imports) {
+			return targets
+		}
+
+		for (const importInfo of testBlock.imports) {
+			// Skip test framework imports
+			if (this.isTestFrameworkImport(importInfo.source)) {
+				continue
+			}
+
+			// Find source file blocks
+			const sourceBlocks = allBlocks.filter(
+				(block) => block.file_path.includes(importInfo.source) && !block.testMetadata?.isTest,
+			)
+
+			for (const sourceBlock of sourceBlocks) {
+				// Check if imported symbols match block identifiers
+				for (const symbol of importInfo.symbols) {
+					if (sourceBlock.identifier === symbol) {
+						targets.push({
+							targetIdentifier: symbol,
+							targetFilePath: sourceBlock.file_path,
+							confidence: 90,
+							detectionMethod: "import",
+						})
+					}
+				}
+			}
+		}
+
+		return targets
+	}
+
+	/**
+	 * Check if an import is from a test framework
+	 */
+	private isTestFrameworkImport(source: string): boolean {
+		const testFrameworks = [
+			"vitest",
+			"jest",
+			"@jest",
+			"mocha",
+			"jasmine",
+			"ava",
+			"tape",
+			"@testing-library",
+			"pytest",
+			"unittest",
+			"nose",
+			"testing", // Go
+			"testify",
+			"ginkgo",
+			"junit",
+			"testng",
+			"nunit",
+			"xunit",
+			"mstest",
+			"rspec",
+			"minitest",
+			"phpunit",
+			"pest",
+			"xctest",
+		]
+
+		return testFrameworks.some((framework) => source.toLowerCase().includes(framework))
 	}
 }
 

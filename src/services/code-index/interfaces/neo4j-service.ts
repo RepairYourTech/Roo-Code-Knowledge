@@ -29,11 +29,22 @@ export interface CodeNode {
 /**
  * Represents a relationship between code entities
  * Phase 10: Added CALLED_BY for bidirectional call graph queries
+ * Phase 10, Task 2: Added TESTS/TESTED_BY for test coverage relationships
  */
 export interface CodeRelationship {
 	fromId: string
 	toId: string
-	type: "CALLS" | "CALLED_BY" | "IMPORTS" | "EXTENDS" | "IMPLEMENTS" | "CONTAINS" | "DEFINES" | "USES"
+	type:
+		| "CALLS"
+		| "CALLED_BY"
+		| "TESTS" // Phase 10, Task 2: Test -> Source relationship
+		| "TESTED_BY" // Phase 10, Task 2: Source -> Test relationship
+		| "IMPORTS"
+		| "EXTENDS"
+		| "IMPLEMENTS"
+		| "CONTAINS"
+		| "DEFINES"
+		| "USES"
 	metadata?: Record<string, unknown>
 }
 

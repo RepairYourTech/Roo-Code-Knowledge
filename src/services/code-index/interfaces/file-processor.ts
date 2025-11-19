@@ -145,6 +145,45 @@ export interface CallInfo {
 	qualifier?: string
 }
 
+/**
+ * Information about a test target (what a test is testing)
+ * Phase 10, Task 2: Test relationship tracking for TESTS/TESTED_BY relationships
+ */
+export interface TestTarget {
+	/** Target identifier (function/class name being tested) */
+	targetIdentifier: string
+
+	/** Target file path (if known) */
+	targetFilePath?: string
+
+	/** Confidence score (0-100) for this relationship */
+	confidence: number
+
+	/** How this target was detected */
+	detectionMethod: "import" | "description" | "mock" | "filename" | "explicit"
+
+	/** Line number where target is referenced in test */
+	referenceLine?: number
+}
+
+/**
+ * Test metadata for code blocks
+ * Phase 10, Task 2: Test detection and relationship tracking
+ */
+export interface TestMetadata {
+	/** Whether this block is a test */
+	isTest: boolean
+
+	/** Test framework detected (jest, vitest, pytest, go-testing, etc.) */
+	testFramework?: string
+
+	/** Test type inferred from path or naming */
+	testType?: "unit" | "integration" | "e2e" | "snapshot" | "benchmark" | "performance" | "unknown"
+
+	/** Test targets: what this test is testing */
+	testTargets?: TestTarget[]
+}
+
 export interface CodeBlock {
 	file_path: string
 	identifier: string | null
@@ -163,4 +202,6 @@ export interface CodeBlock {
 	lspTypeInfo?: LSPTypeInfo
 	// Phase 10: Function call information (optional for backward compatibility)
 	calls?: CallInfo[]
+	// Phase 10, Task 2: Test metadata (optional for backward compatibility)
+	testMetadata?: TestMetadata
 }

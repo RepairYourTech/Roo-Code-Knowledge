@@ -1,4 +1,4 @@
-import { CodeBlock, CallInfo } from "../interfaces/file-processor"
+import { CodeBlock, CallInfo, TestMetadata, TestTarget } from "../interfaces/file-processor"
 import { CodeNode, CodeRelationship, INeo4jService } from "../interfaces/neo4j-service"
 import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
 import * as path from "path"
@@ -329,6 +329,40 @@ export class GraphIndexer implements IGraphIndexer {
 			})
 		}
 
+		// Phase 10, Task 2: Extract TESTS relationships from test metadata
+		if (block.testMetadata?.isTest) {
+			// Extract test targets from imports (highest confidence method)
+			const testTargets = this.extractTestTargetsFromImports(block, allBlocks)
+
+			for (const target of testTargets) {
+				// Create TESTS relationship
+				relationships.push({
+					fromId,
+					toId: target.targetNodeId,
+					type: "TESTS",
+					metadata: {
+						confidence: target.confidence,
+						detectionMethod: target.detectionMethod,
+						testFramework: block.testMetadata.testFramework,
+						testType: block.testMetadata.testType,
+						targetIdentifier: target.targetIdentifier,
+					},
+				})
+			}
+		}
+
+		// Phase 10, Task 2: Create reverse TESTED_BY relationships for efficient queries
+		// This allows us to quickly answer "is this function tested?"
+		const testsRelationships = relationships.filter((r) => r.type === "TESTS")
+		for (const testsRel of testsRelationships) {
+			relationships.push({
+				fromId: testsRel.toId,
+				toId: testsRel.fromId,
+				type: "TESTED_BY",
+				metadata: testsRel.metadata,
+			})
+		}
+
 		return relationships
 	}
 
@@ -499,5 +533,98 @@ export class GraphIndexer implements IGraphIndexer {
 		)
 
 		return !!containingClass
+	}
+
+	/**
+	 * Phase 10, Task 2: Extract test targets from imports
+	 * This is the highest confidence method for linking tests to source code
+	 */
+	private extractTestTargetsFromImports(
+		testBlock: CodeBlock,
+		allBlocks: CodeBlock[],
+	): Array<{ targetNodeId: string; targetIdentifier: string; confidence: number; detectionMethod: string }> {
+		const targets: Array<{
+			targetNodeId: string
+			targetIdentifier: string
+			confidence: number
+			detectionMethod: string
+		}> = []
+
+		if (!testBlock.imports) {
+			return targets
+		}
+
+		// Test framework imports to skip
+		const testFrameworks = [
+			"vitest",
+			"jest",
+			"@jest",
+			"mocha",
+			"jasmine",
+			"ava",
+			"tape",
+			"@testing-library",
+			"pytest",
+			"unittest",
+			"nose",
+			"testing",
+			"testify",
+			"ginkgo",
+			"junit",
+			"testng",
+			"nunit",
+			"xunit",
+			"mstest",
+			"rspec",
+			"minitest",
+			"phpunit",
+			"pest",
+			"xctest",
+		]
+
+		for (const importInfo of testBlock.imports) {
+			// Skip test framework imports
+			if (testFrameworks.some((framework) => importInfo.source.toLowerCase().includes(framework))) {
+				continue
+			}
+
+			// Find source file blocks that match the import
+			const sourceBlocks = allBlocks.filter((block) => {
+				// Skip test blocks
+				if (block.testMetadata?.isTest) {
+					return false
+				}
+
+				// Check if the block's file path matches the import source
+				// This is a simplified check - in a real implementation, we'd need proper path resolution
+				return block.file_path.includes(importInfo.source) || importInfo.source.includes(block.file_path)
+			})
+
+			for (const sourceBlock of sourceBlocks) {
+				// Check if imported symbols match block identifiers
+				for (const symbol of importInfo.symbols) {
+					if (sourceBlock.identifier === symbol) {
+						targets.push({
+							targetNodeId: this.generateNodeId(sourceBlock),
+							targetIdentifier: symbol,
+							confidence: 90,
+							detectionMethod: "import",
+						})
+					}
+				}
+
+				// If no specific symbols, link to the file-level blocks
+				if (importInfo.symbols.length === 0 && sourceBlock.identifier) {
+					targets.push({
+						targetNodeId: this.generateNodeId(sourceBlock),
+						targetIdentifier: sourceBlock.identifier,
+						confidence: 70,
+						detectionMethod: "import",
+					})
+				}
+			}
+		}
+
+		return targets
 	}
 }
