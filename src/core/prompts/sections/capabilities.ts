@@ -62,7 +62,13 @@ CAPABILITIES
 		codeIndexManager.isFeatureConfigured &&
 		codeIndexManager.isInitialized
 			? `
-- You can use the \`codebase_search\` tool to perform semantic searches across your entire codebase. This tool is powerful for finding functionally relevant code, even if you don't know the exact keywords or file names. It's particularly useful for understanding how features are implemented across multiple files, discovering usages of a particular API, or finding code examples related to a concept. This capability relies on a pre-built index of your code.`
+- You have access to a world-class codebase index with advanced search and analysis capabilities through the \`codebase_search\` tool:
+  - **Hybrid Search**: Combines semantic (vector) search with keyword (BM25) search to find functionally relevant code even without exact keywords. Automatically routes queries to the optimal search strategy.
+  - **Graph Relationships**: Understands code structure through relationships like CALLS/CALLED_BY (function call graph), TESTS/TESTED_BY (test coverage), EXTENDS/IMPLEMENTS (inheritance), and type relationships (HAS_TYPE/ACCEPTS_TYPE/RETURNS_TYPE). Use these for architectural analysis and understanding code dependencies.
+  - **Impact Analysis**: Can analyze the blast radius of changes by finding all code that would be affected by modifying a specific function, class, or file. Use this before making significant refactorings.
+  - **Context Enrichment**: Search results automatically include related code, tests, dependencies, and type information to give you complete context.
+  - **Quality Metrics**: Can assess code complexity (cyclomatic/cognitive), test coverage, and identify dead code to guide refactoring decisions.
+  - This tool is particularly powerful for: understanding how features are implemented across multiple files, discovering all usages of an API, finding code examples related to a concept, analyzing dependencies before making changes, and identifying untested or overly complex code that needs attention.`
 			: ""
 	}
 - You can use search_files to perform regex searches across files in a specified directory, outputting context-rich results that include surrounding lines. This is particularly useful for understanding code patterns, finding specific implementations, or identifying areas that need refactoring.
