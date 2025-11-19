@@ -9,9 +9,19 @@ import { OpenRouterEmbedder } from "./embedders/openrouter"
 import { EmbedderProvider, getDefaultModelId, getModelDimension } from "../../shared/embeddingModels"
 import { QdrantVectorStore } from "./vector-store/qdrant-client"
 import { codeParser, DirectoryScanner, FileWatcher } from "./processors"
-import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore, IBM25Index } from "./interfaces"
+import {
+	ICodeParser,
+	IEmbedder,
+	IFileWatcher,
+	IVectorStore,
+	IBM25Index,
+	INeo4jService,
+	IGraphIndexer,
+} from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
+import { Neo4jService } from "./graph/neo4j-service"
+import { GraphIndexer } from "./graph/graph-indexer"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { Ignore } from "ignore"
 import { t } from "../../i18n"
@@ -156,6 +166,42 @@ export class CodeIndexServiceFactory {
 	}
 
 	/**
+	 * Creates a Neo4j service instance if Neo4j is enabled
+	 * @returns Neo4j service instance or undefined if disabled
+	 */
+	public createNeo4jService(): INeo4jService | undefined {
+		if (!this.configManager.isNeo4jEnabled) {
+			return undefined
+		}
+
+		const config = this.configManager.neo4jConfig
+
+		// Validate required fields and provide defaults
+		const neo4jConfig = {
+			enabled: config.enabled,
+			url: config.url || "bolt://localhost:7687",
+			username: config.username || "neo4j",
+			password: config.password || "",
+			database: config.database || "neo4j",
+		}
+
+		return new Neo4jService(neo4jConfig)
+	}
+
+	/**
+	 * Creates a graph indexer instance if Neo4j is enabled
+	 * @param neo4jService Neo4j service instance
+	 * @returns Graph indexer instance or undefined if Neo4j is disabled
+	 */
+	public createGraphIndexer(neo4jService?: INeo4jService): IGraphIndexer | undefined {
+		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
+			return undefined
+		}
+
+		return new GraphIndexer(neo4jService)
+	}
+
+	/**
 	 * Creates a directory scanner instance with its required dependencies.
 	 */
 	public createDirectoryScanner(
@@ -164,6 +210,7 @@ export class CodeIndexServiceFactory {
 		parser: ICodeParser,
 		ignoreInstance: Ignore,
 		bm25Index?: IBM25Index,
+		graphIndexer?: IGraphIndexer,
 	): DirectoryScanner {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -183,6 +230,7 @@ export class CodeIndexServiceFactory {
 			ignoreInstance,
 			bm25Index,
 			batchSize,
+			graphIndexer,
 		)
 	}
 
@@ -197,6 +245,7 @@ export class CodeIndexServiceFactory {
 		ignoreInstance: Ignore,
 		rooIgnoreController?: RooIgnoreController,
 		bm25Index?: IBM25Index,
+		graphIndexer?: IGraphIndexer,
 	): IFileWatcher {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -218,6 +267,7 @@ export class CodeIndexServiceFactory {
 			ignoreInstance,
 			rooIgnoreController,
 			batchSize,
+			graphIndexer,
 		)
 	}
 
@@ -237,6 +287,8 @@ export class CodeIndexServiceFactory {
 		parser: ICodeParser
 		scanner: DirectoryScanner
 		fileWatcher: IFileWatcher
+		neo4jService?: INeo4jService
+		graphIndexer?: IGraphIndexer
 	} {
 		if (!this.configManager.isFeatureConfigured) {
 			throw new Error(t("embeddings:serviceFactory.codeIndexingNotConfigured"))
@@ -245,7 +297,19 @@ export class CodeIndexServiceFactory {
 		const embedder = this.createEmbedder()
 		const vectorStore = this.createVectorStore()
 		const parser = codeParser
-		const scanner = this.createDirectoryScanner(embedder, vectorStore, parser, ignoreInstance, bm25Index)
+
+		// Create Neo4j service and graph indexer if enabled
+		const neo4jService = this.createNeo4jService()
+		const graphIndexer = this.createGraphIndexer(neo4jService)
+
+		const scanner = this.createDirectoryScanner(
+			embedder,
+			vectorStore,
+			parser,
+			ignoreInstance,
+			bm25Index,
+			graphIndexer,
+		)
 		const fileWatcher = this.createFileWatcher(
 			context,
 			embedder,
@@ -254,6 +318,7 @@ export class CodeIndexServiceFactory {
 			ignoreInstance,
 			rooIgnoreController,
 			bm25Index,
+			graphIndexer,
 		)
 
 		return {
@@ -262,6 +327,8 @@ export class CodeIndexServiceFactory {
 			parser,
 			scanner,
 			fileWatcher,
+			neo4jService,
+			graphIndexer,
 		}
 	}
 }

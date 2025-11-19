@@ -15,6 +15,7 @@ import {
 	IDirectoryScanner,
 	IBM25Index,
 	BM25Document,
+	IGraphIndexer,
 } from "../interfaces"
 import { createHash } from "crypto"
 import { v5 as uuidv5 } from "uuid"
@@ -51,6 +52,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly ignoreInstance: Ignore,
 		private readonly bm25Index?: IBM25Index,
 		batchSegmentThreshold?: number,
+		private readonly graphIndexer?: IGraphIndexer,
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -530,6 +532,28 @@ export class DirectoryScanner implements IDirectoryScanner {
 						}
 					})
 					this.bm25Index.addDocuments(bm25Documents)
+				}
+
+				// Also add to Neo4j graph if available
+				if (this.graphIndexer) {
+					try {
+						// Group blocks by file for efficient indexing
+						const blocksByFile = new Map<string, CodeBlock[]>()
+						for (const block of batchBlocks) {
+							if (!blocksByFile.has(block.file_path)) {
+								blocksByFile.set(block.file_path, [])
+							}
+							blocksByFile.get(block.file_path)!.push(block)
+						}
+
+						// Index each file's blocks to Neo4j
+						for (const [filePath, fileBlocks] of blocksByFile) {
+							await this.graphIndexer.indexFile(filePath, fileBlocks)
+						}
+					} catch (error) {
+						// Log error but don't fail the entire indexing process
+						console.error(`[DirectoryScanner] Error indexing to Neo4j:`, error)
+					}
 				}
 
 				// Update hashes for successfully processed files in this batch

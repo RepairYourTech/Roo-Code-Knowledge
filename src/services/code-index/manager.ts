@@ -342,13 +342,25 @@ export class CodeIndexManager {
 		this._bm25Index = new BM25IndexService()
 
 		// (Re)Create shared service instances
-		const { embedder, vectorStore, scanner, fileWatcher } = this._serviceFactory.createServices(
-			this.context,
-			this._cacheManager!,
-			ignoreInstance,
-			rooIgnoreController,
-			this._bm25Index,
-		)
+		const { embedder, vectorStore, scanner, fileWatcher, neo4jService, graphIndexer } =
+			this._serviceFactory.createServices(
+				this.context,
+				this._cacheManager!,
+				ignoreInstance,
+				rooIgnoreController,
+				this._bm25Index,
+			)
+
+		// Initialize Neo4j if enabled
+		if (neo4jService) {
+			try {
+				await neo4jService.initialize()
+				console.log("[CodeIndexManager] Neo4j service initialized successfully")
+			} catch (error) {
+				console.error("[CodeIndexManager] Failed to initialize Neo4j:", error)
+				// Don't fail initialization if Neo4j connection fails
+			}
+		}
 
 		// Validate embedder configuration before proceeding
 		const validationResult = await this._serviceFactory.validateEmbedder(embedder)
