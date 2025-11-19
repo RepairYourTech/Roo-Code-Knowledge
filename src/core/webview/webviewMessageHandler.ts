@@ -2273,6 +2273,14 @@ export const webviewMessageHandler = async (
 				// Save global state first
 				await updateGlobalState("codebaseIndexConfig", globalStateConfig)
 
+				// CRITICAL: Also save codebaseIndexEnabled to VSCode settings so it persists across reinstalls
+				const vscodeConfig = vscode.workspace.getConfiguration("roo-cline")
+				await vscodeConfig.update(
+					"codeIndex.enabled",
+					settings.codebaseIndexEnabled,
+					vscode.ConfigurationTarget.Global,
+				)
+
 				// Save secrets directly using context proxy
 				if (settings.codeIndexOpenAiKey !== undefined) {
 					await provider.contextProxy.storeSecret("codeIndexOpenAiKey", settings.codeIndexOpenAiKey)

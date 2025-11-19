@@ -32,6 +32,7 @@ export class GraphIndexErrorLogger {
 		// Store log file in extension's global storage path
 		const storagePath = context.globalStorageUri.fsPath
 		this.logFilePath = path.join(storagePath, "neo4j-graph-errors.log")
+		console.log(`[GraphIndexErrorLogger] Error log file: ${this.logFilePath}`)
 		this.ensureLogDirectory()
 	}
 

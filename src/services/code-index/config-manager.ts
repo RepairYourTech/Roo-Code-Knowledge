@@ -88,8 +88,10 @@ export class CodeIndexConfigManager {
 		const openRouterApiKey = this.contextProxy?.getSecret("codebaseIndexOpenRouterApiKey") ?? ""
 		const neo4jPassword = this.contextProxy?.getSecret("neo4jPassword") ?? ""
 
-		// Update instance variables with configuration
-		this.codebaseIndexEnabled = codebaseIndexEnabled ?? true
+		// Read codebaseIndexEnabled from VSCode settings (persists across reinstalls)
+		// Fall back to globalState value, then default to true
+		const vscodeSettingEnabled = this.contextProxy?.getConfiguration("roo-cline")?.get<boolean>("codeIndex.enabled")
+		this.codebaseIndexEnabled = vscodeSettingEnabled ?? codebaseIndexEnabled ?? true
 		this.qdrantUrl = codebaseIndexQdrantUrl
 		this.qdrantApiKey = qdrantApiKey ?? ""
 		this.searchMinScore = codebaseIndexSearchMinScore
