@@ -75,6 +75,7 @@ export const codebaseIndexProviderSchema = z.object({
 	codebaseIndexMistralApiKey: z.string().optional(),
 	codebaseIndexVercelAiGatewayApiKey: z.string().optional(),
 	codebaseIndexOpenRouterApiKey: z.string().optional(),
+	codebaseIndexNeo4jPassword: z.string().optional(),
 })
 
 export type CodebaseIndexProvider = z.infer<typeof codebaseIndexProviderSchema>
