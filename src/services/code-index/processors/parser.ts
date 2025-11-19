@@ -1,10 +1,11 @@
 import { readFile } from "fs/promises"
 import { createHash } from "crypto"
 import * as path from "path"
+import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
-import { ICodeParser, CodeBlock } from "../interfaces"
+import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo } from "../interfaces"
 import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
 import {
 	MAX_BLOCK_CHARS,
@@ -36,8 +37,13 @@ function extractImportInfo(_node: any): ImportInfo | null {
 export class CodeParser implements ICodeParser {
 	private loadedParsers: LanguageParser = {}
 	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
+	private lspService?: ILSPService
 	// Markdown files are now supported using the custom markdown parser
 	// which extracts headers and sections for semantic indexing
+
+	constructor(lspService?: ILSPService) {
+		this.lspService = lspService
+	}
 
 	/**
 	 * Parses a code file into code blocks
@@ -50,6 +56,7 @@ export class CodeParser implements ICodeParser {
 		options?: {
 			content?: string
 			fileHash?: string
+			enrichWithLSP?: boolean
 		},
 	): Promise<CodeBlock[]> {
 		// Get file extension
@@ -83,7 +90,14 @@ export class CodeParser implements ICodeParser {
 		}
 
 		// Parse the file
-		return this.parseContent(filePath, content, fileHash)
+		let blocks = await this.parseContent(filePath, content, fileHash)
+
+		// Enrich with LSP information if requested
+		if (options?.enrichWithLSP && this.lspService) {
+			blocks = await this.enrichBlocksWithLSP(blocks)
+		}
+
+		return blocks
 	}
 
 	/**
@@ -736,6 +750,61 @@ export class CodeParser implements ICodeParser {
 		}
 
 		return imports
+	}
+
+	/**
+	 * Enriches a code block with LSP type information
+	 * Phase 6: Query LSP for accurate type information
+	 */
+	private async enrichWithLSPInfo(block: CodeBlock): Promise<LSPTypeInfo | undefined> {
+		if (!this.lspService) {
+			return undefined
+		}
+
+		try {
+			// Query LSP for the code block
+			const result = await this.lspService.queryCodeBlock(block.file_path, block.start_line, block.end_line)
+
+			if (!result.available || !result.symbolInfo) {
+				return {
+					lspAvailable: false,
+				}
+			}
+
+			return {
+				typeInfo: result.symbolInfo.typeInfo,
+				signatureInfo: result.symbolInfo.signatureInfo,
+				lspAvailable: true,
+			}
+		} catch (error) {
+			console.debug(`[CodeParser] Failed to enrich with LSP info: ${error}`)
+			return {
+				lspAvailable: false,
+			}
+		}
+	}
+
+	/**
+	 * Enriches code blocks with LSP type information
+	 * Phase 6: Batch enrichment for better performance
+	 */
+	private async enrichBlocksWithLSP(blocks: CodeBlock[]): Promise<CodeBlock[]> {
+		if (!this.lspService || blocks.length === 0) {
+			return blocks
+		}
+
+		// Enrich each block with LSP information
+		const enrichedBlocks = await Promise.all(
+			blocks.map(async (block) => {
+				const lspTypeInfo = await this.enrichWithLSPInfo(block)
+				return {
+					...block,
+					lspTypeInfo,
+				}
+			}),
+		)
+
+		return enrichedBlocks
 	}
 }
 

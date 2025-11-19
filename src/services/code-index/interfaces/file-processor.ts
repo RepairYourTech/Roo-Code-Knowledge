@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 import { PointStruct } from "./vector-store"
 import { SymbolMetadata, ImportInfo, ExportInfo } from "../types/metadata"
+import { TypeInfo, SignatureInfo } from "./lsp-service"
 
 /**
  * Interface for code file parser
@@ -19,6 +20,8 @@ export interface ICodeParser {
 			maxBlockLines?: number
 			content?: string
 			fileHash?: string
+			/** Whether to enrich with LSP type information (Phase 6) */
+			enrichWithLSP?: boolean
 		},
 	): Promise<CodeBlock[]>
 }
@@ -105,6 +108,19 @@ export interface FileProcessingResult {
  * Common types used across the code-index service
  */
 
+/**
+ * LSP-derived type information for a code block
+ * Phase 6: Accurate type information from Language Server Protocol
+ */
+export interface LSPTypeInfo {
+	/** Accurate type information from LSP */
+	typeInfo?: TypeInfo
+	/** Function/method signature from LSP */
+	signatureInfo?: SignatureInfo
+	/** Whether LSP information was available */
+	lspAvailable: boolean
+}
+
 export interface CodeBlock {
 	file_path: string
 	identifier: string | null
@@ -119,4 +135,6 @@ export interface CodeBlock {
 	imports?: ImportInfo[]
 	exports?: ExportInfo[]
 	documentation?: string
+	// Phase 6: LSP type information (optional for backward compatibility)
+	lspTypeInfo?: LSPTypeInfo
 }
