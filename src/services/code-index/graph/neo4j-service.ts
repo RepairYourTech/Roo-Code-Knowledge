@@ -170,17 +170,20 @@ export class Neo4jService implements INeo4jService {
 
 		const session = this.getSession()
 		try {
+			// Sanitize metadata to ensure all values are primitives or arrays of primitives
+			const sanitizedMetadata = this.sanitizeMetadata(relationship.metadata)
+
 			await session.run(
 				`
 				MATCH (from:CodeNode {id: $fromId})
 				MATCH (to:CodeNode {id: $toId})
 				MERGE (from)-[r:${relationship.type}]->(to)
-				SET r.metadata = $metadata
+				SET r += $metadata
 				`,
 				{
 					fromId: relationship.fromId,
 					toId: relationship.toId,
-					metadata: relationship.metadata || {},
+					metadata: sanitizedMetadata,
 				},
 			)
 		} finally {
@@ -212,13 +215,13 @@ export class Neo4jService implements INeo4jService {
 					MATCH (from:CodeNode {id: rel.fromId})
 					MATCH (to:CodeNode {id: rel.toId})
 					MERGE (from)-[r:${type}]->(to)
-					SET r.metadata = rel.metadata
+					SET r += rel.metadata
 					`,
 					{
 						relationships: rels.map((r) => ({
 							fromId: r.fromId,
 							toId: r.toId,
-							metadata: r.metadata || {},
+							metadata: this.sanitizeMetadata(r.metadata),
 						})),
 					},
 				)
@@ -966,5 +969,46 @@ export class Neo4jService implements INeo4jService {
 			return value
 		}
 		return value.toNumber()
+	}
+
+	/**
+	 * Sanitize metadata to ensure all values are primitives or arrays of primitives
+	 * Neo4j properties can only be: string, number, boolean, or arrays of these types
+	 */
+	private sanitizeMetadata(metadata?: Record<string, unknown>): Record<string, unknown> {
+		if (!metadata || Object.keys(metadata).length === 0) {
+			return {}
+		}
+
+		const sanitized: Record<string, unknown> = {}
+
+		for (const [key, value] of Object.entries(metadata)) {
+			if (value === null || value === undefined) {
+				// Skip null/undefined values
+				continue
+			}
+
+			if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+				// Primitive types are OK
+				sanitized[key] = value
+			} else if (Array.isArray(value)) {
+				// Check if array contains only primitives
+				const allPrimitives = value.every(
+					(item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean",
+				)
+				if (allPrimitives) {
+					sanitized[key] = value
+				} else {
+					// Convert complex array to JSON string
+					sanitized[key] = JSON.stringify(value)
+				}
+			} else if (typeof value === "object") {
+				// Convert objects to JSON string
+				sanitized[key] = JSON.stringify(value)
+			}
+			// Skip functions and other non-serializable types
+		}
+
+		return sanitized
 	}
 }
