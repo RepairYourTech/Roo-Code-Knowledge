@@ -10,6 +10,7 @@ import { HybridSearchService } from "./hybrid-search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
 import { BM25IndexService } from "./bm25/bm25-index"
 import { CacheManager } from "./cache-manager"
+import { SearchOrchestrator } from "./query/search-orchestrator"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
@@ -29,6 +30,7 @@ export class CodeIndexManager {
 	private _orchestrator: CodeIndexOrchestrator | undefined
 	private _searchService: CodeIndexSearchService | undefined
 	private _hybridSearchService: HybridSearchService | undefined
+	private _searchOrchestrator: SearchOrchestrator | undefined // Phase 7: Intelligent search routing
 	private _bm25Index: BM25IndexService | undefined
 	private _cacheManager: CacheManager | undefined
 
@@ -285,6 +287,19 @@ export class CodeIndexManager {
 			return []
 		}
 		this.assertInitialized()
+
+		// Phase 7: Use intelligent search orchestrator if available
+		if (this._searchOrchestrator) {
+			const results = await this._searchOrchestrator.search(query, {
+				directoryPrefix,
+				maxResults: this._configManager!.currentSearchMaxResults,
+				minScore: this._configManager!.currentSearchMinScore,
+			})
+			// Return results without orchestration metadata for backward compatibility
+			return results
+		}
+
+		// Fallback to hybrid search if orchestrator not available
 		return this._hybridSearchService!.searchIndex(query, directoryPrefix)
 	}
 
@@ -342,7 +357,7 @@ export class CodeIndexManager {
 		this._bm25Index = new BM25IndexService()
 
 		// (Re)Create shared service instances
-		const { embedder, vectorStore, scanner, fileWatcher, neo4jService, graphIndexer } =
+		const { embedder, vectorStore, scanner, fileWatcher, neo4jService, graphIndexer, lspService } =
 			this._serviceFactory.createServices(
 				this.context,
 				this._cacheManager!,
@@ -396,6 +411,13 @@ export class CodeIndexManager {
 			embedder,
 			vectorStore,
 			this._bm25Index,
+		)
+
+		// Phase 7: (Re)Initialize search orchestrator for intelligent query routing
+		this._searchOrchestrator = this._serviceFactory.createSearchOrchestrator(
+			this._hybridSearchService,
+			neo4jService,
+			lspService,
 		)
 
 		// Clear any error state after successful recreation

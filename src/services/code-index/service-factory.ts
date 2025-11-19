@@ -24,6 +24,8 @@ import { CacheManager } from "./cache-manager"
 import { Neo4jService } from "./graph/neo4j-service"
 import { GraphIndexer } from "./graph/graph-indexer"
 import { LSPService } from "./lsp/lsp-service"
+import { SearchOrchestrator } from "./query/search-orchestrator"
+import { HybridSearchService } from "./hybrid-search-service"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { Ignore } from "ignore"
 import { t } from "../../i18n"
@@ -287,6 +289,18 @@ export class CodeIndexServiceFactory {
 			batchSize,
 			graphIndexer,
 		)
+	}
+
+	/**
+	 * Creates a search orchestrator for intelligent query routing
+	 * Phase 7: Hybrid Search & Routing
+	 */
+	public createSearchOrchestrator(
+		hybridSearchService: HybridSearchService,
+		neo4jService?: INeo4jService,
+		lspService?: ILSPService,
+	): SearchOrchestrator {
+		return new SearchOrchestrator(hybridSearchService, neo4jService, lspService)
 	}
 
 	/**
