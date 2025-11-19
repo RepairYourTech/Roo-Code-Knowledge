@@ -15,6 +15,8 @@ import {
 } from "../interfaces/neo4j-service"
 import { ILSPService } from "../interfaces/lsp-service"
 import { VectorStoreSearchResult } from "../interfaces/vector-store"
+import { ContextEnrichmentService } from "../context/context-enrichment-service"
+import { EnrichedSearchResult, ContextEnrichmentOptions } from "../interfaces/context-enrichment"
 
 /**
  * Options for search orchestration
@@ -35,12 +37,15 @@ export interface SearchOrchestrationOptions {
 		graph?: number
 		lsp?: number
 	}
+	/** Phase 12: Context enrichment options */
+	contextEnrichment?: ContextEnrichmentOptions
 }
 
 /**
  * Result from orchestrated search with metadata
+ * Phase 12: Now extends EnrichedSearchResult to include context enrichment
  */
-export interface OrchestrationResult extends HybridSearchResult {
+export interface OrchestrationResult extends EnrichedSearchResult {
 	/** Query analysis that determined the search strategy */
 	queryAnalysis?: QueryAnalysis
 	/** Which backends were used for this result */
@@ -52,6 +57,7 @@ export interface OrchestrationResult extends HybridSearchResult {
  */
 export class SearchOrchestrator {
 	private readonly queryAnalyzer: QueryAnalyzer
+	private readonly contextEnrichmentService: ContextEnrichmentService
 
 	constructor(
 		private readonly hybridSearchService: HybridSearchService,
@@ -59,6 +65,8 @@ export class SearchOrchestrator {
 		private readonly lspService?: ILSPService,
 	) {
 		this.queryAnalyzer = new QueryAnalyzer()
+		// Phase 12: Initialize context enrichment service
+		this.contextEnrichmentService = new ContextEnrichmentService(neo4jService || null)
 	}
 
 	/**
@@ -91,8 +99,14 @@ export class SearchOrchestrator {
 		// 4. Apply query-specific enhancements
 		const enhancedResults = this.applyQueryEnhancements(results, effectiveAnalysis)
 
-		// 5. Add orchestration metadata
-		return enhancedResults.map((result) => ({
+		// 5. Phase 12: Enrich results with contextual information
+		const enrichedResults = await this.contextEnrichmentService.enrichSearchResults(
+			enhancedResults,
+			options?.contextEnrichment,
+		)
+
+		// 6. Add orchestration metadata
+		return enrichedResults.map((result) => ({
 			...result,
 			queryAnalysis: effectiveAnalysis,
 			usedBackends: backends,
