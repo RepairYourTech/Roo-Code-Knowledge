@@ -28,11 +28,12 @@ export interface CodeNode {
 
 /**
  * Represents a relationship between code entities
+ * Phase 10: Added CALLED_BY for bidirectional call graph queries
  */
 export interface CodeRelationship {
 	fromId: string
 	toId: string
-	type: "CALLS" | "IMPORTS" | "EXTENDS" | "IMPLEMENTS" | "CONTAINS" | "DEFINES" | "USES"
+	type: "CALLS" | "CALLED_BY" | "IMPORTS" | "EXTENDS" | "IMPLEMENTS" | "CONTAINS" | "DEFINES" | "USES"
 	metadata?: Record<string, unknown>
 }
 

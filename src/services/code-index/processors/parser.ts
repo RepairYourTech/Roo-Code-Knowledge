@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
-import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo } from "../interfaces"
+import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo } from "../interfaces"
 import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
 import {
 	MAX_BLOCK_CHARS,
@@ -301,6 +301,16 @@ export class CodeParser implements ICodeParser {
 							}
 						}
 
+						// Phase 10: Extract function calls
+						let calls: CallInfo[] | undefined = undefined
+						try {
+							const extractedCalls = this.extractCalls(currentNode, filePath)
+							calls = extractedCalls.length > 0 ? extractedCalls : undefined
+						} catch (error) {
+							// Silently fail call extraction - don't break indexing
+							console.debug(`Failed to extract calls for ${filePath}:${start_line}`, error)
+						}
+
 						results.push({
 							file_path: filePath,
 							identifier,
@@ -313,6 +323,7 @@ export class CodeParser implements ICodeParser {
 							symbolMetadata,
 							documentation,
 							imports: fileImports.length > 0 ? fileImports : undefined, // Phase 3: Include imports (Rule 4)
+							calls, // Phase 10: Include function calls
 						})
 					}
 				}
@@ -805,6 +816,199 @@ export class CodeParser implements ICodeParser {
 		)
 
 		return enrichedBlocks
+	}
+
+	/**
+	 * Extract function calls from a code block's AST node
+	 * Phase 10: CALLS relationship extraction
+	 */
+	private extractCalls(node: Node, filePath: string): CallInfo[] {
+		const calls: CallInfo[] = []
+
+		// Get file extension to determine language
+		const ext = path.extname(filePath).slice(1).toLowerCase()
+
+		// Find all call expression nodes in the AST
+		const callNodes = this.findCallExpressions(node, ext)
+
+		for (const callNode of callNodes) {
+			const callInfo = this.parseCallExpression(callNode, ext)
+			if (callInfo) {
+				calls.push(callInfo)
+			}
+		}
+
+		return calls
+	}
+
+	/**
+	 * Find all call expression nodes in the AST
+	 */
+	private findCallExpressions(node: Node, language: string): Node[] {
+		const calls: Node[] = []
+
+		// Language-specific node type names for call expressions
+		const callNodeTypes: Record<string, string[]> = {
+			ts: ["call_expression", "new_expression"],
+			tsx: ["call_expression", "new_expression"],
+			js: ["call_expression", "new_expression"],
+			jsx: ["call_expression", "new_expression"],
+			py: ["call"],
+			rs: ["call_expression"],
+			go: ["call_expression"],
+			java: ["method_invocation", "object_creation_expression"],
+			c: ["call_expression"],
+			cpp: ["call_expression"],
+			cs: ["invocation_expression", "object_creation_expression"],
+		}
+
+		const targetTypes = callNodeTypes[language] || ["call_expression"]
+
+		// Recursively traverse the AST
+		const traverse = (n: Node) => {
+			if (targetTypes.includes(n.type)) {
+				calls.push(n)
+			}
+			for (const child of n.children || []) {
+				if (child) {
+					traverse(child)
+				}
+			}
+		}
+
+		traverse(node)
+		return calls
+	}
+
+	/**
+	 * Parse a call expression node into CallInfo
+	 */
+	private parseCallExpression(callNode: Node, language: string): CallInfo | null {
+		// Language-specific parsing logic
+		if (["ts", "tsx", "js", "jsx"].includes(language)) {
+			return this.parseJSCallExpression(callNode)
+		}
+
+		if (language === "py") {
+			return this.parsePythonCallExpression(callNode)
+		}
+
+		// For other languages, return null for now
+		// TODO: Implement parsers for Rust, Go, Java, C++, etc.
+		return null
+	}
+
+	/**
+	 * Parse a JavaScript/TypeScript call expression
+	 */
+	private parseJSCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		// Handle new expressions (constructor calls)
+		if (callNode.type === "new_expression") {
+			const constructorNode = callNode.childForFieldName("constructor")
+			if (constructorNode) {
+				const calleeName = constructorNode.text
+				return {
+					calleeName,
+					callType: "constructor",
+					line,
+					column,
+				}
+			}
+			return null
+		}
+
+		// Handle regular call expressions
+		const functionNode = callNode.childForFieldName("function")
+		if (!functionNode) {
+			return null
+		}
+
+		// Simple function call: foo()
+		if (functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		// Method call: obj.method() or Class.staticMethod()
+		if (functionNode.type === "member_expression") {
+			const objectNode = functionNode.childForFieldName("object")
+			const propertyNode = functionNode.childForFieldName("property")
+
+			if (objectNode && propertyNode) {
+				const objectName = objectNode.text
+				const methodName = propertyNode.text
+
+				// Heuristic: If object starts with uppercase, it's likely a static method
+				// This is not perfect but works for common cases like Math.max(), Array.from()
+				const isStatic = /^[A-Z]/.test(objectName)
+
+				return {
+					calleeName: methodName,
+					callType: isStatic ? "static_method" : "method",
+					line,
+					column,
+					receiver: isStatic ? undefined : objectName,
+					qualifier: isStatic ? objectName : undefined,
+				}
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Parse a Python call expression
+	 */
+	private parsePythonCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		const functionNode = callNode.childForFieldName("function")
+		if (!functionNode) {
+			return null
+		}
+
+		// Simple function call: foo()
+		if (functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		// Method call: obj.method() or Class.static_method()
+		if (functionNode.type === "attribute") {
+			const objectNode = functionNode.childForFieldName("object")
+			const attributeNode = functionNode.childForFieldName("attribute")
+
+			if (objectNode && attributeNode) {
+				const objectName = objectNode.text
+				const methodName = attributeNode.text
+
+				// Heuristic: If object starts with uppercase, it's likely a static method
+				const isStatic = /^[A-Z]/.test(objectName)
+
+				return {
+					calleeName: methodName,
+					callType: isStatic ? "static_method" : "method",
+					line,
+					column,
+					receiver: isStatic ? undefined : objectName,
+					qualifier: isStatic ? objectName : undefined,
+				}
+			}
+		}
+
+		return null
 	}
 }
 

@@ -1,6 +1,7 @@
-import { CodeBlock } from "../interfaces/file-processor"
+import { CodeBlock, CallInfo } from "../interfaces/file-processor"
 import { CodeNode, CodeRelationship, INeo4jService } from "../interfaces/neo4j-service"
 import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
+import * as path from "path"
 
 /**
  * Graph indexer implementation
@@ -274,9 +275,29 @@ export class GraphIndexer implements IGraphIndexer {
 		// Note: This would require parsing interface implementations
 		// For now, we'll leave this as a placeholder for future enhancement
 
-		// Extract CALLS relationships by analyzing the code content
-		// This is complex and would require parsing function calls in the code
-		// For now, we'll leave this as a placeholder for future enhancement
+		// Phase 10: Extract CALLS relationships from call metadata
+		if (block.calls && block.calls.length > 0) {
+			for (const call of block.calls) {
+				// Resolve the call target to a node ID
+				const targetNodeId = this.resolveCallTarget(call, block, allBlocks)
+
+				if (targetNodeId) {
+					// Create CALLS relationship
+					relationships.push({
+						fromId,
+						toId: targetNodeId,
+						type: "CALLS",
+						metadata: {
+							callType: call.callType,
+							line: call.line,
+							column: call.column,
+							receiver: call.receiver,
+							qualifier: call.qualifier,
+						},
+					})
+				}
+			}
+		}
 
 		// Extract DEFINES relationships for nested definitions
 		// If this block contains other blocks (e.g., a class contains methods)
@@ -296,6 +317,18 @@ export class GraphIndexer implements IGraphIndexer {
 			})
 		}
 
+		// Phase 10: Create reverse CALLED_BY relationships for efficient queries
+		// This allows us to quickly answer "what calls this function?"
+		const callsRelationships = relationships.filter((r) => r.type === "CALLS")
+		for (const callsRel of callsRelationships) {
+			relationships.push({
+				fromId: callsRel.toId,
+				toId: callsRel.fromId,
+				type: "CALLED_BY",
+				metadata: callsRel.metadata,
+			})
+		}
+
 		return relationships
 	}
 
@@ -311,5 +344,160 @@ export class GraphIndexer implements IGraphIndexer {
 	 */
 	private generateNodeId(block: CodeBlock): string {
 		return `${block.type}:${block.file_path}:${block.start_line}`
+	}
+
+	/**
+	 * Resolve a function call to the target node ID
+	 * Phase 10: CALLS relationship resolution
+	 */
+	private resolveCallTarget(call: CallInfo, callerBlock: CodeBlock, allBlocks: CodeBlock[]): string | null {
+		const { calleeName, callType } = call
+
+		// Strategy 1: Look for function/method in the same file
+		const sameFileTarget = allBlocks.find(
+			(block) =>
+				block.file_path === callerBlock.file_path &&
+				block.identifier === calleeName &&
+				(block.type === "function" || block.type === "method" || block.type.includes("function")),
+		)
+
+		if (sameFileTarget) {
+			return this.generateNodeId(sameFileTarget)
+		}
+
+		// Strategy 2: Look for imported functions
+		if (callerBlock.imports) {
+			for (const importInfo of callerBlock.imports) {
+				// Check if this import includes the called function
+				if (importInfo.symbols?.includes(calleeName)) {
+					// Try to find the function in the imported file
+					const importedTarget = this.findFunctionInImportedFile(
+						calleeName,
+						importInfo.source,
+						callerBlock.file_path,
+						allBlocks,
+					)
+
+					if (importedTarget) {
+						return this.generateNodeId(importedTarget)
+					}
+				}
+			}
+		}
+
+		// Strategy 3: For method calls, look for methods in class definitions
+		if (callType === "method" && call.receiver) {
+			// Try to find the method in any class in the same file
+			// This is a simplified heuristic - in a real implementation,
+			// we'd need to track variable types to know which class the receiver is
+			const methodTarget = allBlocks.find(
+				(block) =>
+					block.file_path === callerBlock.file_path &&
+					block.identifier === calleeName &&
+					block.type === "method",
+			)
+
+			if (methodTarget) {
+				return this.generateNodeId(methodTarget)
+			}
+		}
+
+		// Strategy 4: For static calls, look for static methods in classes
+		if (callType === "static_method" && call.qualifier) {
+			const qualifier = call.qualifier // Capture in a const for type narrowing
+			const staticMethodTarget = allBlocks.find(
+				(block) =>
+					block.identifier === calleeName &&
+					block.type === "method" &&
+					// Check if the block is in a class with the qualifier name
+					this.isMethodInClass(block, qualifier, allBlocks),
+			)
+
+			if (staticMethodTarget) {
+				return this.generateNodeId(staticMethodTarget)
+			}
+		}
+
+		// If we can't resolve the target, return null
+		// This is expected for external library calls
+		return null
+	}
+
+	/**
+	 * Find a function in an imported file
+	 */
+	private findFunctionInImportedFile(
+		functionName: string,
+		importSource: string,
+		currentFilePath: string,
+		allBlocks: CodeBlock[],
+	): CodeBlock | null {
+		// Resolve the import source to an actual file path
+		const importedFilePath = this.resolveImportPath(importSource, currentFilePath)
+
+		if (!importedFilePath) {
+			return null
+		}
+
+		// Find the function in the imported file
+		return (
+			allBlocks.find(
+				(block) =>
+					block.file_path === importedFilePath &&
+					block.identifier === functionName &&
+					(block.type === "function" || block.type === "method" || block.type.includes("function")),
+			) || null
+		)
+	}
+
+	/**
+	 * Resolve an import source to a file path
+	 * Examples:
+	 *   './utils' -> '/workspace/src/utils.ts'
+	 *   '../services/auth' -> '/workspace/src/services/auth.ts'
+	 */
+	private resolveImportPath(importSource: string, currentFilePath: string): string | null {
+		// Skip node_modules imports (external libraries)
+		if (!importSource.startsWith(".") && !importSource.startsWith("@/")) {
+			return null
+		}
+
+		// Handle @/ alias (common in TypeScript projects)
+		// For now, we skip these as they require workspace configuration
+		if (importSource.startsWith("@/")) {
+			return null
+		}
+
+		// Handle relative imports
+		const currentDir = path.dirname(currentFilePath)
+		const resolvedPath = path.resolve(currentDir, importSource)
+
+		// Try common extensions
+		const extensions = [".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".c", ".cpp", ".cs"]
+		for (const ext of extensions) {
+			// Return the path with extension
+			// Note: We don't check if the file exists here - we'll check in allBlocks
+			const withExt = resolvedPath + ext
+			return withExt
+		}
+
+		return null
+	}
+
+	/**
+	 * Check if a method block is in a class with the given name
+	 */
+	private isMethodInClass(methodBlock: CodeBlock, className: string, allBlocks: CodeBlock[]): boolean {
+		// Find the class that contains this method
+		const containingClass = allBlocks.find(
+			(block) =>
+				block.file_path === methodBlock.file_path &&
+				block.type === "class" &&
+				block.identifier === className &&
+				block.start_line <= methodBlock.start_line &&
+				block.end_line >= methodBlock.end_line,
+		)
+
+		return !!containingClass
 	}
 }
