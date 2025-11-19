@@ -2,7 +2,7 @@ import * as vscode from "vscode"
 import * as path from "path"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager, IndexingState } from "./state-manager"
-import { IFileWatcher, IVectorStore, BatchProcessingSummary } from "./interfaces"
+import { IFileWatcher, IVectorStore, BatchProcessingSummary, IGraphIndexer, INeo4jService } from "./interfaces"
 import { DirectoryScanner } from "./processors"
 import { CacheManager } from "./cache-manager"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -24,6 +24,8 @@ export class CodeIndexOrchestrator {
 		private readonly vectorStore: IVectorStore,
 		private readonly scanner: DirectoryScanner,
 		private readonly fileWatcher: IFileWatcher,
+		private readonly graphIndexer?: IGraphIndexer,
+		private readonly neo4jService?: INeo4jService,
 	) {}
 
 	/**
@@ -376,9 +378,22 @@ export class CodeIndexOrchestrator {
 				})
 			}
 
-			// NOTE: Neo4j and BM25 clearing is handled by the manager layer
-			// The orchestrator only clears Qdrant and cache
-			// Neo4j and BM25 are cleared when the collection is deleted in Qdrant
+			// Clear Neo4j graph database if enabled
+			if (this.neo4jService && this.configManager.isNeo4jEnabled) {
+				try {
+					await this.neo4jService.clearAll()
+					console.log("[CodeIndexOrchestrator] Neo4j graph database cleared successfully")
+				} catch (error: any) {
+					const errorMsg = `Failed to clear Neo4j graph: ${error.message}`
+					errors.push(errorMsg)
+					console.error("[CodeIndexOrchestrator]", errorMsg, error)
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: error instanceof Error ? error.message : String(error),
+						stack: error instanceof Error ? error.stack : undefined,
+						location: "clearIndexData:neo4j",
+					})
+				}
+			}
 
 			// Clear cache file
 			await this.cacheManager.clearCacheFile()

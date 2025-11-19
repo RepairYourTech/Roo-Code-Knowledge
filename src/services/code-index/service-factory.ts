@@ -23,6 +23,7 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 import { Neo4jService } from "./graph/neo4j-service"
 import { GraphIndexer } from "./graph/graph-indexer"
+import { GraphIndexErrorLogger } from "./graph/error-logger"
 import { LSPService } from "./lsp/lsp-service"
 import { SearchOrchestrator } from "./query/search-orchestrator"
 import { HybridSearchService } from "./hybrid-search-service"
@@ -211,14 +212,21 @@ export class CodeIndexServiceFactory {
 	/**
 	 * Creates a graph indexer instance if Neo4j is enabled
 	 * @param neo4jService Neo4j service instance
+	 * @param context VSCode extension context for error logging
 	 * @returns Graph indexer instance or undefined if Neo4j is disabled
 	 */
-	public createGraphIndexer(neo4jService?: INeo4jService): IGraphIndexer | undefined {
+	public createGraphIndexer(
+		neo4jService?: INeo4jService,
+		context?: vscode.ExtensionContext,
+	): IGraphIndexer | undefined {
 		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
 			return undefined
 		}
 
-		return new GraphIndexer(neo4jService)
+		// Create error logger for persistent error tracking
+		const errorLogger = context ? new GraphIndexErrorLogger(context) : undefined
+
+		return new GraphIndexer(neo4jService, errorLogger)
 	}
 
 	/**
@@ -341,7 +349,7 @@ export class CodeIndexServiceFactory {
 
 		// Create Neo4j service and graph indexer if enabled
 		const neo4jService = this.createNeo4jService()
-		const graphIndexer = this.createGraphIndexer(neo4jService)
+		const graphIndexer = this.createGraphIndexer(neo4jService, context)
 
 		const scanner = this.createDirectoryScanner(
 			embedder,
