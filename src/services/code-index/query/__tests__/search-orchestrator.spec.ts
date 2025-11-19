@@ -57,6 +57,7 @@ describe("SearchOrchestrator", () => {
 			findCallees: vi.fn(),
 			findDependencies: vi.fn(),
 			findDependents: vi.fn(),
+			executeQuery: vi.fn(), // Phase 12: Add for context enrichment
 		} as any
 
 		mockLSPService = {} as any
@@ -448,6 +449,64 @@ describe("SearchOrchestrator", () => {
 			const results = await orchestrator.search("find User$Service with @decorator")
 
 			expect(results).toHaveLength(1)
+		})
+	})
+
+	// Phase 12: Context Enrichment Tests
+	describe("Context Enrichment", () => {
+		it("should enrich results with context when Neo4j is available", async () => {
+			const mockResults = [createMockResult("UserService", 0.9, "src/user-service.ts")]
+			vi.mocked(mockHybridSearchService.searchIndex).mockResolvedValue(mockResults)
+
+			// Mock Neo4j query for finding node ID
+			vi.mocked(mockNeo4jService.executeQuery).mockResolvedValue({
+				nodes: [createMockNode("src/user-service.ts::UserService", "UserService", "src/user-service.ts")],
+				relationships: [],
+			})
+
+			const results = await orchestrator.search("find UserService", {
+				contextEnrichment: {
+					enrichRelatedCode: true,
+					enrichTests: true,
+					maxRelatedItems: 3,
+				},
+			})
+
+			expect(results).toHaveLength(1)
+			// Context enrichment should have been attempted
+			expect(mockNeo4jService.executeQuery).toHaveBeenCalled()
+		})
+
+		it("should skip enrichment for large result sets", async () => {
+			// Create 25 mock results (above default threshold of 20)
+			const mockResults = Array.from({ length: 25 }, (_, i) =>
+				createMockResult(`result${i}`, 0.9, `src/file${i}.ts`),
+			)
+			vi.mocked(mockHybridSearchService.searchIndex).mockResolvedValue(mockResults)
+
+			const results = await orchestrator.search("find something")
+
+			expect(results).toHaveLength(25)
+			// Should not call Neo4j for enrichment due to threshold
+			expect(mockNeo4jService.executeQuery).not.toHaveBeenCalled()
+		})
+
+		it("should handle enrichment gracefully when Neo4j is unavailable", async () => {
+			const mockResults = [createMockResult("UserService", 0.9, "src/user-service.ts")]
+			vi.mocked(mockHybridSearchService.searchIndex).mockResolvedValue(mockResults)
+
+			// Create orchestrator without Neo4j
+			const orchestratorWithoutNeo4j = new SearchOrchestrator(mockHybridSearchService)
+
+			const results = await orchestratorWithoutNeo4j.search("find UserService", {
+				contextEnrichment: {
+					enrichRelatedCode: true,
+				},
+			})
+
+			expect(results).toHaveLength(1)
+			// Should not have enrichment fields
+			expect(results[0].relatedCode).toBeUndefined()
 		})
 	})
 })

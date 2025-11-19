@@ -144,6 +144,12 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 						}
 						lspAvailable: boolean
 					}
+					// Phase 12: Context enrichment
+					relatedCode?: any
+					tests?: any
+					dependencies?: any
+					typeInfo?: any
+					fileSummary?: any
 				}>
 			}
 
@@ -180,6 +186,7 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 				const language = languageMap[fileExt] || null
 
 				// Phase 2: Build enhanced result with metadata
+				// Phase 12: Type as any to allow dynamic enrichment properties
 				const enhancedResult: any = {
 					filePath: relativePath,
 					score: result.score,
@@ -224,6 +231,23 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 					enhancedResult.lspTypeInfo = result.payload.lspTypeInfo
 				}
 
+				// Phase 12: Add context enrichment if available
+				if ("relatedCode" in result && result.relatedCode) {
+					enhancedResult.relatedCode = result.relatedCode
+				}
+				if ("tests" in result && result.tests) {
+					enhancedResult.tests = result.tests
+				}
+				if ("dependencies" in result && result.dependencies) {
+					enhancedResult.dependencies = result.dependencies
+				}
+				if ("typeInfo" in result && result.typeInfo) {
+					enhancedResult.typeInfo = result.typeInfo
+				}
+				if ("fileSummary" in result && result.fileSummary) {
+					enhancedResult.fileSummary = result.fileSummary
+				}
+
 				jsonResult.results.push(enhancedResult)
 			})
 
@@ -248,6 +272,30 @@ ${jsonResult.results
 		parts.push(`Score: ${result.score}`)
 		parts.push(`Lines: ${result.startLine}-${result.endLine}`)
 		parts.push(`Code Chunk: ${result.codeChunk}`)
+
+		// Phase 12: Add context enrichment to output
+		if (result.relatedCode) {
+			const rc = result.relatedCode
+			if (rc.callers?.length > 0) {
+				parts.push(`Callers: ${rc.callers.map((c: any) => c.name).join(", ")}`)
+			}
+			if (rc.callees?.length > 0) {
+				parts.push(`Calls: ${rc.callees.map((c: any) => c.name).join(", ")}`)
+			}
+			if (rc.parentClasses?.length > 0) {
+				parts.push(`Extends/Implements: ${rc.parentClasses.map((c: any) => c.name).join(", ")}`)
+			}
+		}
+		if (result.tests) {
+			const testCount = (result.tests.directTests?.length || 0) + (result.tests.integrationTests?.length || 0)
+			if (testCount > 0) {
+				parts.push(`Tests: ${testCount} test(s) (${result.tests.coveragePercentage}% coverage)`)
+			}
+		}
+		if (result.fileSummary) {
+			parts.push(`File Purpose: ${result.fileSummary.purpose}`)
+		}
+
 		return parts.join("\n")
 	})
 	.join("\n\n")}`
