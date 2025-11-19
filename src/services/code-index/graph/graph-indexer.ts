@@ -363,6 +363,23 @@ export class GraphIndexer implements IGraphIndexer {
 			})
 		}
 
+		// Phase 10, Task 3: Extract type relationships from LSP info
+		if (block.lspTypeInfo?.lspAvailable) {
+			// Extract HAS_TYPE for variables/properties
+			if (block.lspTypeInfo.typeInfo && (block.type === "variable" || block.type === "property")) {
+				const typeRelationships = this.extractHasTypeRelationships(block, allBlocks)
+				relationships.push(...typeRelationships)
+			}
+
+			// Extract ACCEPTS_TYPE and RETURNS_TYPE for functions/methods
+			if (block.lspTypeInfo.signatureInfo && (block.type === "function" || block.type === "method")) {
+				const paramTypeRelationships = this.extractAcceptsTypeRelationships(block, allBlocks)
+				const returnTypeRelationships = this.extractReturnsTypeRelationships(block, allBlocks)
+				relationships.push(...paramTypeRelationships)
+				relationships.push(...returnTypeRelationships)
+			}
+		}
+
 		return relationships
 	}
 
@@ -626,5 +643,203 @@ export class GraphIndexer implements IGraphIndexer {
 		}
 
 		return targets
+	}
+
+	/**
+	 * Phase 10, Task 3: Parse type string to extract base types
+	 * Handles complex type expressions: generics, unions, arrays, etc.
+	 */
+	private parseTypeString(typeString: string): string[] {
+		const types: string[] = []
+
+		// Remove whitespace
+		const cleaned = typeString.trim()
+
+		// Handle union types (A | B | C)
+		if (cleaned.includes("|")) {
+			const unionTypes = cleaned.split("|").map((t) => t.trim())
+			for (const unionType of unionTypes) {
+				types.push(...this.parseTypeString(unionType))
+			}
+			return types
+		}
+
+		// Handle intersection types (A & B & C)
+		if (cleaned.includes("&")) {
+			const intersectionTypes = cleaned.split("&").map((t) => t.trim())
+			for (const intersectionType of intersectionTypes) {
+				types.push(...this.parseTypeString(intersectionType))
+			}
+			return types
+		}
+
+		// Handle array types (T[])
+		if (cleaned.endsWith("[]")) {
+			const baseType = cleaned.slice(0, -2)
+			types.push(...this.parseTypeString(baseType))
+			return types
+		}
+
+		// Handle generic types (Generic<T, K>)
+		const genericMatch = cleaned.match(/^([^<]+)<(.+)>$/)
+		if (genericMatch) {
+			const [, baseType, typeArgs] = genericMatch
+			types.push(baseType.trim())
+
+			// Parse type arguments recursively
+			const typeArgsList = this.splitTypeArguments(typeArgs)
+			for (const typeArg of typeArgsList) {
+				types.push(...this.parseTypeString(typeArg))
+			}
+			return types
+		}
+
+		// Skip primitives and built-in types
+		const builtInTypes = ["string", "number", "boolean", "void", "any", "unknown", "never", "null", "undefined"]
+		if (!builtInTypes.includes(cleaned.toLowerCase())) {
+			types.push(cleaned)
+		}
+
+		return types
+	}
+
+	/**
+	 * Phase 10, Task 3: Split type arguments respecting nested generics
+	 */
+	private splitTypeArguments(typeArgs: string): string[] {
+		const args: string[] = []
+		let current = ""
+		let depth = 0
+
+		for (const char of typeArgs) {
+			if (char === "<") depth++
+			else if (char === ">") depth--
+			else if (char === "," && depth === 0) {
+				args.push(current.trim())
+				current = ""
+				continue
+			}
+			current += char
+		}
+
+		if (current.trim()) {
+			args.push(current.trim())
+		}
+
+		return args
+	}
+
+	/**
+	 * Phase 10, Task 3: Find type definition block
+	 */
+	private findTypeDefinition(typeName: string, allBlocks: CodeBlock[]): CodeBlock | null {
+		// Look for class, interface, type alias, or enum definitions
+		const typeBlock = allBlocks.find(
+			(block) =>
+				(block.type === "class" ||
+					block.type === "interface" ||
+					block.type === "type_alias" ||
+					block.type === "enum") &&
+				block.identifier === typeName,
+		)
+
+		return typeBlock || null
+	}
+
+	/**
+	 * Phase 10, Task 3: Extract HAS_TYPE relationships for variables/properties
+	 */
+	private extractHasTypeRelationships(block: CodeBlock, allBlocks: CodeBlock[]): CodeRelationship[] {
+		const relationships: CodeRelationship[] = []
+		const typeInfo = block.lspTypeInfo?.typeInfo
+
+		if (!typeInfo) return relationships
+
+		// Parse type string to extract base types
+		const baseTypes = this.parseTypeString(typeInfo.type)
+
+		for (const typeName of baseTypes) {
+			// Find type definition in allBlocks
+			const typeBlock = this.findTypeDefinition(typeName, allBlocks)
+
+			if (typeBlock) {
+				relationships.push({
+					fromId: this.generateNodeId(block),
+					toId: this.generateNodeId(typeBlock),
+					type: "HAS_TYPE",
+					metadata: {
+						typeString: typeInfo.type,
+						isInferred: typeInfo.isInferred,
+						source: "lsp",
+					},
+				})
+			}
+		}
+
+		return relationships
+	}
+
+	/**
+	 * Phase 10, Task 3: Extract ACCEPTS_TYPE relationships for function parameters
+	 */
+	private extractAcceptsTypeRelationships(block: CodeBlock, allBlocks: CodeBlock[]): CodeRelationship[] {
+		const relationships: CodeRelationship[] = []
+		const signatureInfo = block.lspTypeInfo?.signatureInfo
+
+		if (!signatureInfo || !signatureInfo.parameters) return relationships
+
+		for (const param of signatureInfo.parameters) {
+			const baseTypes = this.parseTypeString(param.type)
+
+			for (const typeName of baseTypes) {
+				const typeBlock = this.findTypeDefinition(typeName, allBlocks)
+
+				if (typeBlock) {
+					relationships.push({
+						fromId: this.generateNodeId(block),
+						toId: this.generateNodeId(typeBlock),
+						type: "ACCEPTS_TYPE",
+						metadata: {
+							parameterName: param.name,
+							typeString: param.type,
+							isOptional: param.isOptional,
+							source: "lsp",
+						},
+					})
+				}
+			}
+		}
+
+		return relationships
+	}
+
+	/**
+	 * Phase 10, Task 3: Extract RETURNS_TYPE relationships for function return types
+	 */
+	private extractReturnsTypeRelationships(block: CodeBlock, allBlocks: CodeBlock[]): CodeRelationship[] {
+		const relationships: CodeRelationship[] = []
+		const signatureInfo = block.lspTypeInfo?.signatureInfo
+
+		if (!signatureInfo || !signatureInfo.returnType) return relationships
+
+		const baseTypes = this.parseTypeString(signatureInfo.returnType)
+
+		for (const typeName of baseTypes) {
+			const typeBlock = this.findTypeDefinition(typeName, allBlocks)
+
+			if (typeBlock) {
+				relationships.push({
+					fromId: this.generateNodeId(block),
+					toId: this.generateNodeId(typeBlock),
+					type: "RETURNS_TYPE",
+					metadata: {
+						typeString: signatureInfo.returnType,
+						source: "lsp",
+					},
+				})
+			}
+		}
+
+		return relationships
 	}
 }
