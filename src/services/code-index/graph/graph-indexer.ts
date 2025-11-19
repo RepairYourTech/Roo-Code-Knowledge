@@ -262,18 +262,66 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 		}
 
-		// Extract EXTENDS relationships from symbol metadata
-		if (block.symbolMetadata) {
-			const metadata = block.symbolMetadata
+		// Phase 10, Task 4: Extract EXTENDS relationships from symbol metadata
+		if (block.symbolMetadata?.extends && block.type === "class") {
+			let parentClassName = block.symbolMetadata.extends
 
-			// For classes that extend other classes
-			// Note: This would require parsing the class declaration to find the extends clause
-			// For now, we'll leave this as a placeholder for future enhancement
+			// Handle generic base classes: "BaseService<User>" -> "BaseService"
+			if (parentClassName.includes("<")) {
+				parentClassName = parentClassName.substring(0, parentClassName.indexOf("<")).trim()
+			}
+
+			// Handle qualified names: "services.BaseService" -> "BaseService"
+			if (parentClassName.includes(".")) {
+				parentClassName = parentClassName.substring(parentClassName.lastIndexOf(".") + 1).trim()
+			}
+
+			// Find parent class block
+			const parentBlock = allBlocks.find(
+				(b) => (b.type === "class" || b.type === "abstract_class") && b.identifier === parentClassName,
+			)
+
+			if (parentBlock) {
+				relationships.push({
+					fromId,
+					toId: this.generateNodeId(parentBlock),
+					type: "EXTENDS",
+					metadata: {
+						parentClass: parentClassName,
+						isAbstract: block.symbolMetadata.isAbstract || false,
+					},
+				})
+			}
 		}
 
-		// Extract IMPLEMENTS relationships from symbol metadata
-		// Note: This would require parsing interface implementations
-		// For now, we'll leave this as a placeholder for future enhancement
+		// Phase 10, Task 4: Extract IMPLEMENTS relationships from symbol metadata
+		if (block.symbolMetadata?.implements && block.type === "class") {
+			for (let interfaceName of block.symbolMetadata.implements) {
+				// Handle generic interfaces: "IService<User>" -> "IService"
+				if (interfaceName.includes("<")) {
+					interfaceName = interfaceName.substring(0, interfaceName.indexOf("<")).trim()
+				}
+
+				// Handle qualified names: "interfaces.IService" -> "IService"
+				if (interfaceName.includes(".")) {
+					interfaceName = interfaceName.substring(interfaceName.lastIndexOf(".") + 1).trim()
+				}
+
+				// Find interface block
+				const interfaceBlock = allBlocks.find((b) => b.type === "interface" && b.identifier === interfaceName)
+
+				if (interfaceBlock) {
+					relationships.push({
+						fromId,
+						toId: this.generateNodeId(interfaceBlock),
+						type: "IMPLEMENTS",
+						metadata: {
+							interface: interfaceName,
+						},
+					})
+				}
+			}
+		}
 
 		// Phase 10: Extract CALLS relationships from call metadata
 		if (block.calls && block.calls.length > 0) {
@@ -378,6 +426,30 @@ export class GraphIndexer implements IGraphIndexer {
 				relationships.push(...paramTypeRelationships)
 				relationships.push(...returnTypeRelationships)
 			}
+		}
+
+		// Phase 10, Task 4: Create reverse EXTENDED_BY relationships for efficient queries
+		// This allows us to quickly answer "what classes extend this class?"
+		const extendsRelationships = relationships.filter((r) => r.type === "EXTENDS")
+		for (const extendsRel of extendsRelationships) {
+			relationships.push({
+				fromId: extendsRel.toId,
+				toId: extendsRel.fromId,
+				type: "EXTENDED_BY",
+				metadata: extendsRel.metadata,
+			})
+		}
+
+		// Phase 10, Task 4: Create reverse IMPLEMENTED_BY relationships for efficient queries
+		// This allows us to quickly answer "what classes implement this interface?"
+		const implementsRelationships = relationships.filter((r) => r.type === "IMPLEMENTS")
+		for (const implementsRel of implementsRelationships) {
+			relationships.push({
+				fromId: implementsRel.toId,
+				toId: implementsRel.fromId,
+				type: "IMPLEMENTED_BY",
+				metadata: implementsRel.metadata,
+			})
 		}
 
 		return relationships
