@@ -121,6 +121,30 @@ export interface LSPTypeInfo {
 	lspAvailable: boolean
 }
 
+/**
+ * Information about a function call
+ * Phase 10: Function call tracking for CALLS/CALLED_BY relationships
+ */
+export interface CallInfo {
+	/** Name of the function/method being called */
+	calleeName: string
+
+	/** Type of call: 'function', 'method', 'static_method', 'constructor' */
+	callType: "function" | "method" | "static_method" | "constructor"
+
+	/** Line number where the call occurs (1-based) */
+	line: number
+
+	/** Column number where the call occurs (0-based) */
+	column: number
+
+	/** Object/class name for method calls (e.g., 'user' in user.save()) */
+	receiver?: string
+
+	/** Module/class name for static calls (e.g., 'Math' in Math.max()) */
+	qualifier?: string
+}
+
 export interface CodeBlock {
 	file_path: string
 	identifier: string | null
@@ -137,4 +161,6 @@ export interface CodeBlock {
 	documentation?: string
 	// Phase 6: LSP type information (optional for backward compatibility)
 	lspTypeInfo?: LSPTypeInfo
+	// Phase 10: Function call information (optional for backward compatibility)
+	calls?: CallInfo[]
 }
