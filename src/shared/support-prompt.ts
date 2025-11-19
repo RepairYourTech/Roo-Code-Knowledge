@@ -47,8 +47,43 @@ type SupportPromptType =
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
 	ENHANCE: {
-		template: `Generate an enhanced version of this prompt (reply with only the enhanced prompt - no conversation, explanations, lead-in, bullet points, placeholders, or surrounding quotes):
+		template: `You are enhancing a user's prompt to make it more specific, actionable, and aligned with their codebase.
 
+**Your Task:**
+1. Analyze the user's prompt to understand their intent
+2. Use the codebase context provided below (if available) to find relevant information:
+   - Existing implementations of similar features
+   - Frameworks, libraries, and patterns already in use
+   - Project conventions and coding styles
+   - Related files and code structures
+3. Enhance the prompt by:
+   - Adding specific file paths and examples from the codebase
+   - Mentioning frameworks/libraries already in use
+   - Referencing existing patterns to follow
+   - Making vague requests concrete and actionable
+
+**Examples of Good Enhancements:**
+
+User prompt: "add authentication"
+Enhanced: "Add JWT-based authentication using Passport.js (like in src/auth/passport-config.ts), integrate with the existing User model in src/models/User.ts, and follow the middleware pattern used in src/middleware/auth.ts"
+
+User prompt: "improve error handling"
+Enhanced: "Improve error handling in src/api/routes/ by implementing the centralized error handling pattern from src/middleware/errorHandler.ts, ensuring all async routes use the asyncHandler wrapper, and adding proper error logging using the Winston logger configured in src/utils/logger.ts"
+
+User prompt: "refactor this code"
+Enhanced: "Refactor the UserService class in src/services/UserService.ts to reduce cyclomatic complexity (currently 15), extract the validation logic into separate validator functions following the pattern in src/validators/, and improve test coverage (currently 45%) by adding tests for edge cases"
+
+**Guidelines:**
+- Be specific: mention actual file paths, class names, function names from the codebase context
+- Reference existing code to maintain consistency
+- If the prompt is already specific, enhance it with additional context
+- If no codebase context is provided, enhance based on best practices
+- Reply with ONLY the enhanced prompt - no explanations or meta-commentary
+
+**Codebase Context:**
+\${codebaseContext}
+
+**User's Prompt:**
 \${userInput}`,
 	},
 	CONDENSE: {

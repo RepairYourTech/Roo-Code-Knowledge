@@ -4,6 +4,7 @@ import { supportPrompt } from "../../shared/support-prompt"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { ClineProvider } from "./ClineProvider"
+import { CodeIndexManager } from "../../services/code-index/manager"
 
 export interface MessageEnhancerOptions {
 	text: string
@@ -14,6 +15,7 @@ export interface MessageEnhancerOptions {
 	includeTaskHistoryInEnhance?: boolean
 	currentClineMessages?: ClineMessage[]
 	providerSettingsManager: ProviderSettingsManager
+	codeIndexManager?: CodeIndexManager
 }
 
 export interface MessageEnhancerResult {
@@ -23,9 +25,21 @@ export interface MessageEnhancerResult {
 }
 
 /**
- * Enhances a message prompt using AI, optionally including task history for context
+ * Cached codebase context for common prompt patterns
+ */
+interface CachedCodebaseContext {
+	value: string
+	timestamp: number
+}
+
+/**
+ * Enhances a message prompt using AI, optionally including task history and codebase context
  */
 export class MessageEnhancer {
+	// LRU cache for common prompt patterns
+	private static codebaseContextCache: Map<string, CachedCodebaseContext> = new Map()
+	private static readonly CACHE_SIZE_LIMIT = 50 // Conservative limit
+	private static readonly CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
 	/**
 	 * Enhances a message prompt using the configured AI provider
 	 * @param options Configuration options for message enhancement
@@ -42,6 +56,7 @@ export class MessageEnhancer {
 				includeTaskHistoryInEnhance,
 				currentClineMessages,
 				providerSettingsManager,
+				codeIndexManager,
 			} = options
 
 			// Determine which API configuration to use
@@ -69,10 +84,13 @@ export class MessageEnhancer {
 				}
 			}
 
+			// Get codebase context if CodeIndexManager is available
+			const codebaseContext = await this.getCodebaseContext(text, codeIndexManager)
+
 			// Create the enhancement prompt using the support prompt system
 			const enhancementPrompt = supportPrompt.create(
 				"ENHANCE",
-				{ userInput: promptToEnhance },
+				{ userInput: promptToEnhance, codebaseContext },
 				customSupportPrompts,
 			)
 
@@ -89,6 +107,115 @@ export class MessageEnhancer {
 				error: error instanceof Error ? error.message : String(error),
 			}
 		}
+	}
+
+	/**
+	 * Gets codebase context for the user's prompt by searching the code index
+	 * Uses caching to avoid redundant searches for common patterns
+	 * @param userPrompt The user's original prompt
+	 * @param codeIndexManager Optional CodeIndexManager instance
+	 * @returns Formatted codebase context string
+	 */
+	private static async getCodebaseContext(userPrompt: string, codeIndexManager?: CodeIndexManager): Promise<string> {
+		// If no code index manager or feature not enabled, return empty context
+		if (!codeIndexManager || !codeIndexManager.isFeatureEnabled) {
+			return "No codebase context available (code index not enabled)"
+		}
+
+		try {
+			// Create a cache key from the prompt (normalize to lowercase, trim)
+			const cacheKey = userPrompt.toLowerCase().trim().slice(0, 100) // Limit key length
+
+			// Check cache first
+			const cached = this.getFromCache(cacheKey)
+			if (cached) {
+				return cached
+			}
+
+			// Search the codebase for relevant context
+			// Use the user's prompt as the search query
+			const searchResults = await codeIndexManager.searchIndex(userPrompt)
+
+			// If no results, return a message
+			if (!searchResults || searchResults.length === 0) {
+				const noResultsMessage = "No relevant code found in the codebase for this prompt"
+				this.setInCache(cacheKey, noResultsMessage)
+				return noResultsMessage
+			}
+
+			// Format the search results into a concise context string
+			const contextParts: string[] = []
+
+			// Take top 5 results to keep context manageable
+			const topResults = searchResults.slice(0, 5)
+
+			for (const result of topResults) {
+				const filePath = result.payload?.filePath || "unknown"
+				const content = result.payload?.codeChunk || ""
+				const score = result.score?.toFixed(2) || "N/A"
+				const identifier = result.payload?.identifier || null
+				const type = result.payload?.type || null
+
+				// Truncate content to avoid context explosion
+				const truncatedContent = content.slice(0, 300)
+				const contentPreview = truncatedContent + (content.length > 300 ? "..." : "")
+
+				// Add identifier and type info if available
+				const metaInfo = identifier && type ? ` [${type}: ${identifier}]` : ""
+
+				contextParts.push(`File: ${filePath}${metaInfo} (relevance: ${score})
+${contentPreview}`)
+			}
+
+			const formattedContext = contextParts.join("\n\n---\n\n")
+
+			// Cache the result
+			this.setInCache(cacheKey, formattedContext)
+
+			return formattedContext
+		} catch (error) {
+			// Log error but don't fail the enhancement
+			console.error("Failed to get codebase context:", error)
+			return "Error retrieving codebase context"
+		}
+	}
+
+	/**
+	 * Gets a value from the cache if it exists and hasn't expired
+	 * @param key Cache key
+	 * @returns Cached value or null if not found/expired
+	 */
+	private static getFromCache(key: string): string | null {
+		const cached = this.codebaseContextCache.get(key)
+		if (!cached) return null
+
+		// Check TTL
+		if (Date.now() - cached.timestamp > this.CACHE_TTL_MS) {
+			this.codebaseContextCache.delete(key)
+			return null
+		}
+
+		return cached.value
+	}
+
+	/**
+	 * Sets a value in the cache with LRU eviction
+	 * @param key Cache key
+	 * @param value Value to cache
+	 */
+	private static setInCache(key: string, value: string): void {
+		// Simple LRU: if cache is full, remove oldest entry
+		if (this.codebaseContextCache.size >= this.CACHE_SIZE_LIMIT) {
+			const firstKey = this.codebaseContextCache.keys().next().value
+			if (firstKey) {
+				this.codebaseContextCache.delete(firstKey)
+			}
+		}
+
+		this.codebaseContextCache.set(key, {
+			value,
+			timestamp: Date.now(),
+		})
 	}
 
 	/**
