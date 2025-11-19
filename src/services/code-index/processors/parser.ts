@@ -17,8 +17,18 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
-import { extractSymbolMetadata, extractImportInfo } from "./metadata-extractor"
+// TODO: Phase 2 - metadata-extractor.ts not yet implemented
+// import { extractSymbolMetadata, extractImportInfo } from "./metadata-extractor"
 import { ImportInfo } from "../types/metadata"
+
+// Stub functions until metadata-extractor is implemented
+function extractSymbolMetadata(_node: any, _text: string): any {
+	return undefined
+}
+
+function extractImportInfo(_node: any): ImportInfo | null {
+	return null
+}
 
 /**
  * Implementation of the code parser interface

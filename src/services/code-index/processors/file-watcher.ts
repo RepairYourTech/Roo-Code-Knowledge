@@ -1,4 +1,5 @@
 import * as vscode from "vscode"
+import * as path from "path"
 import {
 	QDRANT_CODE_BLOCK_NAMESPACE,
 	MAX_FILE_SIZE_BYTES,
