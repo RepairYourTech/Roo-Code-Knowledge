@@ -6,7 +6,9 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager } from "./state-manager"
 import { CodeIndexServiceFactory } from "./service-factory"
 import { CodeIndexSearchService } from "./search-service"
+import { HybridSearchService } from "./hybrid-search-service"
 import { CodeIndexOrchestrator } from "./orchestrator"
+import { BM25IndexService } from "./bm25/bm25-index"
 import { CacheManager } from "./cache-manager"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
@@ -26,6 +28,8 @@ export class CodeIndexManager {
 	private _serviceFactory: CodeIndexServiceFactory | undefined
 	private _orchestrator: CodeIndexOrchestrator | undefined
 	private _searchService: CodeIndexSearchService | undefined
+	private _hybridSearchService: HybridSearchService | undefined
+	private _bm25Index: BM25IndexService | undefined
 	private _cacheManager: CacheManager | undefined
 
 	// Flag to prevent race conditions during error recovery
@@ -80,7 +84,7 @@ export class CodeIndexManager {
 	}
 
 	private assertInitialized() {
-		if (!this._configManager || !this._orchestrator || !this._searchService || !this._cacheManager) {
+		if (!this._configManager || !this._orchestrator || !this._hybridSearchService || !this._cacheManager) {
 			throw new Error("CodeIndexManager not initialized. Call initialize() first.")
 		}
 	}
@@ -281,7 +285,7 @@ export class CodeIndexManager {
 			return []
 		}
 		this.assertInitialized()
-		return this._searchService!.searchIndex(query, directoryPrefix)
+		return this._hybridSearchService!.searchIndex(query, directoryPrefix)
 	}
 
 	/**
@@ -296,6 +300,8 @@ export class CodeIndexManager {
 		// Clear existing services to ensure clean state
 		this._orchestrator = undefined
 		this._searchService = undefined
+		this._hybridSearchService = undefined
+		this._bm25Index = undefined
 
 		// (Re)Initialize service factory
 		this._serviceFactory = new CodeIndexServiceFactory(
@@ -332,12 +338,16 @@ export class CodeIndexManager {
 		const rooIgnoreController = new RooIgnoreController(workspacePath)
 		await rooIgnoreController.initialize()
 
+		// (Re)Initialize BM25 index BEFORE creating services
+		this._bm25Index = new BM25IndexService()
+
 		// (Re)Create shared service instances
 		const { embedder, vectorStore, scanner, fileWatcher } = this._serviceFactory.createServices(
 			this.context,
 			this._cacheManager!,
 			ignoreInstance,
 			rooIgnoreController,
+			this._bm25Index,
 		)
 
 		// Validate embedder configuration before proceeding
@@ -359,12 +369,21 @@ export class CodeIndexManager {
 			fileWatcher,
 		)
 
-		// (Re)Initialize search service
+		// (Re)Initialize search service (keep for backward compatibility)
 		this._searchService = new CodeIndexSearchService(
 			this._configManager!,
 			this._stateManager,
 			embedder,
 			vectorStore,
+		)
+
+		// (Re)Initialize hybrid search service
+		this._hybridSearchService = new HybridSearchService(
+			this._configManager!,
+			this._stateManager,
+			embedder,
+			vectorStore,
+			this._bm25Index,
 		)
 
 		// Clear any error state after successful recreation

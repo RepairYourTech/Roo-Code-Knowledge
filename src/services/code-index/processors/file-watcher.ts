@@ -18,6 +18,8 @@ import {
 	IVectorStore,
 	PointStruct,
 	BatchProcessingSummary,
+	IBM25Index,
+	BM25Document,
 } from "../interfaces"
 import { codeParser } from "./parser"
 import { CacheManager } from "../cache-manager"
@@ -41,6 +43,7 @@ export class FileWatcher implements IFileWatcher {
 	private readonly BATCH_DEBOUNCE_DELAY_MS = 500
 	private readonly FILE_PROCESSING_CONCURRENCY_LIMIT = 10
 	private readonly batchSegmentThreshold: number
+	private bm25Index?: IBM25Index
 
 	private readonly _onDidStartBatchProcessing = new vscode.EventEmitter<string[]>()
 	private readonly _onBatchProgressUpdate = new vscode.EventEmitter<{
@@ -79,10 +82,12 @@ export class FileWatcher implements IFileWatcher {
 		private readonly cacheManager: CacheManager,
 		private embedder?: IEmbedder,
 		private vectorStore?: IVectorStore,
+		bm25Index?: IBM25Index,
 		ignoreInstance?: Ignore,
 		ignoreController?: RooIgnoreController,
 		batchSegmentThreshold?: number,
 	) {
+		this.bm25Index = bm25Index
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
 			this.ignoreInstance = ignoreInstance
@@ -211,6 +216,13 @@ export class FileWatcher implements IFileWatcher {
 		if (allPathsToClearFromDB.size > 0 && this.vectorStore) {
 			try {
 				await this.vectorStore.deletePointsByMultipleFilePaths(Array.from(allPathsToClearFromDB))
+
+				// Also remove from BM25 index if available
+				if (this.bm25Index) {
+					for (const path of allPathsToClearFromDB) {
+						this.bm25Index.removeDocumentsByFilePath(path)
+					}
+				}
 
 				for (const path of pathsToExplicitlyDelete) {
 					this.cacheManager.deleteHash(path)
@@ -367,6 +379,24 @@ export class FileWatcher implements IFileWatcher {
 					while (retryCount < MAX_BATCH_RETRIES) {
 						try {
 							await this.vectorStore.upsertPoints(batch)
+
+							// Also add to BM25 index if available
+							if (this.bm25Index) {
+								const bm25Documents: BM25Document[] = batch.map((point) => ({
+									id: point.id,
+									text: point.payload.codeChunk || "",
+									filePath: point.payload.filePath || "",
+									startLine: point.payload.startLine || 0,
+									endLine: point.payload.endLine || 0,
+									metadata: {
+										identifier: point.payload.identifier,
+										type: point.payload.type,
+										language: point.payload.language,
+									},
+								}))
+								this.bm25Index.addDocuments(bm25Documents)
+							}
+
 							break
 						} catch (error) {
 							upsertError = error as Error

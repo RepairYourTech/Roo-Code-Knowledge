@@ -101,17 +101,17 @@
 ## Phase 4: BM25 Keyword Search
 
 **Status:** 🔄 In Progress
-**Progress:** 2/5 tasks complete (40%)
+**Progress:** 3/5 tasks complete (60%)
 
-- [x] Task 4.1: Install BM25 Library ✅ **COMPLETE** (Deliverable: `PHASE4_BM25_LIBRARY_ANALYSIS.md`, installed `okapibm25@1.4.1`)
-- [x] Task 4.2: Create BM25 Index Service ✅ **COMPLETE** (Deliverable: `bm25/bm25-index.ts`, `interfaces/bm25-index.ts`, tests passing)
-- [ ] Task 4.3: Create Hybrid Search Service
-- [ ] Task 4.4: Integrate BM25 into Indexing Pipeline
+- [x] Task 4.1: Install BM25 Library ✅ **COMPLETE**
+- [x] Task 4.2: Create BM25 Index Service ✅ **COMPLETE**
+- [x] Task 4.3: Create Hybrid Search Service ✅ **COMPLETE** (Deliverable: `hybrid-search-service.ts`, weighted + RRF fusion)
+- [ ] Task 4.4: Integrate BM25 into Indexing Pipeline 🔄 **IN PROGRESS**
 - [ ] Task 4.5: Update Search Service
 
 **Blockers:** None
 **Expected Impact:** 40% better exact symbol finding
-**Notes:** Task 4.2 complete! BM25 index service implemented with full test coverage. Supports add/remove documents, search with scoring, and index statistics. Next: hybrid search service to combine BM25 + vector scores.
+**Notes:** Task 4.3 complete! Hybrid search service supports weighted fusion (70% vector + 30% BM25) and RRF. Now integrating into indexing pipeline.
 
 ---
 
