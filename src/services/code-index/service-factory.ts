@@ -8,7 +8,7 @@ import { VercelAiGatewayEmbedder } from "./embedders/vercel-ai-gateway"
 import { OpenRouterEmbedder } from "./embedders/openrouter"
 import { EmbedderProvider, getDefaultModelId, getModelDimension } from "../../shared/embeddingModels"
 import { QdrantVectorStore } from "./vector-store/qdrant-client"
-import { codeParser, DirectoryScanner, FileWatcher } from "./processors"
+import { CodeParser, DirectoryScanner, FileWatcher } from "./processors"
 import {
 	ICodeParser,
 	IEmbedder,
@@ -17,11 +17,13 @@ import {
 	IBM25Index,
 	INeo4jService,
 	IGraphIndexer,
+	ILSPService,
 } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 import { Neo4jService } from "./graph/neo4j-service"
 import { GraphIndexer } from "./graph/graph-indexer"
+import { LSPService } from "./lsp/lsp-service"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { Ignore } from "ignore"
 import { t } from "../../i18n"
@@ -166,6 +168,22 @@ export class CodeIndexServiceFactory {
 	}
 
 	/**
+	 * Creates an LSP service instance
+	 * Phase 6: LSP Integration for accurate type information
+	 */
+	public createLSPService(): ILSPService {
+		return new LSPService()
+	}
+
+	/**
+	 * Creates a code parser instance with optional LSP service
+	 * Phase 6: Parser can be enriched with LSP type information
+	 */
+	public createParser(lspService?: ILSPService): ICodeParser {
+		return new CodeParser(lspService)
+	}
+
+	/**
 	 * Creates a Neo4j service instance if Neo4j is enabled
 	 * @returns Neo4j service instance or undefined if disabled
 	 */
@@ -289,6 +307,7 @@ export class CodeIndexServiceFactory {
 		fileWatcher: IFileWatcher
 		neo4jService?: INeo4jService
 		graphIndexer?: IGraphIndexer
+		lspService?: ILSPService
 	} {
 		if (!this.configManager.isFeatureConfigured) {
 			throw new Error(t("embeddings:serviceFactory.codeIndexingNotConfigured"))
@@ -296,7 +315,10 @@ export class CodeIndexServiceFactory {
 
 		const embedder = this.createEmbedder()
 		const vectorStore = this.createVectorStore()
-		const parser = codeParser
+
+		// Create LSP service and parser with LSP support (Phase 6)
+		const lspService = this.createLSPService()
+		const parser = this.createParser(lspService)
 
 		// Create Neo4j service and graph indexer if enabled
 		const neo4jService = this.createNeo4jService()
@@ -329,6 +351,7 @@ export class CodeIndexServiceFactory {
 			fileWatcher,
 			neo4jService,
 			graphIndexer,
+			lspService,
 		}
 	}
 }

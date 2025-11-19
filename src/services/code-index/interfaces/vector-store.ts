@@ -1,4 +1,5 @@
 import { SymbolMetadata, ImportInfo, ExportInfo } from "../types/metadata"
+import { LSPTypeInfo } from "./file-processor"
 
 /**
  * Interface for vector database clients
@@ -104,5 +105,7 @@ export interface Payload {
 	exports?: ExportInfo[]
 	documentation?: string
 	segmentHash?: string
+	// Phase 6: LSP type information (optional for backward compatibility)
+	lspTypeInfo?: LSPTypeInfo
 	[key: string]: any
 }

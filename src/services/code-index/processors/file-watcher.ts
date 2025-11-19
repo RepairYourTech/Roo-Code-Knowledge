@@ -623,7 +623,7 @@ export class FileWatcher implements IFileWatcher {
 				// Phase 2: Create metadata-enriched embeddings
 				const enrichedTexts = blocks.map((block) => {
 					// If block has enhanced metadata, use buildEmbeddingContext
-					if (block.symbolMetadata || block.documentation) {
+					if (block.symbolMetadata || block.documentation || block.lspTypeInfo) {
 						const segment: EnhancedCodeSegment = {
 							segmentHash: block.segmentHash,
 							filePath: block.file_path,
@@ -636,6 +636,7 @@ export class FileWatcher implements IFileWatcher {
 							language: path.extname(block.file_path).slice(1).toLowerCase(),
 							symbolMetadata: block.symbolMetadata,
 							documentation: block.documentation,
+							lspTypeInfo: block.lspTypeInfo,
 						}
 						return buildEmbeddingContext(segment)
 					}
@@ -689,6 +690,8 @@ export class FileWatcher implements IFileWatcher {
 							exports: block.exports,
 							documentation: block.documentation,
 							segmentHash: block.segmentHash,
+							// Phase 6: LSP type information
+							lspTypeInfo: block.lspTypeInfo,
 						},
 					}
 				})

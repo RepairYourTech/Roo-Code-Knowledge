@@ -226,6 +226,27 @@ export interface EnhancedCodeSegment {
 	/** File-level metadata for context */
 	fileMetadata?: FileMetadata
 
+	// ===== LSP Type Information (Phase 6) =====
+
+	/** LSP-derived type information */
+	lspTypeInfo?: {
+		typeInfo?: { type: string; isInferred: boolean; documentation?: string }
+		signatureInfo?: {
+			name: string
+			parameters: Array<{
+				name: string
+				type: string
+				isOptional: boolean
+				defaultValue?: string
+				documentation?: string
+			}>
+			returnType: string
+			documentation?: string
+			typeParameters?: string[]
+		}
+		lspAvailable: boolean
+	}
+
 	// ===== Relationships (Phase 4 - Neo4j) =====
 	// These will be populated in Phase 4 when Neo4j integration is added
 
@@ -308,6 +329,19 @@ export function buildEmbeddingContext(segment: EnhancedCodeSegment): string {
 
 		if (segment.symbolMetadata.returnType) {
 			parts.push(`Returns: ${segment.symbolMetadata.returnType}`)
+		}
+	}
+
+	// Phase 6: Add LSP type information if available
+	if (segment.lspTypeInfo?.lspAvailable) {
+		if (segment.lspTypeInfo.typeInfo) {
+			parts.push(`LSP Type: ${segment.lspTypeInfo.typeInfo.type}`)
+		}
+
+		if (segment.lspTypeInfo.signatureInfo) {
+			const sig = segment.lspTypeInfo.signatureInfo
+			const params = sig.parameters.map((p) => `${p.name}: ${p.type}`).join(", ")
+			parts.push(`LSP Signature: ${sig.name}(${params}): ${sig.returnType}`)
 		}
 	}
 

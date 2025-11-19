@@ -419,7 +419,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 				// Phase 2: Create metadata-enriched embeddings for batch
 				const enrichedTexts = batchBlocks.map((block) => {
 					// If block has enhanced metadata, use buildEmbeddingContext
-					if (block.symbolMetadata || block.documentation) {
+					if (block.symbolMetadata || block.documentation || block.lspTypeInfo) {
 						const segment: EnhancedCodeSegment = {
 							segmentHash: block.segmentHash,
 							filePath: block.file_path,
@@ -432,6 +432,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 							language: path.extname(block.file_path).slice(1).toLowerCase(),
 							symbolMetadata: block.symbolMetadata,
 							documentation: block.documentation,
+							lspTypeInfo: block.lspTypeInfo,
 						}
 						return buildEmbeddingContext(segment)
 					}
@@ -487,6 +488,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 							imports: block.imports,
 							exports: block.exports,
 							documentation: block.documentation,
+							// Phase 6: LSP type information
+							lspTypeInfo: block.lspTypeInfo,
 						},
 					}
 				})
