@@ -36,6 +36,11 @@ export const codebaseIndexConfigSchema = z.object({
 	// OpenAI Compatible specific fields
 	codebaseIndexOpenAiCompatibleBaseUrl: z.string().optional(),
 	codebaseIndexOpenAiCompatibleModelDimension: z.number().optional(),
+	// Neo4j graph database fields
+	codebaseIndexNeo4jEnabled: z.boolean().optional(),
+	codebaseIndexNeo4jUrl: z.string().optional(),
+	codebaseIndexNeo4jUsername: z.string().optional(),
+	codebaseIndexNeo4jDatabase: z.string().optional(),
 })
 
 export type CodebaseIndexConfig = z.infer<typeof codebaseIndexConfigSchema>
