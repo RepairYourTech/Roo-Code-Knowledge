@@ -150,6 +150,8 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 					dependencies?: any
 					typeInfo?: any
 					fileSummary?: any
+					// Phase 13: Quality metrics
+					qualityMetrics?: any
 				}>
 			}
 
@@ -248,6 +250,11 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 					enhancedResult.fileSummary = result.fileSummary
 				}
 
+				// Phase 13: Add quality metrics if available
+				if ("qualityMetrics" in result && result.qualityMetrics) {
+					enhancedResult.qualityMetrics = result.qualityMetrics
+				}
+
 				jsonResult.results.push(enhancedResult)
 			})
 
@@ -294,6 +301,24 @@ ${jsonResult.results
 		}
 		if (result.fileSummary) {
 			parts.push(`File Purpose: ${result.fileSummary.purpose}`)
+		}
+
+		// Phase 13: Add quality metrics to output
+		if (result.qualityMetrics) {
+			const qm = result.qualityMetrics
+			if (qm.qualityScore) {
+				parts.push(`Quality Score: ${qm.qualityScore.overall}/100`)
+			}
+			if (qm.complexity) {
+				parts.push(
+					`Complexity: Cyclomatic=${qm.complexity.cyclomaticComplexity}, Cognitive=${qm.complexity.cognitiveComplexity}`,
+				)
+			}
+			if (qm.coverage) {
+				parts.push(
+					`Test Coverage: ${qm.coverage.coveragePercentage}% (${qm.coverage.directTests} direct, ${qm.coverage.integrationTests} integration)`,
+				)
+			}
 		}
 
 		return parts.join("\n")

@@ -17,6 +17,8 @@ import { ILSPService } from "../interfaces/lsp-service"
 import { VectorStoreSearchResult } from "../interfaces/vector-store"
 import { ContextEnrichmentService } from "../context/context-enrichment-service"
 import { EnrichedSearchResult, ContextEnrichmentOptions } from "../interfaces/context-enrichment"
+import { QualityMetricsService } from "../quality/quality-metrics-service"
+import { QualityMetricsOptions, QualityEnrichedResult } from "../interfaces/quality-metrics"
 
 /**
  * Options for search orchestration
@@ -39,17 +41,26 @@ export interface SearchOrchestrationOptions {
 	}
 	/** Phase 12: Context enrichment options */
 	contextEnrichment?: ContextEnrichmentOptions
+	/** Phase 13: Quality metrics options */
+	qualityMetrics?: QualityMetricsOptions
 }
 
 /**
  * Result from orchestrated search with metadata
  * Phase 12: Now extends EnrichedSearchResult to include context enrichment
+ * Phase 13: Now extends QualityEnrichedResult to include quality metrics
  */
-export interface OrchestrationResult extends EnrichedSearchResult {
+export interface OrchestrationResult extends QualityEnrichedResult {
 	/** Query analysis that determined the search strategy */
 	queryAnalysis?: QueryAnalysis
 	/** Which backends were used for this result */
 	usedBackends?: SearchBackend[]
+	/** Phase 12: Context enrichment fields */
+	relatedCode?: any
+	tests?: any
+	dependencies?: any
+	typeInfo?: any
+	fileSummary?: any
 }
 
 /**
@@ -58,6 +69,7 @@ export interface OrchestrationResult extends EnrichedSearchResult {
 export class SearchOrchestrator {
 	private readonly queryAnalyzer: QueryAnalyzer
 	private readonly contextEnrichmentService: ContextEnrichmentService
+	private readonly qualityMetricsService: QualityMetricsService
 
 	constructor(
 		private readonly hybridSearchService: HybridSearchService,
@@ -67,6 +79,8 @@ export class SearchOrchestrator {
 		this.queryAnalyzer = new QueryAnalyzer()
 		// Phase 12: Initialize context enrichment service
 		this.contextEnrichmentService = new ContextEnrichmentService(neo4jService || null)
+		// Phase 13: Initialize quality metrics service
+		this.qualityMetricsService = new QualityMetricsService(neo4jService || null)
 	}
 
 	/**
@@ -105,8 +119,14 @@ export class SearchOrchestrator {
 			options?.contextEnrichment,
 		)
 
-		// 6. Add orchestration metadata
-		return enrichedResults.map((result) => ({
+		// 6. Phase 13: Enrich results with quality metrics
+		const qualityEnrichedResults = await this.qualityMetricsService.enrichWithQualityMetrics(
+			enrichedResults,
+			options?.qualityMetrics,
+		)
+
+		// 7. Add orchestration metadata
+		return qualityEnrichedResults.map((result) => ({
 			...result,
 			queryAnalysis: effectiveAnalysis,
 			usedBackends: backends,
