@@ -494,6 +494,7 @@
 		"lodash.debounce": "^4.0.8",
 		"mammoth": "^1.9.1",
 		"monaco-vscode-textmate-theme-converter": "^0.1.7",
+		"neo4j-driver": "^6.0.1",
 		"node-cache": "^5.1.2",
 		"node-ipc": "^12.0.0",
 		"okapibm25": "^1.4.1",
