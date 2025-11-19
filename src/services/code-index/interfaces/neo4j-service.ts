@@ -39,6 +39,9 @@ export interface CodeRelationship {
 		| "CALLED_BY"
 		| "TESTS" // Phase 10, Task 2: Test -> Source relationship
 		| "TESTED_BY" // Phase 10, Task 2: Source -> Test relationship
+		| "HAS_TYPE" // Phase 10, Task 3: Variable/Property -> Type relationship
+		| "ACCEPTS_TYPE" // Phase 10, Task 3: Function -> Parameter Type relationship
+		| "RETURNS_TYPE" // Phase 10, Task 3: Function -> Return Type relationship
 		| "IMPORTS"
 		| "EXTENDS"
 		| "IMPLEMENTS"
