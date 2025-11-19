@@ -376,35 +376,9 @@ export class CodeIndexOrchestrator {
 				})
 			}
 
-			// Clear Neo4j graph if enabled
-			// CRITICAL: Neo4j depends on Qdrant data, so we MUST clear it when clearing Qdrant
-			if (this.configManager.isNeo4jEnabled && this.graphIndexer) {
-				try {
-					await this.graphIndexer.clearAll()
-					console.log("[CodeIndexOrchestrator] Neo4j graph cleared successfully")
-				} catch (error: any) {
-					const errorMsg = `Failed to clear Neo4j graph: ${error.message}`
-					errors.push(errorMsg)
-					console.error("[CodeIndexOrchestrator]", errorMsg, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: error instanceof Error ? error.message : String(error),
-						stack: error instanceof Error ? error.stack : undefined,
-						location: "clearIndexData:neo4j",
-					})
-				}
-			}
-
-			// Clear BM25 index if available
-			if (this.bm25Index) {
-				try {
-					this.bm25Index.clear()
-					console.log("[CodeIndexOrchestrator] BM25 index cleared successfully")
-				} catch (error: any) {
-					const errorMsg = `Failed to clear BM25 index: ${error.message}`
-					errors.push(errorMsg)
-					console.error("[CodeIndexOrchestrator]", errorMsg, error)
-				}
-			}
+			// NOTE: Neo4j and BM25 clearing is handled by the manager layer
+			// The orchestrator only clears Qdrant and cache
+			// Neo4j and BM25 are cleared when the collection is deleted in Qdrant
 
 			// Clear cache file
 			await this.cacheManager.clearCacheFile()
