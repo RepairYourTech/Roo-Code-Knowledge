@@ -8,6 +8,11 @@ export class CodeIndexStateManager {
 	private _processedItems: number = 0
 	private _totalItems: number = 0
 	private _currentItemUnit: string = "blocks"
+	// Neo4j graph indexing progress tracking
+	private _neo4jProcessedItems: number = 0
+	private _neo4jTotalItems: number = 0
+	private _neo4jStatus: "idle" | "indexing" | "indexed" | "error" | "disabled" = "disabled"
+	private _neo4jMessage: string = ""
 	private _progressEmitter = new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
 
 	// --- Public API ---
@@ -25,6 +30,11 @@ export class CodeIndexStateManager {
 			processedItems: this._processedItems,
 			totalItems: this._totalItems,
 			currentItemUnit: this._currentItemUnit,
+			// Neo4j graph indexing status
+			neo4jProcessedItems: this._neo4jProcessedItems,
+			neo4jTotalItems: this._neo4jTotalItems,
+			neo4jStatus: this._neo4jStatus,
+			neo4jMessage: this._neo4jMessage,
 		}
 	}
 
@@ -106,6 +116,48 @@ export class CodeIndexStateManager {
 			if (oldStatus !== this._systemStatus || oldMessage !== this._statusMessage || progressChanged) {
 				this._progressEmitter.fire(this.getCurrentStatus())
 			}
+		}
+	}
+
+	// --- Neo4j Graph Indexing Progress ---
+
+	/**
+	 * Report Neo4j graph indexing progress
+	 * @param processedItems Number of items processed
+	 * @param totalItems Total number of items to process
+	 * @param status Current Neo4j indexing status
+	 * @param message Optional status message
+	 */
+	public reportNeo4jIndexingProgress(
+		processedItems: number,
+		totalItems: number,
+		status?: "idle" | "indexing" | "indexed" | "error" | "disabled",
+		message?: string,
+	): void {
+		const progressChanged = processedItems !== this._neo4jProcessedItems || totalItems !== this._neo4jTotalItems
+		const statusChanged = status !== undefined && status !== this._neo4jStatus
+		const messageChanged = message !== undefined && message !== this._neo4jMessage
+
+		if (progressChanged || statusChanged || messageChanged) {
+			this._neo4jProcessedItems = processedItems
+			this._neo4jTotalItems = totalItems
+			if (status !== undefined) this._neo4jStatus = status
+			if (message !== undefined) this._neo4jMessage = message
+
+			this._progressEmitter.fire(this.getCurrentStatus())
+		}
+	}
+
+	/**
+	 * Set Neo4j status without changing progress counts
+	 * @param status Neo4j indexing status
+	 * @param message Optional status message
+	 */
+	public setNeo4jStatus(status: "idle" | "indexing" | "indexed" | "error" | "disabled", message?: string): void {
+		if (status !== this._neo4jStatus || (message !== undefined && message !== this._neo4jMessage)) {
+			this._neo4jStatus = status
+			if (message !== undefined) this._neo4jMessage = message
+			this._progressEmitter.fire(this.getCurrentStatus())
 		}
 	}
 

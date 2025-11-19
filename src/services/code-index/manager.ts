@@ -137,7 +137,14 @@ export class CodeIndexManager {
 			return { requiresRestart }
 		}
 
-		// 3. Check if workspace is available
+		// 3. Initialize Neo4j status based on configuration
+		if (this._configManager.isNeo4jEnabled) {
+			this._stateManager.setNeo4jStatus("idle", "Neo4j graph indexing enabled")
+		} else {
+			this._stateManager.setNeo4jStatus("disabled", "")
+		}
+
+		// 4. Check if workspace is available
 		const workspacePath = this.workspacePath
 		if (!workspacePath) {
 			this._stateManager.setSystemState("Standby", "No workspace folder open")
@@ -364,6 +371,7 @@ export class CodeIndexManager {
 				ignoreInstance,
 				rooIgnoreController,
 				this._bm25Index,
+				this._stateManager, // Pass state manager for Neo4j progress tracking
 			)
 
 		// Initialize Neo4j if enabled

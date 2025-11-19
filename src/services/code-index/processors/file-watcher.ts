@@ -90,6 +90,7 @@ export class FileWatcher implements IFileWatcher {
 		ignoreController?: RooIgnoreController,
 		batchSegmentThreshold?: number,
 		graphIndexer?: IGraphIndexer,
+		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 	) {
 		this.bm25Index = bm25Index
 		this.graphIndexer = graphIndexer
@@ -610,10 +611,30 @@ export class FileWatcher implements IFileWatcher {
 			// Index to Neo4j graph if available
 			if (this.graphIndexer && blocks.length > 0) {
 				try {
+					if (this.stateManager) {
+						this.stateManager.reportNeo4jIndexingProgress(
+							0,
+							1,
+							"indexing",
+							`Indexing ${path.basename(filePath)} to graph`,
+						)
+					}
 					await this.graphIndexer.indexFile(filePath, blocks)
+					if (this.stateManager) {
+						this.stateManager.reportNeo4jIndexingProgress(1, 1, "indexed", "Graph index updated")
+					}
 				} catch (error) {
 					// Log error but don't fail the entire file processing
+					const errorMessage = error instanceof Error ? error.message : String(error)
 					console.error(`[FileWatcher] Error indexing file to Neo4j: ${filePath}`, error)
+					if (this.stateManager) {
+						this.stateManager.reportNeo4jIndexingProgress(
+							0,
+							0,
+							"error",
+							`Graph indexing failed: ${errorMessage}`,
+						)
+					}
 				}
 			}
 

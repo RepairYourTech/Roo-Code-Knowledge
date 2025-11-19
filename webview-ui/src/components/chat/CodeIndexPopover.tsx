@@ -590,6 +590,17 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 
 	const transformStyleString = `translateX(-${100 - progressPercentage}%)`
 
+	// Neo4j graph indexing progress calculation
+	const neo4jProgressPercentage = useMemo(
+		() =>
+			(indexingStatus.neo4jTotalItems || 0) > 0
+				? Math.round(((indexingStatus.neo4jProcessedItems || 0) / (indexingStatus.neo4jTotalItems || 0)) * 100)
+				: 0,
+		[indexingStatus.neo4jProcessedItems, indexingStatus.neo4jTotalItems],
+	)
+
+	const neo4jTransformStyleString = `translateX(-${100 - neo4jProgressPercentage}%)`
+
 	const getAvailableModels = () => {
 		if (!codebaseIndexModels) return []
 
@@ -653,6 +664,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						{/* Status Section */}
 						<div className="space-y-2">
 							<h4 className="text-sm font-medium">{t("settings:codeIndex.statusTitle")}</h4>
+
+							{/* Overall Status Indicator */}
 							<div className="text-sm text-vscode-descriptionForeground">
 								<span
 									className={cn("inline-block w-3 h-3 rounded-full mr-2", {
@@ -666,8 +679,13 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 								{indexingStatus.message ? ` - ${indexingStatus.message}` : ""}
 							</div>
 
+							{/* Vector Index Progress (Qdrant) */}
 							{indexingStatus.systemStatus === "Indexing" && (
-								<div className="mt-2">
+								<div className="mt-3 space-y-2">
+									<div className="text-xs text-vscode-descriptionForeground font-medium">
+										Vector Index: {indexingStatus.processedItems} / {indexingStatus.totalItems}{" "}
+										{indexingStatus.currentItemUnit}
+									</div>
 									<ProgressPrimitive.Root
 										className="relative h-2 w-full overflow-hidden rounded-full bg-secondary"
 										value={progressPercentage}>
@@ -680,6 +698,59 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 									</ProgressPrimitive.Root>
 								</div>
 							)}
+
+							{/* Neo4j Graph Index Progress - Only show if Neo4j is enabled */}
+							{currentSettings.neo4jEnabled &&
+								indexingStatus.neo4jStatus &&
+								indexingStatus.neo4jStatus !== "disabled" && (
+									<div className="mt-3 space-y-2">
+										<div className="flex items-center gap-2">
+											<span
+												className={cn("inline-block w-2 h-2 rounded-full", {
+													"bg-gray-400": indexingStatus.neo4jStatus === "idle",
+													"bg-yellow-500 animate-pulse":
+														indexingStatus.neo4jStatus === "indexing",
+													"bg-green-500": indexingStatus.neo4jStatus === "indexed",
+													"bg-red-500": indexingStatus.neo4jStatus === "error",
+												})}
+											/>
+											<span className="text-xs text-vscode-descriptionForeground font-medium">
+												Graph Index (Neo4j):{" "}
+												{indexingStatus.neo4jStatus === "indexing" ||
+												indexingStatus.neo4jStatus === "indexed"
+													? `${indexingStatus.neo4jProcessedItems || 0} / ${indexingStatus.neo4jTotalItems || 0} files`
+													: indexingStatus.neo4jStatus === "error"
+														? "Error"
+														: "Ready"}
+											</span>
+										</div>
+
+										{indexingStatus.neo4jStatus === "indexing" && (
+											<ProgressPrimitive.Root
+												className="relative h-2 w-full overflow-hidden rounded-full bg-secondary"
+												value={neo4jProgressPercentage}>
+												<ProgressPrimitive.Indicator
+													className="h-full w-full flex-1 bg-green-600 transition-transform duration-300 ease-in-out"
+													style={{
+														transform: neo4jTransformStyleString,
+													}}
+												/>
+											</ProgressPrimitive.Root>
+										)}
+
+										{indexingStatus.neo4jStatus === "error" && indexingStatus.neo4jMessage && (
+											<div className="text-xs text-vscode-errorForeground mt-1">
+												⚠ {indexingStatus.neo4jMessage}
+											</div>
+										)}
+
+										{indexingStatus.neo4jStatus === "indexed" && indexingStatus.neo4jMessage && (
+											<div className="text-xs text-vscode-descriptionForeground mt-1">
+												{indexingStatus.neo4jMessage}
+											</div>
+										)}
+									</div>
+								)}
 						</div>
 
 						{/* Setup Settings Disclosure */}
