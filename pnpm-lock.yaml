@@ -734,6 +734,9 @@ importers:
       node-ipc:
         specifier: ^12.0.0
         version: 12.0.0
+      okapibm25:
+        specifier: ^1.4.1
+        version: 1.4.1
       ollama:
         specifier: ^0.5.17
         version: 0.5.17
@@ -7942,6 +7945,9 @@ packages:
   object.values@1.2.1:
     resolution: {integrity: sha512-gXah6aZrcUxjWg2zR2MwouP2eHlCBzdV4pygudehaKXSGW4v2AsRQUK+lwwXhii6KFZcunEnmSUoYp5CXibxtA==}
     engines: {node: '>= 0.4'}
+
+  okapibm25@1.4.1:
+    resolution: {integrity: sha512-UHmeH4MAtZXGFVncwbY7pfFvDVNxpsyM3W66aGPU0SHj1+ld59ty+9lJ0ifcrcnPUl1XdYoDgb06ObyCnpTs3g==}
 
   ollama@0.5.17:
     resolution: {integrity: sha512-q5LmPtk6GLFouS+3aURIVl+qcAOPC4+Msmx7uBb3pd+fxI55WnGjmLZ0yijI/CYy79x0QPGx3BwC3u5zv9fBvQ==}
@@ -18298,6 +18304,8 @@ snapshots:
       call-bound: 1.0.4
       define-properties: 1.2.1
       es-object-atoms: 1.1.1
+
+  okapibm25@1.4.1: {}
 
   ollama@0.5.17:
     dependencies:

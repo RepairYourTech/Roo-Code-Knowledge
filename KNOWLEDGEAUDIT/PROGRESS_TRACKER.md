@@ -7,20 +7,21 @@
 
 ## Quick Status Overview
 
-| Phase | Name | Status | Progress | Duration | Priority |
-|-------|------|--------|----------|----------|----------|
-| 0 | Foundation & Setup | ✅ Complete | 4/4 | 1 week | 🔴 Critical |
-| 1 | System Prompt Improvements | ✅ Complete | 6/6 | 1 week | 🔥 Highest ROI |
-| 2 | Enhanced Metadata | ✅ Complete | 5/5 | 2 weeks | 🔴 Critical |
-| 3 | Intelligent Chunking Strategy | ✅ Complete | 4/4 | 1.5 weeks | 🔴 Critical |
-| 4 | BM25 Keyword Search | ⬜ Not Started | 0/5 | 1-2 weeks | 🔥 High Impact |
-| 5 | Neo4j Integration | ⬜ Not Started | 0/5 | 2-3 weeks | 🔥 High Impact |
-| 6 | LSP Integration | ⬜ Not Started | 0/3 | 1-2 weeks | 🔥 High Impact |
-| 7 | Hybrid Search & Routing | ⬜ Not Started | 0/3 | 2 weeks | 🔥 Very High |
-| 7 | Advanced Features | ⬜ Not Started | 0/4 | 2-3 weeks | 🟡 Medium |
-| 8 | Performance & Polish | ⬜ Not Started | 0/3 | 1-2 weeks | 🟡 Medium |
+| Phase | Name                          | Status         | Progress | Duration  | Priority       |
+| ----- | ----------------------------- | -------------- | -------- | --------- | -------------- |
+| 0     | Foundation & Setup            | ✅ Complete    | 4/4      | 1 week    | 🔴 Critical    |
+| 1     | System Prompt Improvements    | ✅ Complete    | 6/6      | 1 week    | 🔥 Highest ROI |
+| 2     | Enhanced Metadata             | ✅ Complete    | 5/5      | 2 weeks   | 🔴 Critical    |
+| 3     | Intelligent Chunking Strategy | ✅ Complete    | 4/4      | 1.5 weeks | 🔴 Critical    |
+| 4     | BM25 Keyword Search           | ⬜ Not Started | 0/5      | 1-2 weeks | 🔥 High Impact |
+| 5     | Neo4j Integration             | ⬜ Not Started | 0/5      | 2-3 weeks | 🔥 High Impact |
+| 6     | LSP Integration               | ⬜ Not Started | 0/3      | 1-2 weeks | 🔥 High Impact |
+| 7     | Hybrid Search & Routing       | ⬜ Not Started | 0/3      | 2 weeks   | 🔥 Very High   |
+| 7     | Advanced Features             | ⬜ Not Started | 0/4      | 2-3 weeks | 🟡 Medium      |
+| 8     | Performance & Polish          | ⬜ Not Started | 0/3      | 1-2 weeks | 🟡 Medium      |
 
 **Legend:**
+
 - ⬜ Not Started
 - 🔄 In Progress
 - ✅ Complete
@@ -99,18 +100,18 @@
 
 ## Phase 4: BM25 Keyword Search
 
-**Status:** ⬜ Not Started
-**Progress:** 0/5 tasks complete
+**Status:** 🔄 In Progress
+**Progress:** 2/5 tasks complete (40%)
 
-- [ ] Task 4.1: Install BM25 Library
-- [ ] Task 4.2: Create BM25 Index Service
+- [x] Task 4.1: Install BM25 Library ✅ **COMPLETE** (Deliverable: `PHASE4_BM25_LIBRARY_ANALYSIS.md`, installed `okapibm25@1.4.1`)
+- [x] Task 4.2: Create BM25 Index Service ✅ **COMPLETE** (Deliverable: `bm25/bm25-index.ts`, `interfaces/bm25-index.ts`, tests passing)
 - [ ] Task 4.3: Create Hybrid Search Service
 - [ ] Task 4.4: Integrate BM25 into Indexing Pipeline
 - [ ] Task 4.5: Update Search Service
 
-**Blockers:** Requires Phase 3 complete (chunking fixes)
+**Blockers:** None
 **Expected Impact:** 40% better exact symbol finding
-**Notes:** Complements vector search perfectly. Benefits from Phase 3's improved chunking.
+**Notes:** Task 4.2 complete! BM25 index service implemented with full test coverage. Supports add/remove documents, search with scoring, and index statistics. Next: hybrid search service to combine BM25 + vector scores.
 
 ---
 
@@ -204,23 +205,27 @@
 ## Success Metrics Tracking
 
 ### Search Usage
+
 - **Baseline:** Roo uses codebase_search ~30% of the time
-- **Current:** ___ %
+- **Current:** \_\_\_ %
 - **Target:** 80%
 
 ### Search Relevance
+
 - **Baseline:** ~60% user satisfaction
-- **Current:** ___ %
+- **Current:** \_\_\_ %
 - **Target:** 90%
 
 ### Search Latency
+
 - **Baseline:** ~200ms average
-- **Current:** ___ ms
+- **Current:** \_\_\_ ms
 - **Target:** 150ms
 
 ### Indexing Speed
+
 - **Baseline:** ~100 files/second
-- **Current:** ___ files/second
+- **Current:** \_\_\_ files/second
 - **Target:** 150 files/second
 
 ---
@@ -228,6 +233,7 @@
 ## Notes & Decisions
 
 **2025-11-18:**
+
 - Created comprehensive implementation roadmap
 - Decided NOT to add PostgreSQL (Qdrant + Neo4j sufficient)
 - Confirmed Roo does NOT currently use LSP (will add in Phase 5)
@@ -246,4 +252,3 @@
 ---
 
 **For detailed implementation instructions, see:** `IMPLEMENTATION_ROADMAP.md`
-
