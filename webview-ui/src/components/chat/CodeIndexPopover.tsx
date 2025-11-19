@@ -248,9 +248,12 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		setIndexingStatus(externalIndexingStatus)
 	}, [externalIndexingStatus])
 
-	// Initialize settings from global state
+	// Track if we've initialized settings to prevent re-initialization after save
+	const hasInitializedSettings = useRef(false)
+
+	// Initialize settings from global state ONLY on first load
 	useEffect(() => {
-		if (codebaseIndexConfig) {
+		if (codebaseIndexConfig && !hasInitializedSettings.current) {
 			const settings = {
 				codebaseIndexEnabled: codebaseIndexConfig.codebaseIndexEnabled ?? true,
 				codebaseIndexQdrantUrl: codebaseIndexConfig.codebaseIndexQdrantUrl || "",
@@ -278,6 +281,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 			}
 			setInitialSettings(settings)
 			setCurrentSettings(settings)
+			hasInitializedSettings.current = true
 
 			// Request secret status to check if secrets exist
 			vscode.postMessage({ type: "requestCodeIndexSecretStatus" })
@@ -324,15 +328,18 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 			} else if (event.data.type === "codeIndexSettingsSaved") {
 				if (event.data.success) {
 					setSaveStatus("saved")
-					// CRITICAL: Use the settings returned from the backend, not currentSettingsRef
-					// The backend returns the actual saved state including neo4jEnabled
-					// Merge with current settings to preserve secret fields that weren't sent
 					const backendSettings = event.data.settings || {}
+
+					console.log("[CodeIndexPopover] Settings saved, backend returned:", backendSettings)
+
+					// CRITICAL: Use explicit checks for boolean values to handle false correctly
+					// The ?? operator treats false as a valid value, but we need to be explicit
 					const savedSettings = {
 						...currentSettingsRef.current,
-						// Override with backend values for non-secret fields
 						codebaseIndexEnabled:
-							backendSettings.codebaseIndexEnabled ?? currentSettingsRef.current.codebaseIndexEnabled,
+							backendSettings.codebaseIndexEnabled !== undefined
+								? backendSettings.codebaseIndexEnabled
+								: currentSettingsRef.current.codebaseIndexEnabled,
 						codebaseIndexQdrantUrl:
 							backendSettings.codebaseIndexQdrantUrl ?? currentSettingsRef.current.codebaseIndexQdrantUrl,
 						codebaseIndexEmbedderProvider:
@@ -356,16 +363,18 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						codebaseIndexOpenAiCompatibleBaseUrl:
 							backendSettings.codebaseIndexOpenAiCompatibleBaseUrl ??
 							currentSettingsRef.current.codebaseIndexOpenAiCompatibleBaseUrl,
-						// Neo4j settings from backend (CRITICAL - this is what was missing!)
-						neo4jEnabled: backendSettings.neo4jEnabled ?? currentSettingsRef.current.neo4jEnabled,
+						neo4jEnabled:
+							backendSettings.neo4jEnabled !== undefined
+								? backendSettings.neo4jEnabled
+								: currentSettingsRef.current.neo4jEnabled,
 						neo4jUri: backendSettings.neo4jUri ?? currentSettingsRef.current.neo4jUri,
 						neo4jUsername: backendSettings.neo4jUsername ?? currentSettingsRef.current.neo4jUsername,
 					}
+
+					console.log("[CodeIndexPopover] Updating UI with saved settings:", savedSettings)
+
 					setInitialSettings(savedSettings)
-					// Also update current settings to maintain consistency
 					setCurrentSettings(savedSettings)
-					// Request secret status to ensure we have the latest state
-					// This is important to maintain placeholder display after save
 
 					vscode.postMessage({ type: "requestCodeIndexSecretStatus" })
 
@@ -373,7 +382,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 				} else {
 					setSaveStatus("error")
 					setSaveError(event.data.error || t("settings:codeIndex.saveError"))
-					// Clear error message after 5 seconds
 					setSaveStatus("idle")
 					setSaveError(null)
 				}
@@ -606,6 +614,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 
 		// Always include codebaseIndexEnabled to ensure it's persisted
 		settingsToSave.codebaseIndexEnabled = currentSettings.codebaseIndexEnabled
+
+		console.log("[CodeIndexPopover] Saving settings to backend:", settingsToSave)
 
 		// Save settings to backend
 		vscode.postMessage({
@@ -1626,36 +1636,36 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										</Button>
 									)}
 
-								{currentSettings.codebaseIndexEnabled &&
-									(indexingStatus.systemStatus === "Indexed" ||
-										indexingStatus.systemStatus === "Error") && (
-										<AlertDialog>
-											<AlertDialogTrigger asChild>
-												<Button variant="secondary">
-													{t("settings:codeIndex.clearIndexDataButton")}
-												</Button>
-											</AlertDialogTrigger>
-											<AlertDialogContent>
-												<AlertDialogHeader>
-													<AlertDialogTitle>
-														{t("settings:codeIndex.clearDataDialog.title")}
-													</AlertDialogTitle>
-													<AlertDialogDescription>
-														{t("settings:codeIndex.clearDataDialog.description")}
-													</AlertDialogDescription>
-												</AlertDialogHeader>
-												<AlertDialogFooter>
-													<AlertDialogCancel>
-														{t("settings:codeIndex.clearDataDialog.cancelButton")}
-													</AlertDialogCancel>
-													<AlertDialogAction
-														onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
-														{t("settings:codeIndex.clearDataDialog.confirmButton")}
-													</AlertDialogAction>
-												</AlertDialogFooter>
-											</AlertDialogContent>
-										</AlertDialog>
-									)}
+								{/* Show Clear Index button when status is Indexed or Error, regardless of enabled state */}
+								{(indexingStatus.systemStatus === "Indexed" ||
+									indexingStatus.systemStatus === "Error") && (
+									<AlertDialog>
+										<AlertDialogTrigger asChild>
+											<Button variant="secondary">
+												{t("settings:codeIndex.clearIndexDataButton")}
+											</Button>
+										</AlertDialogTrigger>
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>
+													{t("settings:codeIndex.clearDataDialog.title")}
+												</AlertDialogTitle>
+												<AlertDialogDescription>
+													{t("settings:codeIndex.clearDataDialog.description")}
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel>
+													{t("settings:codeIndex.clearDataDialog.cancelButton")}
+												</AlertDialogCancel>
+												<AlertDialogAction
+													onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
+													{t("settings:codeIndex.clearDataDialog.confirmButton")}
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
+								)}
 							</div>
 
 							<Button

@@ -268,15 +268,27 @@ export class CodeIndexManager {
 
 	/**
 	 * Clears all index data by stopping the watcher, clearing the Qdrant collection,
-	 * and deleting the cache file.
+	 * clearing the Neo4j graph (if enabled), and deleting the cache file.
+	 *
+	 * IMPORTANT: This can be called even when indexing is disabled, to allow users
+	 * to clean up old index data. It will clear BOTH Qdrant AND Neo4j (if enabled).
 	 */
 	public async clearIndexData(): Promise<void> {
-		if (!this.isFeatureEnabled) {
+		// Allow clearing even when feature is disabled - users should be able to clean up old data
+		// But we need the orchestrator to be initialized
+		if (!this._orchestrator) {
+			// If orchestrator doesn't exist, we can't clear Qdrant/Neo4j, but we can clear cache
+			if (this._cacheManager) {
+				await this._cacheManager.clearCacheFile()
+			}
 			return
 		}
-		this.assertInitialized()
-		await this._orchestrator!.clearIndexData()
-		await this._cacheManager!.clearCacheFile()
+
+		await this._orchestrator.clearIndexData()
+		// Note: orchestrator.clearIndexData() already clears cache, but call it again to be safe
+		if (this._cacheManager) {
+			await this._cacheManager.clearCacheFile()
+		}
 	}
 
 	// --- Private Helpers ---

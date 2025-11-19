@@ -2238,9 +2238,12 @@ export const webviewMessageHandler = async (
 
 			const settings = message.codeIndexSettings
 
+			console.log("[WebviewMessageHandler] Received saveCodeIndexSettingsAtomic:", settings)
+
 			try {
 				// Check if embedder provider has changed
 				const currentConfig = getGlobalState("codebaseIndexConfig") || {}
+
 				const embedderProviderChanged =
 					currentConfig.codebaseIndexEmbedderProvider !== settings.codebaseIndexEmbedderProvider
 
@@ -2257,10 +2260,15 @@ export const webviewMessageHandler = async (
 					codebaseIndexSearchMaxResults: settings.codebaseIndexSearchMaxResults,
 					codebaseIndexSearchMinScore: settings.codebaseIndexSearchMinScore,
 					// Neo4j settings (non-sensitive)
-					neo4jEnabled: settings.neo4jEnabled ?? false,
+					neo4jEnabled:
+						settings.neo4jEnabled !== undefined
+							? settings.neo4jEnabled
+							: (currentConfig.neo4jEnabled ?? false),
 					neo4jUri: settings.neo4jUri,
 					neo4jUsername: settings.neo4jUsername,
 				}
+
+				console.log("[WebviewMessageHandler] Saving globalStateConfig:", globalStateConfig)
 
 				// Save global state first
 				await updateGlobalState("codebaseIndexConfig", globalStateConfig)
@@ -2307,6 +2315,7 @@ export const webviewMessageHandler = async (
 				}
 
 				// Send success response first - settings are saved regardless of validation
+				console.log("[WebviewMessageHandler] Sending codeIndexSettingsSaved with:", globalStateConfig)
 				await provider.postMessageToWebview({
 					type: "codeIndexSettingsSaved",
 					success: true,

@@ -344,33 +344,75 @@ export class CodeIndexOrchestrator {
 
 	/**
 	 * Clears all index data by stopping the watcher, clearing the vector store,
-	 * and resetting the cache file.
+	 * clearing the Neo4j graph (if enabled), and resetting the cache file.
+	 *
+	 * IMPORTANT: This clears BOTH Qdrant AND Neo4j (if enabled).
+	 * Neo4j depends on Qdrant data, so they must be cleared together.
 	 */
 	public async clearIndexData(): Promise<void> {
 		this._isProcessing = true
 
+		const errors: string[] = []
+
 		try {
 			await this.stopWatcher()
 
+			// Clear Qdrant vector store
 			try {
 				if (this.configManager.isFeatureConfigured) {
 					await this.vectorStore.deleteCollection()
+					console.log("[CodeIndexOrchestrator] Qdrant collection deleted successfully")
 				} else {
 					console.warn("[CodeIndexOrchestrator] Service not configured, skipping vector collection clear.")
 				}
 			} catch (error: any) {
-				console.error("[CodeIndexOrchestrator] Failed to clear vector collection:", error)
+				const errorMsg = `Failed to clear Qdrant collection: ${error.message}`
+				errors.push(errorMsg)
+				console.error("[CodeIndexOrchestrator]", errorMsg, error)
 				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 					error: error instanceof Error ? error.message : String(error),
 					stack: error instanceof Error ? error.stack : undefined,
-					location: "clearIndexData",
+					location: "clearIndexData:qdrant",
 				})
-				this.stateManager.setSystemState("Error", `Failed to clear vector collection: ${error.message}`)
 			}
 
+			// Clear Neo4j graph if enabled
+			// CRITICAL: Neo4j depends on Qdrant data, so we MUST clear it when clearing Qdrant
+			if (this.configManager.isNeo4jEnabled && this.graphIndexer) {
+				try {
+					await this.graphIndexer.clearAll()
+					console.log("[CodeIndexOrchestrator] Neo4j graph cleared successfully")
+				} catch (error: any) {
+					const errorMsg = `Failed to clear Neo4j graph: ${error.message}`
+					errors.push(errorMsg)
+					console.error("[CodeIndexOrchestrator]", errorMsg, error)
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: error instanceof Error ? error.message : String(error),
+						stack: error instanceof Error ? error.stack : undefined,
+						location: "clearIndexData:neo4j",
+					})
+				}
+			}
+
+			// Clear BM25 index if available
+			if (this.bm25Index) {
+				try {
+					this.bm25Index.clear()
+					console.log("[CodeIndexOrchestrator] BM25 index cleared successfully")
+				} catch (error: any) {
+					const errorMsg = `Failed to clear BM25 index: ${error.message}`
+					errors.push(errorMsg)
+					console.error("[CodeIndexOrchestrator]", errorMsg, error)
+				}
+			}
+
+			// Clear cache file
 			await this.cacheManager.clearCacheFile()
 
-			if (this.stateManager.state !== "Error") {
+			// Set final state based on whether errors occurred
+			if (errors.length > 0) {
+				this.stateManager.setSystemState("Error", `Index data partially cleared. Errors: ${errors.join("; ")}`)
+			} else {
 				this.stateManager.setSystemState("Standby", "Index data cleared successfully.")
 			}
 		} finally {

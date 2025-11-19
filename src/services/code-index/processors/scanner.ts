@@ -43,6 +43,9 @@ import { Package } from "../../../shared/package"
 
 export class DirectoryScanner implements IDirectoryScanner {
 	private readonly batchSegmentThreshold: number
+	// Track cumulative Neo4j progress across all batches
+	private neo4jCumulativeFilesProcessed: number = 0
+	private neo4jTotalFilesToProcess: number = 0
 
 	constructor(
 		private readonly embedder: IEmbedder,
@@ -120,6 +123,10 @@ export class DirectoryScanner implements IDirectoryScanner {
 		const processedFiles = new Set<string>()
 		let processedCount = 0
 		let skippedCount = 0
+
+		// Reset Neo4j cumulative counters at the start of each scan
+		this.neo4jCumulativeFilesProcessed = 0
+		this.neo4jTotalFilesToProcess = 0
 
 		// Initialize parallel processing tools
 		const parseLimiter = pLimit(PARSING_CONCURRENCY) // Concurrency for file parsing
@@ -303,6 +310,16 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Wait for all batch processing to complete
 		await Promise.all(activeBatchPromises)
+
+		// Report final Neo4j status after all batches complete
+		if (this.graphIndexer && this.stateManager && this.neo4jTotalFilesToProcess > 0) {
+			this.stateManager.reportNeo4jIndexingProgress(
+				this.neo4jCumulativeFilesProcessed,
+				this.neo4jTotalFilesToProcess,
+				"indexed",
+				`Graph index complete: ${this.neo4jCumulativeFilesProcessed} files indexed`,
+			)
+		}
 
 		// Handle deleted files
 		const oldHashes = this.cacheManager.getAllHashes()
@@ -550,40 +567,24 @@ export class DirectoryScanner implements IDirectoryScanner {
 							blocksByFile.get(block.file_path)!.push(block)
 						}
 
-						// Report Neo4j indexing start
-						const totalFiles = blocksByFile.size
-						if (this.stateManager) {
-							this.stateManager.reportNeo4jIndexingProgress(
-								0,
-								totalFiles,
-								"indexing",
-								"Indexing to graph database...",
-							)
-						}
+						// Update total files count (cumulative across all batches)
+						const batchFileCount = blocksByFile.size
+						this.neo4jTotalFilesToProcess += batchFileCount
 
 						// Index each file's blocks to Neo4j
-						let processedFiles = 0
 						for (const [filePath, fileBlocks] of blocksByFile) {
 							await this.graphIndexer.indexFile(filePath, fileBlocks)
-							processedFiles++
+							this.neo4jCumulativeFilesProcessed++
+
+							// Report cumulative progress
 							if (this.stateManager) {
 								this.stateManager.reportNeo4jIndexingProgress(
-									processedFiles,
-									totalFiles,
+									this.neo4jCumulativeFilesProcessed,
+									this.neo4jTotalFilesToProcess,
 									"indexing",
-									`Indexed ${processedFiles}/${totalFiles} files to graph`,
+									`Indexed ${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess} files to graph`,
 								)
 							}
-						}
-
-						// Report Neo4j indexing complete
-						if (this.stateManager) {
-							this.stateManager.reportNeo4jIndexingProgress(
-								processedFiles,
-								processedFiles,
-								"indexed",
-								"Graph index complete",
-							)
 						}
 					} catch (error) {
 						// Log error but don't fail the entire indexing process
