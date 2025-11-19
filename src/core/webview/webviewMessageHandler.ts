@@ -1482,6 +1482,9 @@ export const webviewMessageHandler = async (
 
 					const currentCline = provider.getCurrentTask()
 
+					// Get the CodeIndexManager for the current workspace
+					const codeIndexManager = provider.getCurrentWorkspaceCodeIndexManager()
+
 					const result = await MessageEnhancer.enhanceMessage({
 						text: message.text,
 						apiConfiguration,
@@ -1491,6 +1494,7 @@ export const webviewMessageHandler = async (
 						includeTaskHistoryInEnhance,
 						currentClineMessages: currentCline?.clineMessages,
 						providerSettingsManager: provider.providerSettingsManager,
+						codeIndexManager,
 					})
 
 					if (result.success && result.enhancedText) {
