@@ -1,0 +1,26 @@
+name: "CodeQL Config"
+
+# Paths to exclude from CodeQL analysis
+paths-ignore:
+  # Test fixtures are intentionally simplified code for testing purposes
+  # They may contain security anti-patterns that are acceptable in test context
+  - "**/__tests__/fixtures/**"
+  - "**/test/fixtures/**"
+  - "**/__mocks__/**"
+  
+  # Generated files
+  - "**/node_modules/**"
+  - "**/dist/**"
+  - "**/build/**"
+  - "**/.next/**"
+  - "**/out/**"
+
+# Paths to explicitly include (optional - by default all paths are included)
+# paths:
+#   - "src/**"
+#   - "packages/**"
+
+# Disable default queries and use only security queries
+# queries:
+#   - uses: security-and-quality
+
