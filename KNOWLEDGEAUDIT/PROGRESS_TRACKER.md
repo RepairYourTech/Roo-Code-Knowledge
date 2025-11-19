@@ -16,7 +16,7 @@
 | 4     | BM25 Keyword Search           | ✅ Complete    | 5/5      | 1-2 weeks | 🔥 High Impact |
 | 5     | Neo4j Integration             | ✅ Complete    | 5/5      | 2-3 weeks | 🔥 High Impact |
 | 6     | LSP Integration               | ✅ Complete    | 3/3      | 1-2 weeks | 🔥 High Impact |
-| 7     | Hybrid Search & Routing       | 🔄 In Progress | 1/3      | 2 weeks   | 🔥 Very High   |
+| 7     | Hybrid Search & Routing       | 🔄 In Progress | 2/3      | 2 weeks   | 🔥 Very High   |
 | 7     | Advanced Features             | ⬜ Not Started | 0/4      | 2-3 weeks | 🟡 Medium      |
 | 8     | Performance & Polish          | ⬜ Not Started | 0/3      | 1-2 weeks | 🟡 Medium      |
 
@@ -150,15 +150,15 @@
 ## Phase 7: Hybrid Search & Routing
 
 **Status:** 🔄 In Progress
-**Progress:** 1/3 tasks complete (33%)
+**Progress:** 2/3 tasks complete (66%)
 
 - [x] Task 7.1: Create Query Analyzer ✅ **COMPLETE**
-- [ ] Task 7.2: Create Unified Search Orchestrator
+- [x] Task 7.2: Create Unified Search Orchestrator ✅ **COMPLETE**
 - [ ] Task 7.3: Update Search Service
 
 **Blockers:** None
 **Expected Impact:** 60% better search relevance
-**Notes:** Task 7.1 complete! Created QueryAnalyzer with 11 intent types (find_implementation, find_usages, find_callers, find_callees, find_dependencies, find_dependents, find_tests, find_examples, find_by_type, find_pattern, semantic_search). Pattern matching for common queries. Symbol name extraction. Recommends optimal backends and fusion weights based on query intent.
+**Notes:** Task 7.2 complete! Created SearchOrchestrator to route queries to appropriate backends (hybrid search, Neo4j graph, LSP). Executes searches in parallel. Merges results from multiple backends with deduplication. Applies query-specific enhancements (boostExported, testFilesOnly). Routes graph queries for find_callers, find_callees, find_dependencies, find_dependents intents.
 
 ---
 
