@@ -62,6 +62,92 @@ export interface GraphQueryResult {
 }
 
 /**
+ * Represents a dependency chain in the graph
+ * Phase 11: Impact Analysis
+ */
+export interface DependencyChain {
+	path: CodeNode[]
+	relationshipTypes: string[]
+	depth: number
+}
+
+/**
+ * Result from impact analysis query
+ * Phase 11: Impact Analysis
+ */
+export interface ImpactAnalysisResult {
+	impactedNodes: CodeNode[]
+	dependencyChains: DependencyChain[]
+	blastRadius: {
+		totalNodes: number
+		totalFiles: number
+		maxDepth: number
+	}
+	testCoverage: {
+		hasTests: boolean
+		testNodes: CodeNode[]
+		coveragePercentage: number
+	}
+}
+
+/**
+ * Result from dependency analysis query
+ * Phase 11: Impact Analysis
+ */
+export interface DependencyAnalysisResult {
+	dependencies: CodeNode[]
+	dependencyChains: DependencyChain[]
+	dependencyTree: {
+		totalNodes: number
+		totalFiles: number
+		maxDepth: number
+	}
+}
+
+/**
+ * Result from blast radius calculation
+ * Phase 11: Impact Analysis
+ */
+export interface BlastRadiusResult {
+	targetNode: CodeNode | null
+	impactedNodes: CodeNode[]
+	dependencies: CodeNode[]
+	tests: CodeNode[]
+	metrics: {
+		totalImpactedNodes: number
+		totalImpactedFiles: number
+		totalDependencies: number
+		totalTests: number
+		maxImpactDepth: number
+		maxDependencyDepth: number
+		riskScore: number // 0-100, higher = riskier change
+	}
+}
+
+/**
+ * Result from change safety assessment
+ * Phase 11: Impact Analysis
+ */
+export interface ChangeSafetyResult {
+	nodeId: string
+	nodeName: string
+	safetyLevel: "safe" | "moderate" | "risky" | "dangerous"
+	riskScore: number // 0-100
+	reasons: string[]
+	recommendations: string[]
+	impactSummary: {
+		impactedNodes: number
+		impactedFiles: number
+		maxDepth: number
+	}
+	testCoverage: {
+		hasTests: boolean
+		testCount: number
+		coveragePercentage: number
+	}
+}
+
+/**
  * Interface for Neo4j graph database operations
  */
 export interface INeo4jService {
@@ -163,4 +249,28 @@ export interface INeo4jService {
 		relationshipCount: number
 		fileCount: number
 	}>
+
+	/**
+	 * Phase 11: Find all nodes impacted by changing a symbol
+	 * Traverses CALLED_BY, EXTENDED_BY, IMPLEMENTED_BY, TESTED_BY relationships
+	 */
+	findImpactedNodes(nodeId: string, maxDepth?: number): Promise<ImpactAnalysisResult>
+
+	/**
+	 * Phase 11: Find all dependencies of a symbol
+	 * Traverses CALLS, EXTENDS, IMPLEMENTS, HAS_TYPE, ACCEPTS_TYPE, RETURNS_TYPE, IMPORTS relationships
+	 */
+	findDependencyTree(nodeId: string, maxDepth?: number): Promise<DependencyAnalysisResult>
+
+	/**
+	 * Phase 11: Calculate blast radius of changing a symbol
+	 * Combines impact analysis, dependency analysis, and test coverage
+	 */
+	calculateBlastRadius(nodeId: string, maxDepth?: number): Promise<BlastRadiusResult>
+
+	/**
+	 * Phase 11: Assess whether it's safe to change a symbol
+	 * Combines blast radius with test coverage to provide safety assessment
+	 */
+	assessChangeSafety(nodeId: string): Promise<ChangeSafetyResult>
 }

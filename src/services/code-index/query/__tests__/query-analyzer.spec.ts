@@ -94,9 +94,10 @@ describe("QueryAnalyzer", () => {
 				expect(result.symbolName).toBe("UserService")
 			})
 
-			it("should detect 'dependencies of X' pattern", () => {
+			it("should detect 'dependencies of X' pattern (now handled by dependency_analysis)", () => {
 				const result = analyzer.analyze("dependencies of LoginController")
-				expect(result.intent).toBe("find_dependencies")
+				// This now matches the Phase 11 dependency_analysis intent
+				expect(result.intent).toBe("dependency_analysis")
 				expect(result.symbolName).toBe("LoginController")
 			})
 
@@ -397,6 +398,124 @@ describe("QueryAnalyzer", () => {
 		it("should handle queries with multiple spaces", () => {
 			const result = analyzer.analyze("singleton    pattern    in    codebase")
 			expect(result.intent).toBe("find_pattern")
+		})
+	})
+
+	describe("Phase 11: Impact Analysis Intents", () => {
+		describe("impact_analysis intent", () => {
+			it("should detect 'what breaks if' pattern", () => {
+				const result = analyzer.analyze("what breaks if UserService changes")
+				expect(result.intent).toBe("impact_analysis")
+				expect(result.symbolName).toBe("UserService")
+				expect(result.backends).toEqual(["graph"])
+				expect(result.weights.graph).toBe(1.0)
+			})
+
+			it("should detect 'what will break' pattern", () => {
+				const result = analyzer.analyze("what will break when LoginController changes")
+				expect(result.intent).toBe("impact_analysis")
+				expect(result.symbolName).toBe("LoginController")
+			})
+
+			it("should detect 'impact of changing' pattern", () => {
+				const result = analyzer.analyze("impact of changing LoginController")
+				expect(result.intent).toBe("impact_analysis")
+				expect(result.symbolName).toBe("LoginController")
+			})
+
+			it("should detect 'who depends on' pattern", () => {
+				const result = analyzer.analyze("who depends on UserService")
+				expect(result.intent).toBe("impact_analysis")
+				expect(result.symbolName).toBe("UserService")
+			})
+
+			it("should detect 'what uses this' pattern", () => {
+				const result = analyzer.analyze("what uses this function")
+				expect(result.intent).toBe("impact_analysis")
+			})
+		})
+
+		describe("dependency_analysis intent", () => {
+			it("should detect 'what does this depend on' pattern", () => {
+				const result = analyzer.analyze("what does this depend on")
+				expect(result.intent).toBe("dependency_analysis")
+				expect(result.backends).toEqual(["graph"])
+				expect(result.weights.graph).toBe(1.0)
+			})
+
+			it("should detect 'dependencies of' pattern", () => {
+				const result = analyzer.analyze("dependencies of UserService")
+				expect(result.intent).toBe("dependency_analysis")
+				expect(result.symbolName).toBe("UserService")
+			})
+
+			it("should detect 'dependency tree' pattern", () => {
+				const result = analyzer.analyze("show me the dependency tree for LoginController")
+				expect(result.intent).toBe("dependency_analysis")
+				expect(result.symbolName).toBe("LoginController")
+			})
+
+			it("should detect 'full dependencies' pattern", () => {
+				const result = analyzer.analyze("full dependencies of UserService")
+				expect(result.intent).toBe("dependency_analysis")
+				expect(result.symbolName).toBe("UserService")
+			})
+		})
+
+		describe("blast_radius intent", () => {
+			it("should detect 'blast radius' pattern", () => {
+				const result = analyzer.analyze("blast radius of changing UserService")
+				expect(result.intent).toBe("blast_radius")
+				expect(result.symbolName).toBe("UserService")
+				expect(result.backends).toEqual(["graph"])
+				expect(result.weights.graph).toBe(1.0)
+			})
+
+			it("should detect 'impact radius' pattern", () => {
+				const result = analyzer.analyze("impact radius of UserService")
+				expect(result.intent).toBe("blast_radius")
+				expect(result.symbolName).toBe("UserService")
+			})
+
+			it("should detect 'scope of change' pattern", () => {
+				const result = analyzer.analyze("scope of change for LoginController")
+				expect(result.intent).toBe("blast_radius")
+				expect(result.symbolName).toBe("LoginController")
+			})
+
+			it("should detect 'how big is the change' pattern", () => {
+				const result = analyzer.analyze("how big is the change to UserService")
+				expect(result.intent).toBe("blast_radius")
+				expect(result.symbolName).toBe("UserService")
+			})
+
+			it("should detect 'change impact' pattern", () => {
+				const result = analyzer.analyze("change impact for AuthService")
+				expect(result.intent).toBe("blast_radius")
+				expect(result.symbolName).toBe("AuthService")
+			})
+		})
+
+		describe("change_safety intent", () => {
+			it("should detect 'risk of changing' pattern", () => {
+				const result = analyzer.analyze("risk of changing UserService")
+				expect(result.intent).toBe("change_safety")
+				expect(result.symbolName).toBe("UserService")
+				expect(result.backends).toEqual(["graph"])
+				expect(result.weights.graph).toBe(1.0)
+			})
+
+			it("should detect 'safe to modify' pattern", () => {
+				const result = analyzer.analyze("safe to modify LoginController")
+				expect(result.intent).toBe("change_safety")
+				expect(result.symbolName).toBe("LoginController")
+			})
+
+			it("should detect 'safety assessment' pattern", () => {
+				const result = analyzer.analyze("safety assessment for AuthService")
+				expect(result.intent).toBe("change_safety")
+				expect(result.symbolName).toBe("AuthService")
+			})
 		})
 	})
 })
