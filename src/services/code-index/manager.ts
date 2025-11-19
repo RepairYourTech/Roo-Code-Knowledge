@@ -33,6 +33,7 @@ export class CodeIndexManager {
 	private _searchOrchestrator: SearchOrchestrator | undefined // Phase 7: Intelligent search routing
 	private _bm25Index: BM25IndexService | undefined
 	private _cacheManager: CacheManager | undefined
+	private _neo4jService: any | undefined // INeo4jService - track for cleanup
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -133,6 +134,16 @@ export class CodeIndexManager {
 		if (!this.isFeatureEnabled) {
 			if (this._orchestrator) {
 				this._orchestrator.stopWatcher()
+			}
+			// Close Neo4j connection when indexing is disabled
+			if (this._neo4jService) {
+				try {
+					await this._neo4jService.close()
+					console.log("[CodeIndexManager] Neo4j connection closed (indexing disabled)")
+					this._neo4jService = undefined
+				} catch (error) {
+					console.error("[CodeIndexManager] Error closing Neo4j connection:", error)
+				}
 			}
 			return { requiresRestart }
 		}
@@ -263,6 +274,18 @@ export class CodeIndexManager {
 		if (this._orchestrator) {
 			this.stopWatcher()
 		}
+		// Close Neo4j connection on dispose
+		if (this._neo4jService) {
+			this._neo4jService
+				.close()
+				.then(() => {
+					console.log("[CodeIndexManager] Neo4j connection closed (dispose)")
+					this._neo4jService = undefined
+				})
+				.catch((error: any) => {
+					console.error("[CodeIndexManager] Error closing Neo4j connection on dispose:", error)
+				})
+		}
 		this._stateManager.dispose()
 	}
 
@@ -391,6 +414,8 @@ export class CodeIndexManager {
 			try {
 				await neo4jService.initialize()
 				console.log("[CodeIndexManager] Neo4j service initialized successfully")
+				// Track neo4jService for cleanup
+				this._neo4jService = neo4jService
 			} catch (error) {
 				console.error("[CodeIndexManager] Failed to initialize Neo4j:", error)
 				// Don't fail initialization if Neo4j connection fails
@@ -414,6 +439,8 @@ export class CodeIndexManager {
 			vectorStore,
 			scanner,
 			fileWatcher,
+			graphIndexer,
+			neo4jService,
 		)
 
 		// (Re)Initialize search service (keep for backward compatibility)
@@ -462,6 +489,16 @@ export class CodeIndexManager {
 				// Stop the orchestrator if it exists
 				if (this._orchestrator) {
 					this._orchestrator.stopWatcher()
+				}
+				// Close Neo4j connection when indexing is disabled
+				if (this._neo4jService) {
+					try {
+						await this._neo4jService.close()
+						console.log("[CodeIndexManager] Neo4j connection closed (indexing disabled via settings)")
+						this._neo4jService = undefined
+					} catch (error) {
+						console.error("[CodeIndexManager] Error closing Neo4j connection:", error)
+					}
 				}
 				// Set state to indicate service is disabled
 				this._stateManager.setSystemState("Standby", "Code indexing is disabled")

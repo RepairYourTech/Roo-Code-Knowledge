@@ -1,6 +1,7 @@
 import { CodeBlock, CallInfo, TestMetadata, TestTarget } from "../interfaces/file-processor"
 import { CodeNode, CodeRelationship, INeo4jService } from "../interfaces/neo4j-service"
 import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
+import { GraphIndexErrorLogger } from "./error-logger"
 import * as path from "path"
 
 /**
@@ -8,7 +9,10 @@ import * as path from "path"
  * Extracts code relationships from parsed code blocks and indexes them into Neo4j
  */
 export class GraphIndexer implements IGraphIndexer {
-	constructor(private neo4jService: INeo4jService) {}
+	constructor(
+		private neo4jService: INeo4jService,
+		private errorLogger?: GraphIndexErrorLogger,
+	) {}
 
 	/**
 	 * Index a single code block into the graph database
@@ -70,7 +74,26 @@ export class GraphIndexer implements IGraphIndexer {
 			// })
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
+			const errorStack = error instanceof Error ? error.stack : undefined
 			errors.push(errorMessage)
+
+			// Log to persistent error logger
+			if (this.errorLogger) {
+				await this.errorLogger.logError({
+					filePath,
+					operation: "indexBlocks",
+					error: errorMessage,
+					stack: errorStack,
+					additionalContext: {
+						blockCount: blocks.length,
+						nodesCreated,
+						relationshipsCreated,
+					},
+				})
+			}
+
+			// Also log to console for immediate visibility
+			console.error(`[GraphIndexer] Error indexing blocks for ${filePath}:`, error)
 
 			// TODO: Add telemetry events when they are defined in @roo-code/types
 			// TelemetryService.instance?.captureEvent(TelemetryEventName.CodeIndexGraphIndexError, {
