@@ -1,0 +1,73 @@
+# Neo4j Graph Database Setup
+# 
+# Usage:
+# Start: docker compose up -d
+# Stop: docker compose down
+# View logs: docker compose logs -f neo4j
+# 
+# Access:
+# Web Interface: http://localhost:7474
+# Bolt Protocol: bolt://localhost:7687
+# Credentials: neo4j / password
+
+services:
+  neo4j:
+    container_name: neo4j-container
+    image: neo4j:5.15-community
+    ports:
+      - "7474:7474"  # HTTP interface
+      - "7687:7687"  # Bolt protocol
+    volumes:
+      - neo4j_data:/data
+      - neo4j_logs:/logs
+      - neo4j_plugins:/plugins
+      - neo4j_import:/var/lib/neo4j/import
+      - neo4j_metrics:/var/lib/neo4j/metrics
+    environment:
+      # Database configuration
+      - NEO4J_AUTH=neo4j/password
+      - NEO4J_server_config_strict__validation_enabled=false
+      - NEO4J_dbms_security_procedures_unrestricted=apoc.*
+      - NEO4J_dbms_security_procedures_allowlist=apoc.*
+      
+      # Memory configuration
+      - NEO4J_server_memory_pagecache_size=2G
+      - NEO4J_server_memory_heap_initial__size=512m
+      - NEO4J_server_memory_heap_max__size=2G
+      
+      # Performance tuning
+      - NEO4J_dbms_memory_transaction_global_size__limit=1G
+      - NEO4J_dbms_memory_transaction_max__size=256m
+      
+      # Network and security
+      - NEO4J_server_default__listen__address=0.0.0.0
+      - NEO4J_server_default__advertised__address=localhost
+      
+      # Query settings
+      - NEO4J_dbms_query_cache_size=512m
+      - NEO4J_dbms_checkpoint_interval_immediate=enabled
+      
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "cypher-shell", "-u", "neo4j", "-p", "password", "-d", "neo4j", "RETURN 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  neo4j_data:
+    driver: local
+  neo4j_logs:
+    driver: local
+  neo4j_plugins:
+    driver: local
+  neo4j_import:
+    driver: local
+  neo4j_metrics:
+    driver: local
+
+networks:
+  default:
+    name: neo4j_network
+    driver: bridge

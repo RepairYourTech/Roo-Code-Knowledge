@@ -68,6 +68,36 @@ export class QueryAnalyzer {
 			}
 		}
 
+		// Find dependents intent (check before "what does" to avoid conflict)
+		if (
+			this.matchesPattern(lowerQuery, [
+				"what depends on",
+				"what imports",
+				"what requires",
+				"imported by",
+				"dependents",
+			])
+		) {
+			return {
+				intent: "find_dependents",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph", "bm25"],
+				weights: { vector: 0, bm25: 0.3, graph: 0.7, lsp: 0 },
+			}
+		}
+
+		// Find dependencies intent (check before "what does" to avoid conflict)
+		if (
+			this.matchesPattern(lowerQuery, ["depend on", "dependencies", "imports", "requires", "what does it import"])
+		) {
+			return {
+				intent: "find_dependencies",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph", "bm25"],
+				weights: { vector: 0, bm25: 0.3, graph: 0.7, lsp: 0 },
+			}
+		}
+
 		// Find callees intent
 		if (this.matchesPattern(lowerQuery, ["what does", "calls what", "find callees", "invokes"])) {
 			return {
@@ -88,38 +118,13 @@ export class QueryAnalyzer {
 			}
 		}
 
-		// Find dependencies intent
-		if (
-			this.matchesPattern(lowerQuery, [
-				"depends on",
-				"dependencies",
-				"imports",
-				"requires",
-				"what does it import",
-			])
-		) {
-			return {
-				intent: "find_dependencies",
-				backends: ["graph", "bm25"],
-				weights: { vector: 0, bm25: 0.3, graph: 0.7, lsp: 0 },
-			}
-		}
-
-		// Find dependents intent
-		if (this.matchesPattern(lowerQuery, ["dependents", "what imports", "what requires", "imported by"])) {
-			return {
-				intent: "find_dependents",
-				backends: ["graph", "bm25"],
-				weights: { vector: 0, bm25: 0.3, graph: 0.7, lsp: 0 },
-			}
-		}
-
 		// Find tests intent
 		if (
 			this.matchesPattern(lowerQuery, ["test", "tests for", "test cases", "test file", "spec file", "unit test"])
 		) {
 			return {
 				intent: "find_tests",
+				symbolName: this.extractSymbolName(query),
 				backends: ["vector", "bm25"],
 				weights: { vector: 0.6, bm25: 0.4, graph: 0, lsp: 0 },
 				testFilesOnly: true,
@@ -161,6 +166,7 @@ export class QueryAnalyzer {
 		if (this.matchesPattern(lowerQuery, ["example", "examples of", "usage example", "how to use"])) {
 			return {
 				intent: "find_examples",
+				symbolName: this.extractSymbolName(query),
 				backends: ["vector", "bm25"],
 				weights: { vector: 0.7, bm25: 0.3, graph: 0, lsp: 0 },
 			}
@@ -201,13 +207,32 @@ export class QueryAnalyzer {
 
 	/**
 	 * Extracts symbol name from query
-	 * Simple heuristic: looks for quoted strings or capitalized words
+	 * Improved heuristic: looks for quoted strings, symbols after keywords, or capitalized/camelCase words
 	 */
 	private extractSymbolName(query: string): string | undefined {
-		// Try to find quoted strings first
+		// Try to find quoted strings first (highest priority)
 		const quotedMatch = query.match(/["'`]([^"'`]+)["'`]/)
 		if (quotedMatch) {
 			return quotedMatch[1]
+		}
+
+		// Try to extract symbol after common keywords
+		// Patterns: "for X", "of X", "to X", "calls X", "uses X", "on X", "use X"
+		const keywordPatterns = [
+			/\b(?:for|of|on)\s+([A-Z][a-zA-Z0-9_]*)\b/, // "for UserService", "of UserService"
+			/\b(?:for|of|on)\s+([a-z][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*)\b/, // "for authenticateUser"
+			/\b(?:use|uses)\s+([A-Z][a-zA-Z0-9_]*)\b/, // "use AuthService", "to use AuthService"
+			/\b(?:use|uses)\s+([a-z][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*)\b/, // "use authenticateUser"
+			/\b(?:calls|imports|requires)\s+([A-Z][a-zA-Z0-9_]*)\b/, // "calls UserService"
+			/\b(?:calls|imports|requires)\s+([a-z][a-zA-Z0-9_]*[A-Z][a-zA-Z0-9_]*)\b/, // "calls authenticateUser"
+			/\b(?:calls|imports|requires)\s+(?:the\s+)?([a-z_]+)\b/, // "calls the login" or "calls authenticate"
+		]
+
+		for (const pattern of keywordPatterns) {
+			const match = query.match(pattern)
+			if (match) {
+				return match[1]
+			}
 		}
 
 		// Try to find capitalized words (likely class/function names)
