@@ -7,7 +7,15 @@ import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../sha
 import { getWorkspacePathForContext } from "../../../utils/path"
 import { scannerExtensions } from "../shared/supported-extensions"
 import * as vscode from "vscode"
-import { CodeBlock, ICodeParser, IEmbedder, IVectorStore, IDirectoryScanner } from "../interfaces"
+import {
+	CodeBlock,
+	ICodeParser,
+	IEmbedder,
+	IVectorStore,
+	IDirectoryScanner,
+	IBM25Index,
+	BM25Document,
+} from "../interfaces"
 import { createHash } from "crypto"
 import { v5 as uuidv5 } from "uuid"
 import pLimit from "p-limit"
@@ -41,6 +49,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly codeParser: ICodeParser,
 		private readonly cacheManager: CacheManager,
 		private readonly ignoreInstance: Ignore,
+		private readonly bm25Index?: IBM25Index,
 		batchSegmentThreshold?: number,
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
@@ -483,6 +492,23 @@ export class DirectoryScanner implements IDirectoryScanner {
 				// Upsert points to Qdrant
 				await this.qdrantClient.upsertPoints(points)
 				onBlocksIndexed?.(batchBlocks.length)
+
+				// Also add to BM25 index if available
+				if (this.bm25Index) {
+					const bm25Documents: BM25Document[] = batchBlocks.map((block) => ({
+						id: block.id,
+						text: block.codeChunk,
+						filePath: block.filePath,
+						startLine: block.start_line,
+						endLine: block.end_line,
+						metadata: {
+							identifier: block.identifier,
+							type: block.type,
+							language: block.language,
+						},
+					}))
+					this.bm25Index.addDocuments(bm25Documents)
+				}
 
 				// Update hashes for successfully processed files in this batch
 				for (const fileInfo of batchFileInfos) {

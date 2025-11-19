@@ -9,7 +9,7 @@ import { OpenRouterEmbedder } from "./embedders/openrouter"
 import { EmbedderProvider, getDefaultModelId, getModelDimension } from "../../shared/embeddingModels"
 import { QdrantVectorStore } from "./vector-store/qdrant-client"
 import { codeParser, DirectoryScanner, FileWatcher } from "./processors"
-import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
+import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore, IBM25Index } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
@@ -163,6 +163,7 @@ export class CodeIndexServiceFactory {
 		vectorStore: IVectorStore,
 		parser: ICodeParser,
 		ignoreInstance: Ignore,
+		bm25Index?: IBM25Index,
 	): DirectoryScanner {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -174,7 +175,15 @@ export class CodeIndexServiceFactory {
 			// In test environment, vscode.workspace might not be available
 			batchSize = BATCH_SEGMENT_THRESHOLD
 		}
-		return new DirectoryScanner(embedder, vectorStore, parser, this.cacheManager, ignoreInstance, batchSize)
+		return new DirectoryScanner(
+			embedder,
+			vectorStore,
+			parser,
+			this.cacheManager,
+			ignoreInstance,
+			bm25Index,
+			batchSize,
+		)
 	}
 
 	/**
@@ -187,6 +196,7 @@ export class CodeIndexServiceFactory {
 		cacheManager: CacheManager,
 		ignoreInstance: Ignore,
 		rooIgnoreController?: RooIgnoreController,
+		bm25Index?: IBM25Index,
 	): IFileWatcher {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -204,6 +214,7 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			embedder,
 			vectorStore,
+			bm25Index,
 			ignoreInstance,
 			rooIgnoreController,
 			batchSize,
@@ -219,6 +230,7 @@ export class CodeIndexServiceFactory {
 		cacheManager: CacheManager,
 		ignoreInstance: Ignore,
 		rooIgnoreController?: RooIgnoreController,
+		bm25Index?: IBM25Index,
 	): {
 		embedder: IEmbedder
 		vectorStore: IVectorStore
@@ -233,7 +245,7 @@ export class CodeIndexServiceFactory {
 		const embedder = this.createEmbedder()
 		const vectorStore = this.createVectorStore()
 		const parser = codeParser
-		const scanner = this.createDirectoryScanner(embedder, vectorStore, parser, ignoreInstance)
+		const scanner = this.createDirectoryScanner(embedder, vectorStore, parser, ignoreInstance, bm25Index)
 		const fileWatcher = this.createFileWatcher(
 			context,
 			embedder,
@@ -241,6 +253,7 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
+			bm25Index,
 		)
 
 		return {
