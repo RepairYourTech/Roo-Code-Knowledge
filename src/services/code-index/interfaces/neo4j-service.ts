@@ -44,7 +44,9 @@ export interface CodeRelationship {
 		| "RETURNS_TYPE" // Phase 10, Task 3: Function -> Return Type relationship
 		| "IMPORTS"
 		| "EXTENDS"
+		| "EXTENDED_BY" // Phase 10, Task 4: Parent Class -> Child Class relationship
 		| "IMPLEMENTS"
+		| "IMPLEMENTED_BY" // Phase 10, Task 4: Interface -> Implementation relationship
 		| "CONTAINS"
 		| "DEFINES"
 		| "USES"
