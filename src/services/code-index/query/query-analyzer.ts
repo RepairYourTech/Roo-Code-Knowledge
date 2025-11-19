@@ -12,6 +12,10 @@ export type QueryIntent =
 	| "find_examples" // Find usage examples
 	| "find_by_type" // Find by LSP type information
 	| "find_pattern" // Find design patterns or code patterns
+	| "impact_analysis" // Phase 11: Find what breaks if changed
+	| "dependency_analysis" // Phase 11: Find comprehensive dependency tree
+	| "blast_radius" // Phase 11: Calculate change impact radius
+	| "change_safety" // Phase 11: Assess change safety
 	| "semantic_search" // General semantic search (default)
 
 /**
@@ -57,6 +61,79 @@ export class QueryAnalyzer {
 	 */
 	public analyze(query: string): QueryAnalysis {
 		const lowerQuery = query.toLowerCase()
+
+		// Phase 11: Impact analysis intent
+		if (
+			this.matchesPattern(lowerQuery, [
+				"what breaks if",
+				"what will break",
+				"impact of changing",
+				"affected by changing",
+				"who depends on",
+				"what uses this",
+			])
+		) {
+			return {
+				intent: "impact_analysis",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph"],
+				weights: { vector: 0, bm25: 0, graph: 1.0, lsp: 0 },
+			}
+		}
+
+		// Phase 11: Dependency analysis intent
+		if (
+			this.matchesPattern(lowerQuery, [
+				"what does this depend on",
+				"dependencies of",
+				"what does this use",
+				"dependency tree",
+				"full dependencies",
+			])
+		) {
+			return {
+				intent: "dependency_analysis",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph"],
+				weights: { vector: 0, bm25: 0, graph: 1.0, lsp: 0 },
+			}
+		}
+
+		// Phase 11: Blast radius intent
+		if (
+			this.matchesPattern(lowerQuery, [
+				"blast radius",
+				"impact radius",
+				"scope of change",
+				"how big is the change",
+				"change impact",
+			])
+		) {
+			return {
+				intent: "blast_radius",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph"],
+				weights: { vector: 0, bm25: 0, graph: 1.0, lsp: 0 },
+			}
+		}
+
+		// Phase 11: Change safety intent
+		if (
+			this.matchesPattern(lowerQuery, [
+				"can i safely change",
+				"is it safe to change",
+				"safe to modify",
+				"risk of changing",
+				"safety assessment",
+			])
+		) {
+			return {
+				intent: "change_safety",
+				symbolName: this.extractSymbolName(query),
+				backends: ["graph"],
+				weights: { vector: 0, bm25: 0, graph: 1.0, lsp: 0 },
+			}
+		}
 
 		// Find callers intent
 		if (this.matchesPattern(lowerQuery, ["all callers", "who calls", "what calls", "find callers"])) {

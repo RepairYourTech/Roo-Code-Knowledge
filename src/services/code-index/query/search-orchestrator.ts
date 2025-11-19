@@ -5,7 +5,14 @@
 
 import { QueryAnalyzer, QueryAnalysis, SearchBackend } from "./query-analyzer"
 import { HybridSearchService, HybridSearchResult, HybridSearchConfig } from "../hybrid-search-service"
-import { INeo4jService, CodeNode } from "../interfaces/neo4j-service"
+import {
+	INeo4jService,
+	CodeNode,
+	ImpactAnalysisResult,
+	DependencyAnalysisResult,
+	BlastRadiusResult,
+	ChangeSafetyResult,
+} from "../interfaces/neo4j-service"
 import { ILSPService } from "../interfaces/lsp-service"
 import { VectorStoreSearchResult } from "../interfaces/vector-store"
 
@@ -204,6 +211,38 @@ export class SearchOrchestrator {
 				}
 				break
 
+			case "impact_analysis":
+				// Phase 11: Find all code impacted by changing this symbol
+				if (analysis.symbolName) {
+					const result = await this.neo4jService.findImpactedNodes(analysis.symbolName, 3)
+					return this.convertImpactAnalysisToResults(result)
+				}
+				break
+
+			case "dependency_analysis":
+				// Phase 11: Find comprehensive dependency tree
+				if (analysis.symbolName) {
+					const result = await this.neo4jService.findDependencyTree(analysis.symbolName, 3)
+					return this.convertDependencyAnalysisToResults(result)
+				}
+				break
+
+			case "blast_radius":
+				// Phase 11: Calculate blast radius of change
+				if (analysis.symbolName) {
+					const result = await this.neo4jService.calculateBlastRadius(analysis.symbolName, 3)
+					return this.convertBlastRadiusToResults(result)
+				}
+				break
+
+			case "change_safety":
+				// Phase 11: Assess change safety
+				if (analysis.symbolName) {
+					const result = await this.neo4jService.assessChangeSafety(analysis.symbolName)
+					return this.convertChangeSafetyToResults(result)
+				}
+				break
+
 			default:
 				// For other intents, graph search is not applicable
 				return []
@@ -316,5 +355,198 @@ export class SearchOrchestrator {
 			vectorScore: 0,
 			bm25Score: 0,
 		}))
+	}
+
+	/**
+	 * Phase 11: Converts impact analysis result to search results
+	 */
+	private convertImpactAnalysisToResults(result: ImpactAnalysisResult): HybridSearchResult[] {
+		const results: HybridSearchResult[] = []
+
+		// Add impacted nodes as results
+		result.impactedNodes.forEach((node, index) => {
+			const chain = result.dependencyChains.find((c) => c.path[0]?.id === node.id)
+			const explanation = chain
+				? `Impacted via: ${chain.relationshipTypes.join(" → ")} (depth: ${chain.depth})`
+				: "Impacted by this change"
+
+			results.push({
+				id: node.id,
+				score: 1.0 - index * 0.02, // Higher scores for more directly impacted nodes
+				payload: {
+					filePath: node.filePath,
+					codeChunk: explanation,
+					startLine: node.startLine,
+					endLine: node.endLine,
+					identifier: node.name,
+					type: node.type,
+					language: node.language,
+				},
+				hybridScore: 1.0 - index * 0.02,
+				vectorScore: 0,
+				bm25Score: 0,
+			})
+		})
+
+		// Add test nodes with special marker
+		result.testCoverage.testNodes.forEach((node, index) => {
+			results.push({
+				id: node.id,
+				score: 0.9 - index * 0.02,
+				payload: {
+					filePath: node.filePath,
+					codeChunk: "🧪 Test coverage for this code",
+					startLine: node.startLine,
+					endLine: node.endLine,
+					identifier: node.name,
+					type: node.type,
+					language: node.language,
+				},
+				hybridScore: 0.9 - index * 0.02,
+				vectorScore: 0,
+				bm25Score: 0,
+			})
+		})
+
+		return results
+	}
+
+	/**
+	 * Phase 11: Converts dependency analysis result to search results
+	 */
+	private convertDependencyAnalysisToResults(result: DependencyAnalysisResult): HybridSearchResult[] {
+		return result.dependencies.map((node, index) => {
+			const chain = result.dependencyChains.find((c) => c.path[c.path.length - 1]?.id === node.id)
+			const explanation = chain
+				? `Dependency via: ${chain.relationshipTypes.join(" → ")} (depth: ${chain.depth})`
+				: "Direct dependency"
+
+			return {
+				id: node.id,
+				score: 1.0 - index * 0.02,
+				payload: {
+					filePath: node.filePath,
+					codeChunk: explanation,
+					startLine: node.startLine,
+					endLine: node.endLine,
+					identifier: node.name,
+					type: node.type,
+					language: node.language,
+				},
+				hybridScore: 1.0 - index * 0.02,
+				vectorScore: 0,
+				bm25Score: 0,
+			}
+		})
+	}
+
+	/**
+	 * Phase 11: Converts blast radius result to search results
+	 */
+	private convertBlastRadiusToResults(result: BlastRadiusResult): HybridSearchResult[] {
+		const results: HybridSearchResult[] = []
+
+		// Add summary as first result
+		if (result.targetNode) {
+			const summary = `
+📊 Blast Radius Analysis for ${result.targetNode.name}:
+- Risk Score: ${result.metrics.riskScore}/100
+- Impacted Nodes: ${result.metrics.totalImpactedNodes}
+- Impacted Files: ${result.metrics.totalImpactedFiles}
+- Dependencies: ${result.metrics.totalDependencies}
+- Tests: ${result.metrics.totalTests}
+- Max Impact Depth: ${result.metrics.maxImpactDepth}
+			`.trim()
+
+			results.push({
+				id: result.targetNode.id,
+				score: 1.0,
+				payload: {
+					filePath: result.targetNode.filePath,
+					codeChunk: summary,
+					startLine: result.targetNode.startLine,
+					endLine: result.targetNode.endLine,
+					identifier: result.targetNode.name,
+					type: result.targetNode.type,
+					language: result.targetNode.language,
+				},
+				hybridScore: 1.0,
+				vectorScore: 0,
+				bm25Score: 0,
+			})
+		}
+
+		// Add impacted nodes
+		result.impactedNodes.forEach((node, index) => {
+			results.push({
+				id: node.id,
+				score: 0.9 - index * 0.02,
+				payload: {
+					filePath: node.filePath,
+					codeChunk: "⚠️ Impacted by change",
+					startLine: node.startLine,
+					endLine: node.endLine,
+					identifier: node.name,
+					type: node.type,
+					language: node.language,
+				},
+				hybridScore: 0.9 - index * 0.02,
+				vectorScore: 0,
+				bm25Score: 0,
+			})
+		})
+
+		return results
+	}
+
+	/**
+	 * Phase 11: Converts change safety result to search results
+	 */
+	private convertChangeSafetyToResults(result: ChangeSafetyResult): HybridSearchResult[] {
+		const safetyEmoji = {
+			safe: "✅",
+			moderate: "⚠️",
+			risky: "🔶",
+			dangerous: "🚨",
+		}
+
+		const summary = `
+${safetyEmoji[result.safetyLevel]} Change Safety Assessment: ${result.safetyLevel.toUpperCase()}
+Risk Score: ${result.riskScore}/100
+
+Reasons:
+${result.reasons.map((r) => `- ${r}`).join("\n")}
+
+Recommendations:
+${result.recommendations.map((r) => `- ${r}`).join("\n")}
+
+Impact Summary:
+- Impacted Nodes: ${result.impactSummary.impactedNodes}
+- Impacted Files: ${result.impactSummary.impactedFiles}
+- Max Depth: ${result.impactSummary.maxDepth}
+
+Test Coverage:
+- Has Tests: ${result.testCoverage.hasTests ? "Yes" : "No"}
+- Test Count: ${result.testCoverage.testCount}
+		`.trim()
+
+		return [
+			{
+				id: result.nodeId,
+				score: 1.0,
+				payload: {
+					filePath: "",
+					codeChunk: summary,
+					startLine: 0,
+					endLine: 0,
+					identifier: result.nodeName,
+					type: "safety_assessment",
+					language: undefined,
+				},
+				hybridScore: 1.0,
+				vectorScore: 0,
+				bm25Score: 0,
+			},
+		]
 	}
 }
