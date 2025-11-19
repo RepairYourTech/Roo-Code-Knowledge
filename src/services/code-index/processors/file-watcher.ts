@@ -21,6 +21,7 @@ import {
 	BatchProcessingSummary,
 	IBM25Index,
 	BM25Document,
+	IGraphIndexer,
 } from "../interfaces"
 import { codeParser } from "./parser"
 import { CacheManager } from "../cache-manager"
@@ -45,6 +46,7 @@ export class FileWatcher implements IFileWatcher {
 	private readonly FILE_PROCESSING_CONCURRENCY_LIMIT = 10
 	private readonly batchSegmentThreshold: number
 	private bm25Index?: IBM25Index
+	private graphIndexer?: IGraphIndexer
 
 	private readonly _onDidStartBatchProcessing = new vscode.EventEmitter<string[]>()
 	private readonly _onBatchProgressUpdate = new vscode.EventEmitter<{
@@ -87,8 +89,10 @@ export class FileWatcher implements IFileWatcher {
 		ignoreInstance?: Ignore,
 		ignoreController?: RooIgnoreController,
 		batchSegmentThreshold?: number,
+		graphIndexer?: IGraphIndexer,
 	) {
 		this.bm25Index = bm25Index
+		this.graphIndexer = graphIndexer
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
 			this.ignoreInstance = ignoreInstance
@@ -222,6 +226,18 @@ export class FileWatcher implements IFileWatcher {
 				if (this.bm25Index) {
 					for (const path of allPathsToClearFromDB) {
 						this.bm25Index.removeDocumentsByFilePath(path)
+					}
+				}
+
+				// Also remove from Neo4j graph if available
+				if (this.graphIndexer) {
+					try {
+						for (const path of allPathsToClearFromDB) {
+							await this.graphIndexer.removeFile(path)
+						}
+					} catch (error) {
+						// Log error but don't fail the entire deletion process
+						console.error(`[FileWatcher] Error removing files from Neo4j`, error)
 					}
 				}
 
@@ -590,6 +606,16 @@ export class FileWatcher implements IFileWatcher {
 
 			// Parse file
 			const blocks = await codeParser.parseFile(filePath, { content, fileHash: newHash })
+
+			// Index to Neo4j graph if available
+			if (this.graphIndexer && blocks.length > 0) {
+				try {
+					await this.graphIndexer.indexFile(filePath, blocks)
+				} catch (error) {
+					// Log error but don't fail the entire file processing
+					console.error(`[FileWatcher] Error indexing file to Neo4j: ${filePath}`, error)
+				}
+			}
 
 			// Prepare points for batch processing
 			let pointsToUpsert: PointStruct[] = []
