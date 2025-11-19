@@ -166,10 +166,16 @@ export class HybridSearchService {
 			const bm25Score = bm25Entry?.normalizedScore ?? 0
 
 			// Calculate weighted hybrid score
-			const hybridScore = config.vectorWeight * vectorScore + config.bm25Weight * bm25Score
+			let hybridScore = config.vectorWeight * vectorScore + config.bm25Weight * bm25Score
 
 			// Use vector result as base (it has all the metadata)
 			const baseResult = vectorEntry?.result ?? this.createResultFromBM25(bm25Entry!.result)
+
+			// Phase 6: Boost score if LSP type information is available
+			// This prioritizes results with accurate type information
+			if (baseResult.payload?.lspTypeInfo?.lspAvailable) {
+				hybridScore = hybridScore * 1.1 // 10% boost for LSP-enriched results
+			}
 
 			hybridResults.push({
 				...baseResult,
@@ -210,13 +216,19 @@ export class HybridSearchService {
 			const bm25Rank = bm25Ranks.get(id) ?? Infinity
 
 			// RRF formula: sum of 1/(k + rank) for each ranking
-			const rrfScore = 1 / (k + vectorRank) + 1 / (k + bm25Rank)
+			let rrfScore = 1 / (k + vectorRank) + 1 / (k + bm25Rank)
 
 			// Get original results
 			const vectorResult = vectorResults.find((r) => String(r.id) === id)
 			const bm25Result = bm25Results.find((r) => String(r.id) === id)
 
 			const baseResult = vectorResult ?? this.createResultFromBM25(bm25Result!)
+
+			// Phase 6: Boost score if LSP type information is available
+			// This prioritizes results with accurate type information
+			if (baseResult.payload?.lspTypeInfo?.lspAvailable) {
+				rrfScore = rrfScore * 1.1 // 10% boost for LSP-enriched results
+			}
 
 			hybridResults.push({
 				...baseResult,
