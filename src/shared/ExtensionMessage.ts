@@ -45,6 +45,11 @@ export interface IndexingStatus {
 	totalItems: number
 	currentItemUnit?: string
 	workspacePath?: string
+	// Neo4j graph indexing progress (optional - only present when Neo4j is enabled)
+	neo4jProcessedItems?: number
+	neo4jTotalItems?: number
+	neo4jStatus?: "idle" | "indexing" | "indexed" | "error" | "disabled"
+	neo4jMessage?: string
 }
 
 export interface IndexingStatusUpdateMessage {

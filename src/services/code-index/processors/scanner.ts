@@ -53,6 +53,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly bm25Index?: IBM25Index,
 		batchSegmentThreshold?: number,
 		private readonly graphIndexer?: IGraphIndexer,
+		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 	) {
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -549,13 +550,53 @@ export class DirectoryScanner implements IDirectoryScanner {
 							blocksByFile.get(block.file_path)!.push(block)
 						}
 
+						// Report Neo4j indexing start
+						const totalFiles = blocksByFile.size
+						if (this.stateManager) {
+							this.stateManager.reportNeo4jIndexingProgress(
+								0,
+								totalFiles,
+								"indexing",
+								"Indexing to graph database...",
+							)
+						}
+
 						// Index each file's blocks to Neo4j
+						let processedFiles = 0
 						for (const [filePath, fileBlocks] of blocksByFile) {
 							await this.graphIndexer.indexFile(filePath, fileBlocks)
+							processedFiles++
+							if (this.stateManager) {
+								this.stateManager.reportNeo4jIndexingProgress(
+									processedFiles,
+									totalFiles,
+									"indexing",
+									`Indexed ${processedFiles}/${totalFiles} files to graph`,
+								)
+							}
+						}
+
+						// Report Neo4j indexing complete
+						if (this.stateManager) {
+							this.stateManager.reportNeo4jIndexingProgress(
+								processedFiles,
+								processedFiles,
+								"indexed",
+								"Graph index complete",
+							)
 						}
 					} catch (error) {
 						// Log error but don't fail the entire indexing process
+						const errorMessage = error instanceof Error ? error.message : String(error)
 						console.error(`[DirectoryScanner] Error indexing to Neo4j:`, error)
+						if (this.stateManager) {
+							this.stateManager.reportNeo4jIndexingProgress(
+								0,
+								0,
+								"error",
+								`Graph indexing failed: ${errorMessage}`,
+							)
+						}
 					}
 				}
 

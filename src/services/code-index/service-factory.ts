@@ -231,6 +231,7 @@ export class CodeIndexServiceFactory {
 		ignoreInstance: Ignore,
 		bm25Index?: IBM25Index,
 		graphIndexer?: IGraphIndexer,
+		stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 	): DirectoryScanner {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -251,6 +252,7 @@ export class CodeIndexServiceFactory {
 			bm25Index,
 			batchSize,
 			graphIndexer,
+			stateManager,
 		)
 	}
 
@@ -266,6 +268,7 @@ export class CodeIndexServiceFactory {
 		rooIgnoreController?: RooIgnoreController,
 		bm25Index?: IBM25Index,
 		graphIndexer?: IGraphIndexer,
+		stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 	): IFileWatcher {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -288,6 +291,7 @@ export class CodeIndexServiceFactory {
 			rooIgnoreController,
 			batchSize,
 			graphIndexer,
+			stateManager,
 		)
 	}
 
@@ -313,6 +317,7 @@ export class CodeIndexServiceFactory {
 		ignoreInstance: Ignore,
 		rooIgnoreController?: RooIgnoreController,
 		bm25Index?: IBM25Index,
+		stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 	): {
 		embedder: IEmbedder
 		vectorStore: IVectorStore
@@ -345,6 +350,7 @@ export class CodeIndexServiceFactory {
 			ignoreInstance,
 			bm25Index,
 			graphIndexer,
+			stateManager,
 		)
 		const fileWatcher = this.createFileWatcher(
 			context,
@@ -355,6 +361,7 @@ export class CodeIndexServiceFactory {
 			rooIgnoreController,
 			bm25Index,
 			graphIndexer,
+			stateManager,
 		)
 
 		return {
