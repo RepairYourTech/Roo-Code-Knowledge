@@ -495,18 +495,40 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 				// Also add to BM25 index if available
 				if (this.bm25Index) {
-					const bm25Documents: BM25Document[] = batchBlocks.map((block) => ({
-						id: block.id,
-						text: block.codeChunk,
-						filePath: block.filePath,
-						startLine: block.start_line,
-						endLine: block.end_line,
-						metadata: {
-							identifier: block.identifier,
-							type: block.type,
-							language: block.language,
-						},
-					}))
+					const languageMap: Record<string, string> = {
+						ts: "TypeScript",
+						tsx: "TypeScript",
+						js: "JavaScript",
+						jsx: "JavaScript",
+						py: "Python",
+						java: "Java",
+						cpp: "C++",
+						c: "C",
+						cs: "C#",
+						go: "Go",
+						rs: "Rust",
+						rb: "Ruby",
+						php: "PHP",
+						swift: "Swift",
+						kt: "Kotlin",
+						scala: "Scala",
+					}
+					const bm25Documents: BM25Document[] = batchBlocks.map((block) => {
+						const ext = path.extname(block.file_path).slice(1).toLowerCase()
+						const language = languageMap[ext] || ext
+						return {
+							id: block.segmentHash,
+							text: block.content,
+							filePath: block.file_path,
+							startLine: block.start_line,
+							endLine: block.end_line,
+							metadata: {
+								identifier: block.identifier,
+								type: block.type,
+								language,
+							},
+						}
+					})
 					this.bm25Index.addDocuments(bm25Documents)
 				}
 
