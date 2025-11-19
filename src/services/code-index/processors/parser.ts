@@ -296,7 +296,11 @@ export class CodeParser implements ICodeParser {
 						let documentation = undefined
 						if (ext === "ts" || ext === "tsx" || ext === "js" || ext === "jsx") {
 							try {
-								symbolMetadata = extractSymbolMetadata(currentNode, currentNode.text) || undefined
+								// CRITICAL FIX: Pass full file content, not just currentNode.text
+								// extractDocumentation() uses node.startPosition.row to index into fileContent.split("\n")
+								// If we pass currentNode.text, line indexing is incorrect (e.g., node at line 50
+								// would try to access lines[50] in an array that only has as many lines as the node)
+								symbolMetadata = extractSymbolMetadata(currentNode, content) || undefined
 								documentation = symbolMetadata?.documentation
 							} catch (error) {
 								// Silently fail metadata extraction - don't break indexing
