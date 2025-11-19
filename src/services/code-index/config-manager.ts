@@ -25,6 +25,12 @@ export class CodeIndexConfigManager {
 	private qdrantApiKey?: string
 	private searchMinScore?: number
 	private searchMaxResults?: number
+	// Neo4j graph database configuration (optional, disabled by default)
+	private neo4jEnabled: boolean = false
+	private neo4jUrl?: string = "bolt://localhost:7687"
+	private neo4jUsername?: string = "neo4j"
+	private neo4jPassword?: string
+	private neo4jDatabase?: string = "neo4j"
 
 	constructor(private readonly contextProxy: ContextProxy) {
 		// Initialize with current configuration to avoid false restart triggers
@@ -52,6 +58,11 @@ export class CodeIndexConfigManager {
 			codebaseIndexEmbedderModelId: "",
 			codebaseIndexSearchMinScore: undefined,
 			codebaseIndexSearchMaxResults: undefined,
+			// Neo4j defaults (disabled by default)
+			codebaseIndexNeo4jEnabled: false,
+			codebaseIndexNeo4jUrl: "bolt://localhost:7687",
+			codebaseIndexNeo4jUsername: "neo4j",
+			codebaseIndexNeo4jDatabase: "neo4j",
 		}
 
 		const {
@@ -62,6 +73,10 @@ export class CodeIndexConfigManager {
 			codebaseIndexEmbedderModelId,
 			codebaseIndexSearchMinScore,
 			codebaseIndexSearchMaxResults,
+			codebaseIndexNeo4jEnabled,
+			codebaseIndexNeo4jUrl,
+			codebaseIndexNeo4jUsername,
+			codebaseIndexNeo4jDatabase,
 		} = codebaseIndexConfig
 
 		const openAiKey = this.contextProxy?.getSecret("codeIndexOpenAiKey") ?? ""
@@ -73,6 +88,7 @@ export class CodeIndexConfigManager {
 		const mistralApiKey = this.contextProxy?.getSecret("codebaseIndexMistralApiKey") ?? ""
 		const vercelAiGatewayApiKey = this.contextProxy?.getSecret("codebaseIndexVercelAiGatewayApiKey") ?? ""
 		const openRouterApiKey = this.contextProxy?.getSecret("codebaseIndexOpenRouterApiKey") ?? ""
+		const neo4jPassword = this.contextProxy?.getSecret("codebaseIndexNeo4jPassword") ?? ""
 
 		// Update instance variables with configuration
 		this.codebaseIndexEnabled = codebaseIndexEnabled ?? true
@@ -80,6 +96,13 @@ export class CodeIndexConfigManager {
 		this.qdrantApiKey = qdrantApiKey ?? ""
 		this.searchMinScore = codebaseIndexSearchMinScore
 		this.searchMaxResults = codebaseIndexSearchMaxResults
+
+		// Update Neo4j configuration (disabled by default)
+		this.neo4jEnabled = codebaseIndexNeo4jEnabled ?? false
+		this.neo4jUrl = codebaseIndexNeo4jUrl ?? "bolt://localhost:7687"
+		this.neo4jUsername = codebaseIndexNeo4jUsername ?? "neo4j"
+		this.neo4jPassword = neo4jPassword ?? ""
+		this.neo4jDatabase = codebaseIndexNeo4jDatabase ?? "neo4j"
 
 		// Validate and set model dimension
 		const rawDimension = codebaseIndexConfig.codebaseIndexEmbedderModelDimension
@@ -176,6 +199,12 @@ export class CodeIndexConfigManager {
 			openRouterApiKey: this.openRouterOptions?.apiKey ?? "",
 			qdrantUrl: this.qdrantUrl ?? "",
 			qdrantApiKey: this.qdrantApiKey ?? "",
+			// Neo4j configuration snapshot
+			neo4jEnabled: this.neo4jEnabled,
+			neo4jUrl: this.neo4jUrl ?? "",
+			neo4jUsername: this.neo4jUsername ?? "",
+			neo4jPassword: this.neo4jPassword ?? "",
+			neo4jDatabase: this.neo4jDatabase ?? "",
 		}
 
 		// Refresh secrets from VSCode storage to ensure we have the latest values
@@ -285,6 +314,11 @@ export class CodeIndexConfigManager {
 		const prevOpenRouterApiKey = prev?.openRouterApiKey ?? ""
 		const prevQdrantUrl = prev?.qdrantUrl ?? ""
 		const prevQdrantApiKey = prev?.qdrantApiKey ?? ""
+		const prevNeo4jEnabled = prev?.neo4jEnabled ?? false
+		const prevNeo4jUrl = prev?.neo4jUrl ?? ""
+		const prevNeo4jUsername = prev?.neo4jUsername ?? ""
+		const prevNeo4jPassword = prev?.neo4jPassword ?? ""
+		const prevNeo4jDatabase = prev?.neo4jDatabase ?? ""
 
 		// 1. Transition from disabled/unconfigured to enabled/configured
 		if ((!prevEnabled || !prevConfigured) && this.codebaseIndexEnabled && nowConfigured) {
@@ -365,6 +399,29 @@ export class CodeIndexConfigManager {
 			return true
 		}
 
+		// Neo4j configuration changes (requires restart if enabled/disabled or connection details change)
+		const currentNeo4jEnabled = this.neo4jEnabled
+		const currentNeo4jUrl = this.neo4jUrl ?? ""
+		const currentNeo4jUsername = this.neo4jUsername ?? ""
+		const currentNeo4jPassword = this.neo4jPassword ?? ""
+		const currentNeo4jDatabase = this.neo4jDatabase ?? ""
+
+		if (prevNeo4jEnabled !== currentNeo4jEnabled) {
+			return true // Enabling/disabling Neo4j requires restart
+		}
+
+		// Only check Neo4j connection details if Neo4j is enabled
+		if (currentNeo4jEnabled) {
+			if (
+				prevNeo4jUrl !== currentNeo4jUrl ||
+				prevNeo4jUsername !== currentNeo4jUsername ||
+				prevNeo4jPassword !== currentNeo4jPassword ||
+				prevNeo4jDatabase !== currentNeo4jDatabase
+			) {
+				return true
+			}
+		}
+
 		// Vector dimension changes (still important for compatibility)
 		if (this._hasVectorDimensionChanged(prevProvider, prev?.modelId)) {
 			return true
@@ -419,6 +476,12 @@ export class CodeIndexConfigManager {
 			qdrantApiKey: this.qdrantApiKey,
 			searchMinScore: this.currentSearchMinScore,
 			searchMaxResults: this.currentSearchMaxResults,
+			// Neo4j configuration
+			neo4jEnabled: this.neo4jEnabled,
+			neo4jUrl: this.neo4jUrl,
+			neo4jUsername: this.neo4jUsername,
+			neo4jPassword: this.neo4jPassword,
+			neo4jDatabase: this.neo4jDatabase,
 		}
 	}
 
@@ -450,6 +513,32 @@ export class CodeIndexConfigManager {
 		return {
 			url: this.qdrantUrl,
 			apiKey: this.qdrantApiKey,
+		}
+	}
+
+	/**
+	 * Gets whether Neo4j graph database integration is enabled
+	 */
+	public get isNeo4jEnabled(): boolean {
+		return this.neo4jEnabled
+	}
+
+	/**
+	 * Gets the current Neo4j configuration
+	 */
+	public get neo4jConfig(): {
+		enabled: boolean
+		url?: string
+		username?: string
+		password?: string
+		database?: string
+	} {
+		return {
+			enabled: this.neo4jEnabled,
+			url: this.neo4jUrl,
+			username: this.neo4jUsername,
+			password: this.neo4jPassword,
+			database: this.neo4jDatabase,
 		}
 	}
 

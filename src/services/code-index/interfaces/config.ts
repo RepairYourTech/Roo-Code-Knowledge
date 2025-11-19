@@ -20,6 +20,12 @@ export interface CodeIndexConfig {
 	qdrantApiKey?: string
 	searchMinScore?: number
 	searchMaxResults?: number
+	// Neo4j graph database configuration (optional)
+	neo4jEnabled?: boolean
+	neo4jUrl?: string
+	neo4jUsername?: string
+	neo4jPassword?: string
+	neo4jDatabase?: string
 }
 
 /**
@@ -41,4 +47,10 @@ export type PreviousConfigSnapshot = {
 	openRouterApiKey?: string
 	qdrantUrl?: string
 	qdrantApiKey?: string
+	// Neo4j configuration snapshot
+	neo4jEnabled?: boolean
+	neo4jUrl?: string
+	neo4jUsername?: string
+	neo4jPassword?: string
+	neo4jDatabase?: string
 }
