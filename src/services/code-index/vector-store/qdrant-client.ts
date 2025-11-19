@@ -452,9 +452,7 @@ export class QdrantVectorStore implements IVectorStore {
 					hnsw_ef: 128,
 					exact: false,
 				},
-				with_payload: {
-					include: ["filePath", "codeChunk", "startLine", "endLine", "pathSegments"],
-				},
+				with_payload: true, // Phase 6: Return all payload fields including LSP type info
 			}
 
 			const operationResult = await this.client.query(this.collectionName, searchRequest)
