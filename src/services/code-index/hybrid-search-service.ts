@@ -144,12 +144,12 @@ export class HybridSearchService {
 		const bm25Scores = bm25Results.map((r) => r.score)
 		const normalizedBM25Scores = this.normalizeScores(bm25Scores)
 
-		// Create lookup maps
+		// Create lookup maps (convert IDs to strings for consistency)
 		const vectorMap = new Map(
-			vectorResults.map((r, i) => [r.id, { result: r, normalizedScore: normalizedVectorScores[i] }]),
+			vectorResults.map((r, i) => [String(r.id), { result: r, normalizedScore: normalizedVectorScores[i] }]),
 		)
 		const bm25Map = new Map(
-			bm25Results.map((r, i) => [r.id, { result: r, normalizedScore: normalizedBM25Scores[i] }]),
+			bm25Results.map((r, i) => [String(r.id), { result: r, normalizedScore: normalizedBM25Scores[i] }]),
 		)
 
 		// Get all unique document IDs
@@ -195,9 +195,9 @@ export class HybridSearchService {
 	): HybridSearchResult[] {
 		const k = 60 // RRF constant (typical value)
 
-		// Create rank maps
-		const vectorRanks = new Map(vectorResults.map((r, i) => [r.id, i + 1]))
-		const bm25Ranks = new Map(bm25Results.map((r, i) => [r.id, i + 1]))
+		// Create rank maps (convert IDs to strings for consistency)
+		const vectorRanks = new Map(vectorResults.map((r, i) => [String(r.id), i + 1]))
+		const bm25Ranks = new Map(bm25Results.map((r, i) => [String(r.id), i + 1]))
 
 		// Get all unique document IDs
 		const allIds = new Set([...vectorRanks.keys(), ...bm25Ranks.keys()])
@@ -213,8 +213,8 @@ export class HybridSearchService {
 			const rrfScore = 1 / (k + vectorRank) + 1 / (k + bm25Rank)
 
 			// Get original results
-			const vectorResult = vectorResults.find((r) => r.id === id)
-			const bm25Result = bm25Results.find((r) => r.id === id)
+			const vectorResult = vectorResults.find((r) => String(r.id) === id)
+			const bm25Result = bm25Results.find((r) => String(r.id) === id)
 
 			const baseResult = vectorResult ?? this.createResultFromBM25(bm25Result!)
 
@@ -254,7 +254,7 @@ export class HybridSearchService {
 	 */
 	private createResultFromBM25(bm25Result: BM25SearchResult): VectorStoreSearchResult {
 		return {
-			id: bm25Result.id,
+			id: String(bm25Result.id),
 			score: 0, // Will be overwritten with hybrid score
 			payload: {
 				filePath: "",
