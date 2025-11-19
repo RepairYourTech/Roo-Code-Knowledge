@@ -22,6 +22,8 @@ This audit evaluates how well Roo-Code's system prompts and mode-specific prompt
 
 **Overall Assessment**: **MODERATE GAPS** - The foundation is good, but significant enhancements are needed to fully leverage the world-class index.
 
+**🔥 CRITICAL DISCOVERY**: Roo has a **Prompt Enhancement Feature** (✨ icon in chat) that could leverage the codebase index to provide context-aware prompt improvements, but currently doesn't use it at all!
+
 ---
 
 ## 1. Files Audited
@@ -326,6 +328,28 @@ codebases. Use natural language queries to find implementations, patterns, and c
     - **Impact**: Roo may not use graph-based or impact analysis queries
     - **Affected**: Tool Use Guidelines
     - **Fix**: Add examples of graph queries, impact analysis queries
+
+### 4.4 Critical Missing Feature (NEWLY DISCOVERED) 🔥🔥🔥
+
+9. **Prompt Enhancement Feature Doesn't Use Codebase Index** 🔥🔥🔥
+    - **Impact**: HUGE missed opportunity - users enhance prompts but get no codebase context
+    - **Current State**:
+        - Roo has a "✨ Enhance Prompt" feature (WandSparkles icon in chat)
+        - Located in `src/core/webview/messageEnhancer.ts`
+        - Current prompt: "Generate an enhanced version of this prompt (reply with only the enhanced prompt...)"
+        - **Does NOT search codebase or add any project context**
+    - **Opportunity**:
+        - When user types vague prompt like "add authentication", enhancement could:
+            1. Search codebase for existing auth patterns
+            2. Find related files, frameworks, libraries in use
+            3. Identify project conventions (e.g., "uses JWT with Passport.js")
+            4. Enhance prompt to: "Add JWT-based authentication using Passport.js (like in src/auth/), integrate with existing User model, follow the middleware pattern in src/middleware/"
+        - This would make prompt enhancement **10x more valuable**
+    - **Fix**:
+        - Update ENHANCE support prompt to search codebase first
+        - Add codebase context to enhancement process
+        - Make enhancements project-aware and convention-aware
+    - **Priority**: 🔥🔥🔥 **CRITICAL** - This is the missing 30% to reach 100% utilization!
 
 ---
 
@@ -728,6 +752,81 @@ Example delegation patterns:
 
 ---
 
+### Recommendation 7: Make Prompt Enhancement Codebase-Aware 🔥🔥🔥 CRITICAL
+
+**File**: `src/shared/support-prompt.ts` (ENHANCE template, lines 49-52)
+
+**Current**:
+
+```typescript
+ENHANCE: {
+  template: `Generate an enhanced version of this prompt (reply with only the enhanced prompt - no conversation, explanations, lead-in, bullet points, placeholders, or surrounding quotes):
+
+\${userInput}`,
+},
+```
+
+**Recommended**:
+
+```typescript
+ENHANCE: {
+  template: `You are enhancing a user's prompt to make it more specific, actionable, and aligned with their codebase.
+
+**Your Task:**
+1. Analyze the user's prompt to understand their intent
+2. Search the codebase to find relevant context:
+   - Existing implementations of similar features
+   - Frameworks, libraries, and patterns already in use
+   - Project conventions and coding styles
+   - Related files and code structures
+3. Enhance the prompt by:
+   - Adding specific file paths and examples from the codebase
+   - Mentioning frameworks/libraries already in use
+   - Referencing existing patterns to follow
+   - Making vague requests concrete and actionable
+
+**Examples:**
+
+User prompt: "add authentication"
+Enhanced: "Add JWT-based authentication using Passport.js (like in src/auth/passport-config.ts), integrate with the existing User model in src/models/User.ts, and follow the middleware pattern used in src/middleware/auth.ts"
+
+User prompt: "improve error handling"
+Enhanced: "Improve error handling in src/api/routes/ by implementing the centralized error handling pattern from src/middleware/errorHandler.ts, ensuring all async routes use the asyncHandler wrapper, and adding proper error logging using the Winston logger configured in src/utils/logger.ts"
+
+User prompt: "refactor this code"
+Enhanced: "Refactor the UserService class in src/services/UserService.ts to reduce cyclomatic complexity (currently 15), extract the validation logic into separate validator functions following the pattern in src/validators/, and improve test coverage (currently 45%) by adding tests for edge cases"
+
+**Guidelines:**
+- Use codebase_search to find relevant files, patterns, and conventions
+- Be specific: mention actual file paths, class names, function names
+- Reference existing code to maintain consistency
+- If the prompt is already specific, enhance it with additional context
+- Reply with ONLY the enhanced prompt - no explanations or meta-commentary
+
+**User's Prompt:**
+\${userInput}`,
+},
+```
+
+**Implementation Notes**:
+
+- The MessageEnhancer class (`src/core/webview/messageEnhancer.ts`) will need access to CodeIndexManager
+- Add codebase_search capability to the enhancement process
+- May need to increase token budget for enhancement to accommodate search results
+- Consider caching common patterns to reduce latency
+
+**Rationale**: This is the **missing 30%** to reach 100% utilization. Prompt enhancement is a high-leverage feature that users actively use (✨ icon in chat), but it currently provides zero codebase context. Making it codebase-aware would:
+
+- Make vague prompts actionable
+- Ensure consistency with existing code
+- Reduce back-and-forth clarification
+- Teach users about their codebase structure
+- Dramatically improve first-attempt success rate
+
+**Expected Impact**: +30% improvement in index utilization (the missing piece!)
+
+---
+
 ## 6. Implementation Priority
 
 ### Phase 1: Critical Updates (Implement First) 🔥🔥🔥
@@ -748,12 +847,19 @@ Example delegation patterns:
     - Effort: 1 hour
 
 3. **Recommendation 3**: Add Mode-Specific Instructions
+
     - File: `packages/types/src/mode.ts`
     - Modes: Architect (line 146), Code (line 157), Debug (line 180), Ask (line 168)
     - Effort: 2 hours
 
-**Total Effort**: ~3.5 hours
-**Expected Impact**: +40% improvement in index utilization
+4. **Recommendation 7**: Make Prompt Enhancement Codebase-Aware 🔥🔥🔥 **NEW!**
+    - File: `src/shared/support-prompt.ts` (ENHANCE template)
+    - File: `src/core/webview/messageEnhancer.ts` (add CodeIndexManager integration)
+    - Effort: 3-4 hours (requires code changes, not just prompts)
+    - **This is the missing 30% to reach 100% utilization!**
+
+**Total Effort**: ~6.5-7.5 hours
+**Expected Impact**: +70% improvement in index utilization (+40% from prompts, +30% from codebase-aware enhancement)
 
 ### Phase 2: High Priority Updates (Implement Second) 🔥🔥
 
@@ -785,7 +891,7 @@ Example delegation patterns:
     - Effort: 30 minutes
 
 **Total Effort**: ~30 minutes
-**Expected Impact**: +10% improvement in index utilization
+**Expected Impact**: Minimal (examples are nice-to-have)
 
 ---
 
@@ -840,27 +946,51 @@ After implementing prompt updates, test that Roo actually uses the index as inte
 
 **Gaps Identified**:
 
-- 6 critical gaps preventing full utilization
+- 7 critical gaps preventing full utilization (including prompt enhancement!)
 - 3 high priority gaps limiting advanced features
 - 2 medium priority gaps reducing discoverability
 
+**🔥 CRITICAL DISCOVERY**: Prompt Enhancement Feature (✨ icon) doesn't use codebase index - this is the missing 30%!
+
 **Recommended Actions**:
 
-1. **Phase 1** (3.5 hours): Update capabilities section, tool description, and mode-specific instructions
+1. **Phase 1** (6.5-7.5 hours):
+    - Update capabilities section, tool description, and mode-specific instructions
+    - **Make prompt enhancement codebase-aware** (NEW - highest impact!)
 2. **Phase 2** (1.5 hours): Add search strategy guidance and orchestrator delegation guidance
 3. **Phase 3** (30 minutes): Add advanced query examples
 4. **Testing** (2 hours): Verify Roo uses index as intended
 
-**Total Effort**: ~7.5 hours of prompt engineering work
+**Total Effort**: ~10.5-11.5 hours (prompt engineering + code changes)
 
-**Expected Outcome**: +70% improvement in codebase index utilization, unlocking the full value of Phases 10-13 enhancements.
+**Expected Outcome**:
+
+- +40% from prompt improvements
+- +30% from codebase-aware prompt enhancement
+- **= 70% total improvement → 100% utilization achieved!**
+
+**Path to 100% Utilization**:
+
+The missing piece was **Prompt Enhancement**! Users actively use the ✨ icon to enhance their prompts, but it currently provides zero codebase context. By making it codebase-aware:
+
+- Vague prompts become specific and actionable
+- Users learn about their codebase structure
+- Consistency with existing patterns is automatic
+- First-attempt success rate dramatically improves
+
+This is the **highest-leverage change** because:
+
+1. Users already use this feature (no adoption needed)
+2. It's the first interaction point (shapes the entire task)
+3. It teaches users about the codebase (multiplier effect)
+4. It prevents wasted iterations (saves time)
 
 **Next Steps**:
 
-1. Review audit findings with user
-2. Prioritize recommendations
-3. Implement Phase 1 updates first
-4. Test and iterate based on real usage
+1. Review audit findings with user ✅
+2. Implement Phase 1 (critical updates + codebase-aware enhancement)
+3. Test with real scenarios
+4. Measure improvement in index utilization
 5. Implement Phase 2 and 3 as time permits
 
 ---
