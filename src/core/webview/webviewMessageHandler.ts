@@ -2252,6 +2252,10 @@ export const webviewMessageHandler = async (
 					codebaseIndexOpenAiCompatibleBaseUrl: settings.codebaseIndexOpenAiCompatibleBaseUrl,
 					codebaseIndexSearchMaxResults: settings.codebaseIndexSearchMaxResults,
 					codebaseIndexSearchMinScore: settings.codebaseIndexSearchMinScore,
+					// Neo4j settings (non-sensitive)
+					neo4jEnabled: settings.neo4jEnabled ?? false,
+					neo4jUri: settings.neo4jUri,
+					neo4jUsername: settings.neo4jUsername,
 				}
 
 				// Save global state first
@@ -2293,6 +2297,9 @@ export const webviewMessageHandler = async (
 						"codebaseIndexOpenRouterApiKey",
 						settings.codebaseIndexOpenRouterApiKey,
 					)
+				}
+				if (settings.neo4jPassword !== undefined) {
+					await provider.contextProxy.storeSecret("neo4jPassword", settings.neo4jPassword)
 				}
 
 				// Send success response first - settings are saved regardless of validation
@@ -2432,6 +2439,7 @@ export const webviewMessageHandler = async (
 				"codebaseIndexVercelAiGatewayApiKey",
 			))
 			const hasOpenRouterApiKey = !!(await provider.context.secrets.get("codebaseIndexOpenRouterApiKey"))
+			const hasNeo4jPassword = !!(await provider.context.secrets.get("neo4jPassword"))
 
 			provider.postMessageToWebview({
 				type: "codeIndexSecretStatus",
@@ -2443,6 +2451,7 @@ export const webviewMessageHandler = async (
 					hasMistralApiKey,
 					hasVercelAiGatewayApiKey,
 					hasOpenRouterApiKey,
+					hasNeo4jPassword,
 				},
 			})
 			break

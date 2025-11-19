@@ -232,6 +232,12 @@ export interface WebviewMessage {
 		codebaseIndexSearchMaxResults?: number
 		codebaseIndexSearchMinScore?: number
 
+		// Neo4j settings
+		neo4jEnabled?: boolean
+		neo4jUri?: string
+		neo4jUsername?: string
+		neo4jPassword?: string
+
 		// Secret settings
 		codeIndexOpenAiKey?: string
 		codeIndexQdrantApiKey?: string
