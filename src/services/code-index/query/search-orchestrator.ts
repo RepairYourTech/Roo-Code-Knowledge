@@ -63,18 +63,31 @@ export class SearchOrchestrator {
 
 		// 2. Override backends/weights if specified in options
 		const backends = options?.forceBackends ?? analysis.backends
-		const weights = options?.forceWeights ?? analysis.weights
+		const weights = options?.forceWeights
+			? {
+					vector: options.forceWeights.vector ?? analysis.weights.vector,
+					bm25: options.forceWeights.bm25 ?? analysis.weights.bm25,
+					graph: options.forceWeights.graph ?? analysis.weights.graph,
+					lsp: options.forceWeights.lsp ?? analysis.weights.lsp,
+				}
+			: analysis.weights
+
+		// Create modified analysis with overridden weights
+		const effectiveAnalysis: QueryAnalysis = {
+			...analysis,
+			weights,
+		}
 
 		// 3. Route to appropriate backends
-		const results = await this.routeQuery(query, analysis, backends, options)
+		const results = await this.routeQuery(query, effectiveAnalysis, backends, options)
 
 		// 4. Apply query-specific enhancements
-		const enhancedResults = this.applyQueryEnhancements(results, analysis)
+		const enhancedResults = this.applyQueryEnhancements(results, effectiveAnalysis)
 
 		// 5. Add orchestration metadata
 		return enhancedResults.map((result) => ({
 			...result,
-			queryAnalysis: analysis,
+			queryAnalysis: effectiveAnalysis,
 			usedBackends: backends,
 		}))
 	}
