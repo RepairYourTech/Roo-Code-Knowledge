@@ -124,8 +124,21 @@ export class CodeIndexConfigManager {
 		this.openAiOptions = { openAiNativeApiKey: openAiKey }
 
 		// Set embedder provider with support for openai-compatible
-		// Use the provider from config, or default to "openai" if not set
-		this.embedderProvider = codebaseIndexEmbedderProvider || "openai"
+		if (codebaseIndexEmbedderProvider === "ollama") {
+			this.embedderProvider = "ollama"
+		} else if (codebaseIndexEmbedderProvider === "openai-compatible") {
+			this.embedderProvider = "openai-compatible"
+		} else if (codebaseIndexEmbedderProvider === "gemini") {
+			this.embedderProvider = "gemini"
+		} else if (codebaseIndexEmbedderProvider === "mistral") {
+			this.embedderProvider = "mistral"
+		} else if (codebaseIndexEmbedderProvider === "vercel-ai-gateway") {
+			this.embedderProvider = "vercel-ai-gateway"
+		} else if (codebaseIndexEmbedderProvider === "openrouter") {
+			this.embedderProvider = "openrouter"
+		} else {
+			this.embedderProvider = "openai"
+		}
 
 		this.modelId = codebaseIndexEmbedderModelId || undefined
 
