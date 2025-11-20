@@ -25,26 +25,61 @@ import { CacheManager } from "../cache-manager"
 import { t } from "../../../i18n"
 import { buildEmbeddingContext, EnhancedCodeSegment } from "../types/metadata"
 
-// Global mutex for Neo4j file indexing operations to prevent race conditions
-// This ensures that when File A is being indexed (delete + create nodes + create relationships),
-// File B cannot delete its nodes in parallel, which would break relationships from A to B
-const neo4jFileMutex = new Mutex()
+// Per-file mutex map for Neo4j file indexing operations to prevent race conditions
+// This allows concurrent indexing of different files while preventing concurrent indexing of the same file
+const fileMutexMap = new Map<string, Mutex>()
+
+// Track which file is holding which mutex for deadlock detection
+const mutexHolders = new Map<string, string>()
+// Track which file is waiting for which mutex
+const mutexWaiters = new Map<string, Set<string>>()
+
+// Circuit breaker pattern for Neo4j operations - module level state shared across all scanner instances
+const circuitBreakerState = {
+	connectionErrors: {
+		consecutiveFailures: 0,
+		lastFailureTime: 0,
+		isOpen: false,
+	},
+	transactionErrors: {
+		consecutiveFailures: 0,
+		lastFailureTime: 0,
+		isOpen: false,
+	},
+	deadlockErrors: {
+		consecutiveFailures: 0,
+		lastFailureTime: 0,
+		isOpen: false,
+	},
+}
+
+// Track active Neo4j transactions across all batches
+let activeNeo4jTransactions = 0
+
 import {
-	QDRANT_CODE_BLOCK_NAMESPACE,
-	MAX_FILE_SIZE_BYTES,
-	MAX_LIST_FILES_LIMIT_CODE_INDEX,
-	BATCH_SEGMENT_THRESHOLD,
+	MAX_CONCURRENT_TRANSACTIONS,
+	MUTEX_TIMEOUT_MS,
+	DEADLOCK_DETECTION_ENABLED,
+	DEADLOCK_RETRY_DELAY_MS,
+	MAX_DEADLOCK_RETRIES,
+	TRANSACTION_TIMEOUT_MS,
 	MAX_BATCH_RETRIES,
 	INITIAL_RETRY_DELAY_MS,
-	PARSING_CONCURRENCY,
-	BATCH_PROCESSING_CONCURRENCY,
-	MAX_PENDING_BATCHES,
 } from "../constants"
 import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
+
+// Additional constants needed for scanner functionality
+const QDRANT_CODE_BLOCK_NAMESPACE = "code-blocks"
+const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 10 // 10MB
+const MAX_LIST_FILES_LIMIT_CODE_INDEX = 10000
+const BATCH_SEGMENT_THRESHOLD = 100
+const PARSING_CONCURRENCY = 4
+const BATCH_PROCESSING_CONCURRENCY = 2
+const MAX_PENDING_BATCHES = 5
 
 export class DirectoryScanner implements IDirectoryScanner {
 	private readonly batchSegmentThreshold: number
@@ -53,6 +88,294 @@ export class DirectoryScanner implements IDirectoryScanner {
 	private neo4jTotalFilesToProcess: number = 0
 	// Cancellation support
 	private _cancelled: boolean = false
+
+	/**
+	 * Get or create a mutex for a specific file
+	 * @param filePath The file path to get a mutex for
+	 * @returns The mutex for the file
+	 */
+	private getFileMutex(filePath: string): Mutex {
+		if (!fileMutexMap.has(filePath)) {
+			fileMutexMap.set(filePath, new Mutex())
+		}
+		return fileMutexMap.get(filePath)!
+	}
+
+	/**
+	 * Clean up a mutex for a file after processing is complete
+	 * @param filePath The file path to clean up the mutex for
+	 */
+	private cleanupFileMutex(filePath: string): void {
+		fileMutexMap.delete(filePath)
+		mutexHolders.delete(filePath)
+		mutexWaiters.delete(filePath)
+	}
+
+	/**
+	 * Detect deadlock conditions between files
+	 * @param waitingFile The file waiting for a mutex
+	 * @param holdingFile The file holding the mutex
+	 * @returns True if a deadlock is detected
+	 */
+	private detectDeadlock(waitingFile: string, holdingFile: string): boolean {
+		if (!DEADLOCK_DETECTION_ENABLED) {
+			return false
+		}
+
+		// Track the waiting relationship
+		if (!mutexWaiters.has(holdingFile)) {
+			mutexWaiters.set(holdingFile, new Set())
+		}
+		mutexWaiters.get(holdingFile)!.add(waitingFile)
+
+		// Check for circular dependency (deadlock)
+		const visited = new Set<string>()
+		const recursionStack = new Set<string>()
+
+		const hasCycle = (file: string): boolean => {
+			if (recursionStack.has(file)) {
+				return true // Cycle detected
+			}
+			if (visited.has(file)) {
+				return false
+			}
+
+			visited.add(file)
+			recursionStack.add(file)
+
+			const waiters = mutexWaiters.get(file)
+			if (waiters) {
+				for (const waiter of waiters) {
+					if (hasCycle(waiter)) {
+						return true
+					}
+				}
+			}
+
+			recursionStack.delete(file)
+			return false
+		}
+
+		return hasCycle(waitingFile)
+	}
+
+	/**
+	 * Break a deadlock by releasing the mutex of the specified file
+	 * @param filePath The file whose mutex should be released
+	 */
+	private breakDeadlock(filePath: string): void {
+		console.warn(`[DirectoryScanner] Breaking deadlock for file: ${filePath}`)
+		const mutex = fileMutexMap.get(filePath)
+		if (mutex) {
+			// Force cleanup of the mutex
+			this.cleanupFileMutex(filePath)
+			fileMutexMap.set(filePath, new Mutex())
+		}
+	}
+
+	/**
+	 * Wait for available Neo4j transaction slot
+	 */
+	private async waitForTransactionSlot(): Promise<void> {
+		while (activeNeo4jTransactions >= MAX_CONCURRENT_TRANSACTIONS) {
+			console.log(
+				`[DirectoryScanner] Waiting for Neo4j transaction slot (${activeNeo4jTransactions}/${MAX_CONCURRENT_TRANSACTIONS} active)`,
+			)
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+	}
+
+	/**
+	 * Safely increment active transaction counter with mutex protection
+	 */
+	private async incrementActiveTransactions(): Promise<void> {
+		const mutex = this.getFileMutex("activeTransactions")
+		const release = await mutex.acquire()
+		try {
+			if (activeNeo4jTransactions < 0) {
+				console.warn(
+					`[DirectoryScanner] Active transactions counter was negative (${activeNeo4jTransactions}), resetting to 0`,
+				)
+				activeNeo4jTransactions = 0
+			}
+			activeNeo4jTransactions++
+		} finally {
+			release()
+		}
+	}
+
+	/**
+	 * Safely decrement active transaction counter with mutex protection
+	 */
+	private async decrementActiveTransactions(): Promise<void> {
+		const mutex = this.getFileMutex("activeTransactions")
+		const release = await mutex.acquire()
+		try {
+			activeNeo4jTransactions--
+			if (activeNeo4jTransactions < 0) {
+				console.warn(
+					`[DirectoryScanner] Active transactions counter went negative (${activeNeo4jTransactions}), clamping to 0`,
+				)
+				activeNeo4jTransactions = 0
+			}
+		} finally {
+			release()
+		}
+	}
+
+	/**
+	 * Check if circuit breaker is open for a specific error type
+	 * @param errorType The type of error to check
+	 * @returns True if circuit breaker is open
+	 */
+	private isCircuitBreakerOpen(errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"): boolean {
+		const state = circuitBreakerState[errorType]
+		const now = Date.now()
+
+		// Check if circuit breaker should be reset (5 minute timeout)
+		if (state.isOpen && now - state.lastFailureTime > 5 * 60 * 1000) {
+			console.log(`[DirectoryScanner] Circuit breaker reset for ${errorType}`)
+			state.consecutiveFailures = 0
+			state.isOpen = false
+			return false
+		}
+
+		return state.isOpen
+	}
+
+	/**
+	 * Update circuit breaker state after an error
+	 * @param errorType The type of error
+	 */
+	private updateCircuitBreaker(errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"): void {
+		const state = circuitBreakerState[errorType]
+		state.consecutiveFailures++
+		state.lastFailureTime = Date.now()
+
+		if (state.consecutiveFailures >= 3) {
+			console.error(
+				`[DirectoryScanner] Circuit breaker opened for ${errorType} (${state.consecutiveFailures} consecutive failures)`,
+			)
+			state.isOpen = true
+		}
+	}
+
+	/**
+	 * Reset circuit breaker state after successful operation
+	 * @param errorType The type of error to reset
+	 */
+	private resetCircuitBreaker(errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"): void {
+		const state = circuitBreakerState[errorType]
+		if (state.consecutiveFailures > 0) {
+			console.log(`[DirectoryScanner] Circuit breaker reset for ${errorType} after successful operation`)
+			state.consecutiveFailures = 0
+			state.isOpen = false
+		}
+	}
+
+	/**
+	 * Topologically sort files based on import dependencies
+	 * @param blocksByFile Map of file paths to their blocks
+	 * @returns Array of file paths in dependency order
+	 */
+	private topologicalSortFiles(blocksByFile: Map<string, CodeBlock[]>): string[] {
+		const files = Array.from(blocksByFile.keys())
+		const dependencies = new Map<string, Set<string>>()
+
+		// Build dependency graph
+		for (const [filePath, blocks] of blocksByFile) {
+			const deps = new Set<string>()
+			for (const block of blocks) {
+				if (block.imports) {
+					for (const importInfo of block.imports) {
+						// Try to resolve import path to actual file path
+						const resolvedPath = this.resolveImportPath(importInfo.source, filePath)
+						if (resolvedPath && blocksByFile.has(resolvedPath)) {
+							deps.add(resolvedPath)
+						}
+					}
+				}
+			}
+			dependencies.set(filePath, deps)
+		}
+
+		// Topological sort (Kahn's algorithm)
+		const inDegree = new Map<string, number>()
+		const queue: string[] = []
+		const result: string[] = []
+
+		// Initialize in-degrees
+		for (const file of files) {
+			inDegree.set(file, 0)
+		}
+
+		// Calculate in-degrees
+		for (const [file, deps] of dependencies) {
+			for (const dep of deps) {
+				inDegree.set(dep, (inDegree.get(dep) || 0) + 1)
+			}
+		}
+
+		// Find nodes with no incoming edges
+		for (const [file, degree] of inDegree) {
+			if (degree === 0) {
+				queue.push(file)
+			}
+		}
+
+		// Process queue
+		while (queue.length > 0) {
+			const current = queue.shift()!
+			result.push(current)
+
+			const deps = dependencies.get(current)
+			if (deps) {
+				for (const dep of deps) {
+					const newDegree = (inDegree.get(dep) || 0) - 1
+					inDegree.set(dep, newDegree)
+					if (newDegree === 0) {
+						queue.push(dep)
+					}
+				}
+			}
+		}
+
+		// If there are remaining nodes (cycle), add them in any order
+		if (result.length < files.length) {
+			console.warn(
+				"[DirectoryScanner] Circular dependency detected, processing remaining files in arbitrary order",
+			)
+			for (const file of files) {
+				if (!result.includes(file)) {
+					result.push(file)
+				}
+			}
+		}
+
+		return result
+	}
+
+	/**
+	 * Resolve import path to actual file path
+	 * @param importPath The import path from the file
+	 * @param currentFilePath The current file path
+	 * @returns Resolved file path or null if not found
+	 */
+	private resolveImportPath(importPath: string, currentFilePath: string): string | null {
+		// Simple implementation - could be enhanced with more sophisticated resolution
+		if (importPath.startsWith("./") || importPath.startsWith("../")) {
+			const dir = path.dirname(currentFilePath)
+			const resolved = path.resolve(dir, importPath)
+			// Try common extensions
+			for (const ext of [".ts", ".tsx", ".js", ".jsx", ".py", ".java"]) {
+				const withExt = resolved + ext
+				if (fileMutexMap.has(withExt)) {
+					return withExt
+				}
+			}
+		}
+		return null
+	}
 
 	constructor(
 		private readonly embedder: IEmbedder,
@@ -233,86 +556,73 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 					// Process embeddings if configured
 					if (this.embedder && this.qdrantClient && blocks.length > 0) {
-						const release = await mutex.acquire()
-						try {
-							// Check for cancellation before batch accumulation
-							if (this._cancelled) {
-								release()
-								throw new Error("Indexing cancelled by user")
+						let addedBlocksFromFile = false
+						for (const block of blocks) {
+							const trimmedContent = block.content.trim()
+							if (trimmedContent) {
+								currentBatchBlocks.push(block)
+								currentBatchTexts.push(trimmedContent)
+								addedBlocksFromFile = true
 							}
+						}
 
-							let addedBlocksFromFile = false
-							for (const block of blocks) {
-								const trimmedContent = block.content.trim()
-								if (trimmedContent) {
-									currentBatchBlocks.push(block)
-									currentBatchTexts.push(trimmedContent)
-									addedBlocksFromFile = true
+						// Add file info once per file (outside the block loop)
+						if (addedBlocksFromFile) {
+							totalBlockCount += fileBlockCount
+							currentBatchFileInfos.push({
+								filePath,
+								fileHash: currentFileHash,
+								isNew: isNewFile,
+							})
+
+							// Check if batch threshold is met AFTER adding all blocks for this file
+							// This ensures a file is never split across batches
+							if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
+								// Check for cancellation before processing batch
+								if (this._cancelled) {
+									throw new Error("Indexing cancelled by user")
 								}
-							}
 
-							// Add file info once per file (outside the block loop)
-							if (addedBlocksFromFile) {
-								totalBlockCount += fileBlockCount
-								currentBatchFileInfos.push({
-									filePath,
-									fileHash: currentFileHash,
-									isNew: isNewFile,
-								})
-
-								// Check if batch threshold is met AFTER adding all blocks for this file
-								// This ensures a file is never split across batches
-								if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
-									// Check for cancellation before processing batch
+								// Wait if we've reached the maximum pending batches
+								while (pendingBatchCount >= MAX_PENDING_BATCHES) {
+									// Check for cancellation while waiting
 									if (this._cancelled) {
-										release()
 										throw new Error("Indexing cancelled by user")
 									}
-
-									// Wait if we've reached the maximum pending batches
-									while (pendingBatchCount >= MAX_PENDING_BATCHES) {
-										// Check for cancellation while waiting
-										if (this._cancelled) {
-											release()
-											throw new Error("Indexing cancelled by user")
-										}
-										// Wait for at least one batch to complete
-										await Promise.race(activeBatchPromises)
-									}
-
-									// Copy current batch data and clear accumulators
-									const batchBlocks = [...currentBatchBlocks]
-									const batchTexts = [...currentBatchTexts]
-									const batchFileInfos = [...currentBatchFileInfos]
-									currentBatchBlocks = []
-									currentBatchTexts = []
-									currentBatchFileInfos = []
-
-									// Increment pending batch count
-									pendingBatchCount++
-
-									// Queue batch processing
-									const batchPromise = batchLimiter(() =>
-										this.processBatch(
-											batchBlocks,
-											batchTexts,
-											batchFileInfos,
-											scanWorkspace,
-											onError,
-											onBlocksIndexed,
-										),
-									)
-									activeBatchPromises.add(batchPromise)
-
-									// Clean up completed promises to prevent memory accumulation
-									batchPromise.finally(() => {
-										activeBatchPromises.delete(batchPromise)
-										pendingBatchCount--
-									})
+									// Wait for at least one batch to complete
+									await Promise.race(activeBatchPromises)
 								}
+
+								// Copy current batch data and clear accumulators
+								const batchBlocks = [...currentBatchBlocks]
+								const batchTexts = [...currentBatchTexts]
+								const batchFileInfos = [...currentBatchFileInfos]
+								currentBatchBlocks = []
+								currentBatchTexts = []
+								currentBatchFileInfos = []
+
+								// Increment pending batch count
+								pendingBatchCount++
+
+								// Queue batch processing
+								const batchPromise = batchLimiter(() =>
+									this.processBatch(
+										batchBlocks,
+										batchTexts,
+										batchFileInfos,
+										scanWorkspace,
+										onError,
+										onBlocksIndexed,
+									),
+								)
+								activeBatchPromises.add(batchPromise)
+
+								// Clean up completed promises to prevent memory accumulation
+								batchPromise.finally(() => {
+									activeBatchPromises.delete(batchPromise)
+									pendingBatchCount--
+								})
 							}
-						} finally {
-							release()
 						}
 					} else {
 						// Only update hash if not being processed in a batch
@@ -492,6 +802,22 @@ export class DirectoryScanner implements IDirectoryScanner {
 		let attempts = 0
 		let success = false
 		let lastError: Error | null = null
+		let batchFailed = false
+
+		// Group blocks and file infos by file path for per-file processing
+		const blocksByFile = new Map<string, CodeBlock[]>()
+		const fileInfosByFile = new Map<string, { filePath: string; fileHash: string; isNew: boolean }>()
+
+		for (const block of batchBlocks) {
+			if (!blocksByFile.has(block.file_path)) {
+				blocksByFile.set(block.file_path, [])
+			}
+			blocksByFile.get(block.file_path)!.push(block)
+		}
+
+		for (const fileInfo of batchFileInfos) {
+			fileInfosByFile.set(fileInfo.filePath, fileInfo)
+		}
 
 		while (attempts < MAX_BATCH_RETRIES && !success) {
 			attempts++
@@ -501,193 +827,192 @@ export class DirectoryScanner implements IDirectoryScanner {
 					console.log("[DirectoryScanner] Batch processing aborted - cancelled during retry")
 					throw new Error("Indexing cancelled by user")
 				}
-				// --- Deletion Step ---
-				const uniqueFilePaths = [
-					...new Set(
-						batchFileInfos
-							.filter((info) => !info.isNew) // Only modified files (not new)
-							.map((info) => info.filePath),
-					),
-				]
-				if (uniqueFilePaths.length > 0) {
+
+				// Process each file individually while holding its mutex for the entire lifecycle
+				for (const [filePath, fileBlocks] of blocksByFile) {
+					const fileInfo = fileInfosByFile.get(filePath)
+					if (!fileInfo) {
+						console.warn(`[DirectoryScanner] No file info found for ${filePath}, skipping`)
+						continue
+					}
+
+					// Get file-specific mutex before any processing to prevent race conditions
+					const fileMutex = this.getFileMutex(filePath)
+					const release = await fileMutex.acquire()
+
 					try {
-						await this.qdrantClient.deletePointsByMultipleFilePaths(uniqueFilePaths)
-					} catch (deleteError: any) {
-						const errorStatus =
-							deleteError?.status || deleteError?.response?.status || deleteError?.statusCode
-						const errorMessage = deleteError instanceof Error ? deleteError.message : String(deleteError)
+						// Check for cancellation before processing this file
+						if (this._cancelled) {
+							throw new Error("Indexing cancelled by user")
+						}
 
-						console.error(
-							`[DirectoryScanner] Failed to delete points for ${uniqueFilePaths.length} files before upsert in workspace ${scanWorkspace}:`,
-							deleteError,
-						)
+						console.log(`[DirectoryScanner] Processing file with full lifecycle mutex: ${filePath}`)
 
-						TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-							error: sanitizeErrorMessage(errorMessage),
-							stack:
-								deleteError instanceof Error
-									? sanitizeErrorMessage(deleteError.stack || "")
-									: undefined,
-							location: "processBatch:deletePointsByMultipleFilePaths",
-							fileCount: uniqueFilePaths.length,
-							errorStatus: errorStatus,
+						// Step 1: Delete existing points for modified files (Qdrant operation)
+						if (!fileInfo.isNew) {
+							try {
+								await this.qdrantClient.deletePointsByMultipleFilePaths([filePath])
+								console.log(`[DirectoryScanner] Deleted existing points for modified file: ${filePath}`)
+							} catch (deleteError: any) {
+								const errorMessage =
+									deleteError instanceof Error ? deleteError.message : String(deleteError)
+								console.error(
+									`[DirectoryScanner] Failed to delete points for ${filePath}:`,
+									deleteError,
+								)
+
+								// Mark batch as failed for transaction coordination
+								batchFailed = true
+
+								TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+									error: sanitizeErrorMessage(errorMessage),
+									stack:
+										deleteError instanceof Error
+											? sanitizeErrorMessage(deleteError.stack || "")
+											: undefined,
+									location: "processBatch:deletePointsByFilePath",
+									filePath: filePath,
+								})
+
+								// Re-throw to trigger retry
+								throw new Error(`Failed to delete points for file ${filePath}: ${errorMessage}`, {
+									cause: deleteError,
+								})
+							}
+						}
+
+						// Step 2: Create embeddings for this file's blocks
+						const enrichedTexts = fileBlocks.map((block) => {
+							// If block has enhanced metadata, use buildEmbeddingContext
+							if (block.symbolMetadata || block.documentation || block.lspTypeInfo) {
+								const segment: EnhancedCodeSegment = {
+									segmentHash: block.segmentHash,
+									filePath: block.file_path,
+									content: block.content,
+									startLine: block.start_line,
+									endLine: block.end_line,
+									fileHash: block.fileHash,
+									identifier: block.identifier,
+									type: block.type,
+									language: path.extname(block.file_path).slice(1).toLowerCase(),
+									symbolMetadata: block.symbolMetadata,
+									documentation: block.documentation,
+									lspTypeInfo: block.lspTypeInfo,
+								}
+								return buildEmbeddingContext(segment)
+							}
+							// Fallback to plain content for blocks without metadata
+							return block.content
 						})
 
-						// Re-throw with workspace context
-						throw new Error(
-							`Failed to delete points for ${uniqueFilePaths.length} files. Workspace: ${scanWorkspace}. ${errorMessage}`,
-							{ cause: deleteError },
-						)
-					}
-				}
-				// --- End Deletion Step ---
+						const { embeddings } = await this.embedder.createEmbeddings(enrichedTexts)
 
-				// Phase 2: Create metadata-enriched embeddings for batch
-				const enrichedTexts = batchBlocks.map((block) => {
-					// If block has enhanced metadata, use buildEmbeddingContext
-					if (block.symbolMetadata || block.documentation || block.lspTypeInfo) {
-						const segment: EnhancedCodeSegment = {
-							segmentHash: block.segmentHash,
-							filePath: block.file_path,
-							content: block.content,
-							startLine: block.start_line,
-							endLine: block.end_line,
-							fileHash: block.fileHash,
-							identifier: block.identifier,
-							type: block.type,
-							language: path.extname(block.file_path).slice(1).toLowerCase(),
-							symbolMetadata: block.symbolMetadata,
-							documentation: block.documentation,
-							lspTypeInfo: block.lspTypeInfo,
-						}
-						return buildEmbeddingContext(segment)
-					}
-					// Fallback to plain content for blocks without metadata
-					return block.content
-				})
+						// Step 3: Prepare and upsert points to Qdrant
+						const points = fileBlocks.map((block, index) => {
+							const normalizedAbsolutePath = generateNormalizedAbsolutePath(
+								block.file_path,
+								scanWorkspace,
+							)
+							const pointId = uuidv5(block.segmentHash, QDRANT_CODE_BLOCK_NAMESPACE)
 
-				const { embeddings } = await this.embedder.createEmbeddings(enrichedTexts)
-
-				// Prepare points for Qdrant
-				const points = batchBlocks.map((block, index) => {
-					const normalizedAbsolutePath = generateNormalizedAbsolutePath(block.file_path, scanWorkspace)
-
-					// Use segmentHash for unique ID generation to handle multiple segments from same line
-					const pointId = uuidv5(block.segmentHash, QDRANT_CODE_BLOCK_NAMESPACE)
-
-					// Get file extension for language detection
-					const ext = path.extname(block.file_path).slice(1).toLowerCase()
-					const languageMap: Record<string, string> = {
-						ts: "TypeScript",
-						tsx: "TypeScript",
-						js: "JavaScript",
-						jsx: "JavaScript",
-						py: "Python",
-						java: "Java",
-						cpp: "C++",
-						c: "C",
-						cs: "C#",
-						go: "Go",
-						rs: "Rust",
-						rb: "Ruby",
-						php: "PHP",
-						swift: "Swift",
-						kt: "Kotlin",
-						scala: "Scala",
-					}
-					const language = languageMap[ext] || ext
-
-					return {
-						id: pointId,
-						vector: embeddings[index],
-						payload: {
-							filePath: generateRelativeFilePath(normalizedAbsolutePath, scanWorkspace),
-							codeChunk: block.content,
-							startLine: block.start_line,
-							endLine: block.end_line,
-							segmentHash: block.segmentHash,
-							// Phase 2: Enhanced metadata
-							identifier: block.identifier,
-							type: block.type,
-							language,
-							symbolMetadata: block.symbolMetadata,
-							imports: block.imports,
-							exports: block.exports,
-							documentation: block.documentation,
-							// Phase 6: LSP type information
-							lspTypeInfo: block.lspTypeInfo,
-						},
-					}
-				})
-
-				// Upsert points to Qdrant
-				await this.qdrantClient.upsertPoints(points)
-				onBlocksIndexed?.(batchBlocks.length)
-
-				// Also add to BM25 index if available
-				if (this.bm25Index) {
-					const languageMap: Record<string, string> = {
-						ts: "TypeScript",
-						tsx: "TypeScript",
-						js: "JavaScript",
-						jsx: "JavaScript",
-						py: "Python",
-						java: "Java",
-						cpp: "C++",
-						c: "C",
-						cs: "C#",
-						go: "Go",
-						rs: "Rust",
-						rb: "Ruby",
-						php: "PHP",
-						swift: "Swift",
-						kt: "Kotlin",
-						scala: "Scala",
-					}
-					const bm25Documents: BM25Document[] = batchBlocks.map((block) => {
-						const ext = path.extname(block.file_path).slice(1).toLowerCase()
-						const language = languageMap[ext] || ext
-						return {
-							id: block.segmentHash,
-							text: block.content,
-							filePath: block.file_path,
-							startLine: block.start_line,
-							endLine: block.end_line,
-							metadata: {
-								identifier: block.identifier,
-								type: block.type,
-								language,
-							},
-						}
-					})
-					this.bm25Index.addDocuments(bm25Documents)
-				}
-
-				// Also add to Neo4j graph if available
-				if (this.graphIndexer) {
-					try {
-						// Group blocks by file for efficient indexing
-						const blocksByFile = new Map<string, CodeBlock[]>()
-						for (const block of batchBlocks) {
-							if (!blocksByFile.has(block.file_path)) {
-								blocksByFile.set(block.file_path, [])
+							const ext = path.extname(block.file_path).slice(1).toLowerCase()
+							const languageMap: Record<string, string> = {
+								ts: "TypeScript",
+								tsx: "TypeScript",
+								js: "JavaScript",
+								jsx: "JavaScript",
+								py: "Python",
+								java: "Java",
+								cpp: "C++",
+								c: "C",
+								cs: "C#",
+								go: "Go",
+								rs: "Rust",
+								rb: "Ruby",
+								php: "PHP",
+								swift: "Swift",
+								kt: "Kotlin",
+								scala: "Scala",
 							}
-							blocksByFile.get(block.file_path)!.push(block)
+							const language = languageMap[ext] || ext
+
+							return {
+								id: pointId,
+								vector: embeddings[index],
+								payload: {
+									filePath: generateRelativeFilePath(normalizedAbsolutePath, scanWorkspace),
+									codeChunk: block.content,
+									startLine: block.start_line,
+									endLine: block.end_line,
+									segmentHash: block.segmentHash,
+									identifier: block.identifier,
+									type: block.type,
+									language,
+									symbolMetadata: block.symbolMetadata,
+									imports: block.imports,
+									exports: block.exports,
+									documentation: block.documentation,
+									lspTypeInfo: block.lspTypeInfo,
+								},
+							}
+						})
+
+						await this.qdrantClient.upsertPoints(points)
+						onBlocksIndexed?.(fileBlocks.length)
+						console.log(`[DirectoryScanner] Upserted ${fileBlocks.length} points for file: ${filePath}`)
+
+						// Step 4: Add to BM25 index if available
+						if (this.bm25Index) {
+							const languageMap: Record<string, string> = {
+								ts: "TypeScript",
+								tsx: "TypeScript",
+								js: "JavaScript",
+								jsx: "JavaScript",
+								py: "Python",
+								java: "Java",
+								cpp: "C++",
+								c: "C",
+								cs: "C#",
+								go: "Go",
+								rs: "Rust",
+								rb: "Ruby",
+								php: "PHP",
+								swift: "Swift",
+								kt: "Kotlin",
+								scala: "Scala",
+							}
+							const bm25Documents: BM25Document[] = fileBlocks.map((block) => {
+								const ext = path.extname(block.file_path).slice(1).toLowerCase()
+								const language = languageMap[ext] || ext
+								return {
+									id: block.segmentHash,
+									text: block.content,
+									filePath: block.file_path,
+									startLine: block.start_line,
+									endLine: block.end_line,
+									metadata: {
+										identifier: block.identifier,
+										type: block.type,
+										language,
+									},
+								}
+							})
+							this.bm25Index.addDocuments(bm25Documents)
 						}
 
-						// Update total files count (cumulative across all batches)
-						const batchFileCount = blocksByFile.size
-						this.neo4jTotalFilesToProcess += batchFileCount
+						// Step 5: Add to Neo4j graph if available
+						if (this.graphIndexer) {
+							// Wait for available transaction slot
+							await this.waitForTransactionSlot()
+							await this.incrementActiveTransactions()
 
-						// Index each file's blocks to Neo4j with mutex protection
-						// This prevents race conditions where File A creates relationships to File B's nodes
-						// while File B is being re-indexed (delete + create) in a parallel batch
-						for (const [filePath, fileBlocks] of blocksByFile) {
-							// Acquire mutex before indexing this file
-							const release = await neo4jFileMutex.acquire()
 							try {
+								console.log(`[DirectoryScanner] Starting Neo4j indexing for file: ${filePath}`)
 								await this.graphIndexer.indexFile(filePath, fileBlocks)
 								this.neo4jCumulativeFilesProcessed++
+								console.log(
+									`[DirectoryScanner] Successfully indexed file to Neo4j: ${filePath} (${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess})`,
+								)
 
 								// Report cumulative progress
 								if (this.stateManager) {
@@ -698,29 +1023,135 @@ export class DirectoryScanner implements IDirectoryScanner {
 										`Indexed ${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess} files to graph`,
 									)
 								}
+
+								// Reset circuit breaker on successful operation
+								this.resetCircuitBreaker("transactionErrors")
+								this.resetCircuitBreaker("connectionErrors")
+								this.resetCircuitBreaker("deadlockErrors")
+							} catch (error) {
+								// Mark batch as failed for transaction coordination
+								batchFailed = true
+
+								// Enhanced error handling with proper error propagation and circuit breaker pattern
+								const errorMessage = error instanceof Error ? error.message : String(error)
+								const errorStack = error instanceof Error ? error.stack : undefined
+
+								console.error(`[DirectoryScanner] Error indexing to Neo4j:`, {
+									error: errorMessage,
+									stack: errorStack,
+									filePath: filePath,
+									processedFiles: this.neo4jCumulativeFilesProcessed,
+									totalFiles: this.neo4jTotalFilesToProcess,
+								})
+
+								// Determine error type for circuit breaker
+								let errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"
+								if (
+									errorMessage.includes("connection") ||
+									errorMessage.includes("pool") ||
+									errorMessage.includes("timeout")
+								) {
+									errorType = "connectionErrors"
+									console.error(
+										`[DirectoryScanner] Neo4j connection issue detected - possible resource exhaustion. Consider reducing batch size or concurrency.`,
+									)
+								} else if (errorMessage.includes("deadlock") || errorMessage.includes("lock")) {
+									errorType = "deadlockErrors"
+								} else {
+									errorType = "transactionErrors"
+								}
+
+								// Update circuit breaker for specific error type
+								this.updateCircuitBreaker(errorType)
+								console.warn(
+									`[DirectoryScanner] Neo4j ${errorType} consecutive failures: ${circuitBreakerState[errorType].consecutiveFailures}/3`,
+								)
+
+								// Report detailed error to state manager
+								if (this.stateManager) {
+									this.stateManager.reportNeo4jIndexingProgress(
+										this.neo4jCumulativeFilesProcessed,
+										this.neo4jTotalFilesToProcess,
+										"error",
+										`Graph indexing failed: ${errorMessage} (${errorType} failure ${circuitBreakerState[errorType].consecutiveFailures}/3)`,
+									)
+								}
+
+								// Report to telemetry for monitoring
+								TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+									error: sanitizeErrorMessage(errorMessage),
+									stack: sanitizeErrorMessage(errorStack || ""),
+									location: "processBatch:neo4jIndexing",
+									filePath: filePath,
+									errorType: errorType,
+									circuitBreakerState: circuitBreakerState[errorType],
+								})
+
+								// Circuit breaker: stop Neo4j indexing after consecutive failures
+								if (this.isCircuitBreakerOpen(errorType)) {
+									console.error(
+										`[DirectoryScanner] Neo4j circuit breaker triggered for ${errorType} - disabling Neo4j indexing for this batch.`,
+									)
+
+									// Report circuit breaker activation to telemetry
+									TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+										error: sanitizeErrorMessage(errorMessage),
+										stack: sanitizeErrorMessage(errorStack || ""),
+										location: "processBatch:neo4jCircuitBreaker",
+										errorType: "circuit_breaker_triggered",
+										circuitBreakerType: errorType,
+										circuitBreakerState: circuitBreakerState[errorType],
+									})
+
+									// Don't re-throw for circuit breaker - continue with vector indexing
+									return
+								}
+
+								// Re-throw critical errors that should stop the entire indexing process
+								if (
+									errorMessage.includes("authentication") ||
+									errorMessage.includes("authorization") ||
+									errorMessage.includes("invalid database")
+								) {
+									console.error(
+										`[DirectoryScanner] Critical Neo4j error - stopping indexing: ${errorMessage}`,
+									)
+									throw new Error(`Neo4j critical error: ${errorMessage}`)
+								}
+
+								// For other errors, log and continue with vector indexing (graceful degradation)
+								console.warn(
+									`[DirectoryScanner] Neo4j error handled gracefully - continuing with vector indexing: ${errorMessage}`,
+								)
 							} finally {
-								release()
+								// Decrement active transaction counter
+								await this.decrementActiveTransactions()
 							}
 						}
-					} catch (error) {
-						// Log error but don't fail the entire indexing process
-						const errorMessage = error instanceof Error ? error.message : String(error)
-						console.error(`[DirectoryScanner] Error indexing to Neo4j:`, error)
-						if (this.stateManager) {
-							this.stateManager.reportNeo4jIndexingProgress(
-								0,
-								0,
-								"error",
-								`Graph indexing failed: ${errorMessage}`,
+
+						// Step 6: Update cache hash for successfully processed file
+						// Only update if batch didn't fail (transaction coordination)
+						if (!batchFailed) {
+							await this.cacheManager.updateHash(fileInfo.filePath, fileInfo.fileHash)
+							console.log(`[DirectoryScanner] Updated cache hash for file: ${filePath}`)
+						} else {
+							console.warn(
+								`[DirectoryScanner] File processing failed - not updating cache hash for: ${filePath}`,
 							)
+
+							TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+								error: "File-level transaction failure",
+								location: "processBatch:fileFailure",
+								filePath: filePath,
+							})
 						}
+					} finally {
+						// Release mutex for this file
+						release()
+						console.log(`[DirectoryScanner] Released mutex for file: ${filePath}`)
 					}
 				}
 
-				// Update hashes for successfully processed files in this batch
-				for (const fileInfo of batchFileInfos) {
-					await this.cacheManager.updateHash(fileInfo.filePath, fileInfo.fileHash)
-				}
 				success = true
 			} catch (error) {
 				lastError = error as Error

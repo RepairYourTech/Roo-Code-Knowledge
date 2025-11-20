@@ -18,6 +18,7 @@ import path from "path"
 import { t } from "../../i18n"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
+import { sanitizeErrorMessage } from "./shared/validation-helpers"
 
 export class CodeIndexManager {
 	// --- Singleton Implementation ---
@@ -155,6 +156,14 @@ export class CodeIndexManager {
 			this._stateManager.setNeo4jStatus("idle", "Neo4j graph indexing enabled")
 		} else {
 			this._stateManager.setNeo4jStatus("disabled", "")
+		}
+
+		// If disabling the main feature, also clear any system error state
+		if (!this.isFeatureEnabled) {
+			const currentStatus = this._stateManager.getCurrentStatus()
+			if (currentStatus.systemStatus === "Error") {
+				this._stateManager.setSystemState("Standby", "")
+			}
 		}
 
 		// 4. Check if workspace is available
@@ -427,14 +436,69 @@ export class CodeIndexManager {
 		// Initialize Neo4j if enabled
 		if (neo4jService) {
 			try {
+				console.log("[CodeIndexManager] Initializing Neo4j service...")
+				console.log(
+					`[CodeIndexManager] Neo4j config: ${JSON.stringify({
+						url: this._configManager!.neo4jConfig.url?.replace(/\/\/.*@/, "//***:***"), // Hide credentials in logs
+						database: this._configManager!.neo4jConfig.database,
+					})}`,
+				)
+
 				await neo4jService.initialize()
-				console.log("[CodeIndexManager] Neo4j service initialized successfully")
-				// Track neo4jService for cleanup
-				this._neo4jService = neo4jService
+
+				// Verify connection after initialization
+				if (neo4jService.isConnected()) {
+					console.log("[CodeIndexManager] Neo4j service initialized and connected successfully")
+					// Track neo4jService for cleanup
+					this._neo4jService = neo4jService
+
+					// Set Neo4j status to idle (ready for indexing)
+					this._stateManager.setNeo4jStatus("idle", "Neo4j graph indexing ready")
+				} else {
+					console.error(
+						"[CodeIndexManager] Neo4j service initialization completed but connection verification failed",
+					)
+					this._stateManager.setNeo4jStatus("error", "Neo4j connection verification failed")
+
+					// Report to telemetry for monitoring
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: "Neo4j connection verification failed after initialization",
+						location: "_recreateServices:neo4jInitialization",
+						errorType: "connection_verification_failed",
+					})
+				}
 			} catch (error) {
-				console.error("[CodeIndexManager] Failed to initialize Neo4j:", error)
-				// Don't fail initialization if Neo4j connection fails
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				const errorStack = error instanceof Error ? error.stack : undefined
+
+				console.error("[CodeIndexManager] Failed to initialize Neo4j:", {
+					error: errorMessage,
+					stack: errorStack,
+					config: {
+						url: this._configManager!.neo4jConfig.url?.replace(/\/\/.*@/, "//***:***"), // Hide credentials
+						database: this._configManager!.neo4jConfig.database,
+					},
+				})
+
+				// Set Neo4j status to error to prevent false "Ready" state
+				this._stateManager.setNeo4jStatus("error", `Neo4j initialization failed: ${errorMessage}`)
+
+				// Report detailed error to telemetry
+				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+					error: sanitizeErrorMessage(errorMessage),
+					stack: sanitizeErrorMessage(errorStack || ""),
+					location: "_recreateServices:neo4jInitialization",
+					errorType: "initialization_failed",
+				})
+
+				// Don't fail entire initialization if Neo4j connection fails (graceful degradation)
+				console.warn(
+					"[CodeIndexManager] Continuing with vector indexing only - Neo4j graph indexing will be unavailable",
+				)
 			}
+		} else {
+			console.log("[CodeIndexManager] Neo4j service not created - graph indexing disabled")
+			this._stateManager.setNeo4jStatus("disabled", "Neo4j graph indexing is disabled")
 		}
 
 		// Validate embedder configuration before proceeding
@@ -517,6 +581,9 @@ export class CodeIndexManager {
 						console.error("[CodeIndexManager] Error closing Neo4j connection:", error)
 					}
 				}
+				// Explicitly set Neo4j status to disabled so UI updates
+				this._stateManager.setNeo4jStatus("disabled", "")
+
 				// Set state to indicate service is disabled
 				this._stateManager.setSystemState("Standby", "Code indexing is disabled")
 				return

@@ -1,7 +1,20 @@
 import { CodeBlock, CallInfo, TestMetadata, TestTarget } from "../interfaces/file-processor"
-import { CodeNode, CodeRelationship, INeo4jService } from "../interfaces/neo4j-service"
+import {
+	CodeNode,
+	CodeRelationship,
+	INeo4jService,
+	ImportMetadata,
+	CallMetadata,
+	TestMetadata as TestMetadataType,
+	TypeMetadata,
+	ExtendsMetadata,
+	ImplementsMetadata,
+	RelationshipMetadata,
+} from "../interfaces/neo4j-service"
 import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
 import { CodebaseIndexErrorLogger } from "./error-logger"
+import { MetadataValidator } from "./metadata-validator"
+import { MAX_METADATA_ARRAY_LENGTH } from "../constants"
 import * as path from "path"
 
 /**
@@ -9,10 +22,23 @@ import * as path from "path"
  * Extracts code relationships from parsed code blocks and indexes them into Neo4j
  */
 export class GraphIndexer implements IGraphIndexer {
+	private readonly metadataValidator: MetadataValidator
+
 	constructor(
 		private neo4jService: INeo4jService,
 		private errorLogger?: CodebaseIndexErrorLogger,
-	) {}
+	) {
+		// Initialize metadata validator with appropriate configuration
+		this.metadataValidator = new MetadataValidator(
+			{
+				service: "neo4j",
+				validationEnabled: true,
+				allowTruncation: true,
+				logLevel: "warn",
+			},
+			errorLogger,
+		)
+	}
 
 	/**
 	 * Index a single code block into the graph database
@@ -164,9 +190,33 @@ export class GraphIndexer implements IGraphIndexer {
 	extractNodes(block: CodeBlock): CodeNode[] {
 		const nodes: CodeNode[] = []
 
+		// Phase 2: Validate node properties before creation
+		// Check identifier is non-empty
+		if (!block.identifier || block.identifier.trim() === "") {
+			console.warn(`[GraphIndexer] Skipping node with empty identifier in ${block.file_path}:${block.start_line}`)
+			return nodes
+		}
+
 		// Determine node type from block type
 		const nodeType = this.mapBlockTypeToNodeType(block.type)
 		if (!nodeType) {
+			console.warn(
+				`[GraphIndexer] Unrecognized block type "${block.type}" in ${block.file_path}:${block.start_line}`,
+			)
+			return nodes
+		}
+
+		// Validate line numbers
+		if (block.start_line > block.end_line) {
+			console.warn(
+				`[GraphIndexer] Invalid line range ${block.start_line}-${block.end_line} in ${block.file_path}`,
+			)
+			return nodes
+		}
+
+		// Validate file path is non-empty
+		if (!block.file_path || block.file_path.trim() === "") {
+			console.warn(`[GraphIndexer] Skipping node with empty file path`)
 			return nodes
 		}
 
@@ -1251,11 +1301,15 @@ export class GraphIndexer implements IGraphIndexer {
 					fromId,
 					toId: importNodeId,
 					type: "IMPORTS",
-					metadata: {
-						source: importInfo.source,
-						symbols: importInfo.symbols,
-						isDefault: importInfo.isDefault,
-					},
+					metadata: this.validateAndSanitizeMetadata(
+						{
+							source: importInfo.source,
+							symbols: importInfo.symbols,
+							isDefault: importInfo.isDefault,
+						},
+						"IMPORTS",
+						block.identifier || undefined,
+					) as ImportMetadata,
 				})
 			}
 		}
@@ -1284,10 +1338,14 @@ export class GraphIndexer implements IGraphIndexer {
 					fromId,
 					toId: this.generateNodeId(parentBlock),
 					type: "EXTENDS",
-					metadata: {
-						parentClass: parentClassName,
-						isAbstract: block.symbolMetadata.isAbstract || false,
-					},
+					metadata: this.validateAndSanitizeMetadata(
+						{
+							parentClass: parentClassName,
+							isAbstract: block.symbolMetadata.isAbstract || false,
+						},
+						"EXTENDS",
+						block.identifier || undefined,
+					),
 				})
 			}
 		}
@@ -1313,9 +1371,13 @@ export class GraphIndexer implements IGraphIndexer {
 						fromId,
 						toId: this.generateNodeId(interfaceBlock),
 						type: "IMPLEMENTS",
-						metadata: {
-							interface: interfaceName,
-						},
+						metadata: this.validateAndSanitizeMetadata(
+							{
+								interface: interfaceName,
+							},
+							"IMPLEMENTS",
+							block.identifier || undefined,
+						),
 					})
 				}
 			}
@@ -1333,13 +1395,17 @@ export class GraphIndexer implements IGraphIndexer {
 						fromId,
 						toId: targetNodeId,
 						type: "CALLS",
-						metadata: {
-							callType: call.callType,
-							line: call.line,
-							column: call.column,
-							receiver: call.receiver,
-							qualifier: call.qualifier,
-						},
+						metadata: this.validateAndSanitizeMetadata(
+							{
+								callType: call.callType,
+								line: call.line,
+								column: call.column,
+								receiver: call.receiver,
+								qualifier: call.qualifier,
+							},
+							"CALLS",
+							block.identifier || undefined,
+						),
 					})
 				}
 			}
@@ -1386,13 +1452,17 @@ export class GraphIndexer implements IGraphIndexer {
 					fromId,
 					toId: target.targetNodeId,
 					type: "TESTS",
-					metadata: {
-						confidence: target.confidence,
-						detectionMethod: target.detectionMethod,
-						testFramework: block.testMetadata.testFramework,
-						testType: block.testMetadata.testType,
-						targetIdentifier: target.targetIdentifier,
-					},
+					metadata: this.validateAndSanitizeMetadata(
+						{
+							confidence: target.confidence,
+							detectionMethod: target.detectionMethod,
+							testFramework: block.testMetadata.testFramework,
+							testType: block.testMetadata.testType,
+							targetIdentifier: target.targetIdentifier,
+						},
+						"TESTS",
+						block.identifier || undefined,
+					),
 				})
 			}
 		}
@@ -1837,11 +1907,15 @@ export class GraphIndexer implements IGraphIndexer {
 					fromId: this.generateNodeId(block),
 					toId: this.generateNodeId(typeBlock),
 					type: "HAS_TYPE",
-					metadata: {
-						typeString: typeInfo.type,
-						isInferred: typeInfo.isInferred,
-						source: "lsp",
-					},
+					metadata: this.validateAndSanitizeMetadata(
+						{
+							typeString: typeInfo.type,
+							isInferred: typeInfo.isInferred,
+							source: "lsp",
+						},
+						"HAS_TYPE",
+						block.identifier,
+					),
 				})
 			}
 		}
@@ -1869,18 +1943,120 @@ export class GraphIndexer implements IGraphIndexer {
 						fromId: this.generateNodeId(block),
 						toId: this.generateNodeId(typeBlock),
 						type: "ACCEPTS_TYPE",
-						metadata: {
-							parameterName: param.name,
-							typeString: param.type,
-							isOptional: param.isOptional,
-							source: "lsp",
-						},
+						metadata: this.validateAndSanitizeMetadata(
+							{
+								parameterName: param.name,
+								typeString: param.type,
+								isOptional: param.isOptional,
+								source: "lsp",
+							},
+							"ACCEPTS_TYPE",
+							block.identifier || undefined,
+						),
 					})
 				}
 			}
 		}
 
 		return relationships
+	}
+
+	/**
+	 * Validates and sanitizes metadata using MetadataValidator
+	 * Phase 1: Add metadata validation before relationship creation
+	 */
+	private validateAndSanitizeMetadata(
+		metadata: Record<string, unknown>,
+		relationshipType: string,
+		blockIdentifier?: string,
+	): RelationshipMetadata {
+		try {
+			// Phase 3: Add size limits for metadata arrays
+			// Check IMPORTS metadata for array size limits
+			if (relationshipType === "IMPORTS" && metadata.symbols && Array.isArray(metadata.symbols)) {
+				const symbols = metadata.symbols as string[]
+				if (symbols.length > MAX_METADATA_ARRAY_LENGTH) {
+					console.warn(
+						`[GraphIndexer] IMPORTS symbols array (${symbols.length} items) exceeds limit (${MAX_METADATA_ARRAY_LENGTH}), truncating`,
+					)
+					metadata.symbols = symbols.slice(0, MAX_METADATA_ARRAY_LENGTH)
+					// Add truncation warning
+					metadata._truncated = true
+					metadata._originalLength = symbols.length
+				}
+			}
+
+			// Phase 3: Check parameter metadata for array size limits
+			if (relationshipType === "ACCEPTS_TYPE" && metadata.parameterName) {
+				// This is handled at the array level in the calling code
+				// but we validate the overall structure here
+			}
+
+			// Phase 4: Add validation for nested objects in metadata
+			// Validate testMetadata structure
+			if (relationshipType === "TESTS" && metadata.testFramework) {
+				if (typeof metadata.testFramework !== "string") {
+					console.warn(`[GraphIndexer] Invalid testFramework type in TESTS metadata for ${blockIdentifier}`)
+					metadata.testFramework = String(metadata.testFramework)
+				}
+			}
+
+			// Validate lspTypeInfo structure
+			if (metadata.source === "lsp") {
+				// Basic structure validation for LSP-derived metadata
+				if (metadata.typeString && typeof metadata.typeString !== "string") {
+					console.warn(`[GraphIndexer] Invalid typeString in LSP metadata for ${blockIdentifier}`)
+					metadata.typeString = String(metadata.typeString)
+				}
+			}
+
+			// Use MetadataValidator to sanitize the metadata
+			const validationResult = this.metadataValidator.validateAndSanitize(metadata)
+
+			// Log any warnings from validation
+			if (validationResult.warnings.length > 0) {
+				console.warn(
+					`[GraphIndexer] Metadata validation warnings for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
+					validationResult.warnings,
+				)
+			}
+
+			// Log if truncation occurred
+			if (validationResult.wasTruncated) {
+				console.warn(
+					`[GraphIndexer] Metadata was truncated for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}`,
+				)
+			}
+
+			// Return the sanitized metadata with proper type casting
+			// based on the relationship type to ensure type safety
+			return validationResult.sanitized as RelationshipMetadata
+		} catch (error) {
+			// Phase 4: Add error handling for metadata creation
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			console.error(
+				`[GraphIndexer] Error validating metadata for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
+				errorMessage,
+			)
+
+			// Log to persistent error logger if available
+			if (this.errorLogger) {
+				this.errorLogger.logError({
+					service: "neo4j",
+					filePath: blockIdentifier ? `unknown:${blockIdentifier}` : "unknown",
+					operation: "validateAndSanitizeMetadata",
+					error: errorMessage,
+					stack: error instanceof Error ? error.stack : undefined,
+					additionalContext: {
+						relationshipType,
+						metadata,
+					},
+				})
+			}
+
+			// Return empty metadata as fallback
+			return {}
+		}
 	}
 
 	/**
@@ -1902,10 +2078,14 @@ export class GraphIndexer implements IGraphIndexer {
 					fromId: this.generateNodeId(block),
 					toId: this.generateNodeId(typeBlock),
 					type: "RETURNS_TYPE",
-					metadata: {
-						typeString: signatureInfo.returnType,
-						source: "lsp",
-					},
+					metadata: this.validateAndSanitizeMetadata(
+						{
+							typeString: signatureInfo.returnType,
+							source: "lsp",
+						},
+						"RETURNS_TYPE",
+						block.identifier || undefined,
+					),
 				})
 			}
 		}

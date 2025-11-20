@@ -4,6 +4,7 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager, IndexingState } from "./state-manager"
 import { IFileWatcher, IVectorStore, BatchProcessingSummary, IGraphIndexer, INeo4jService } from "./interfaces"
 import { DirectoryScanner } from "./processors"
+import { Neo4jService } from "./graph/neo4j-service"
 import { CacheManager } from "./cache-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -32,13 +33,11 @@ export class CodeIndexOrchestrator {
 	 * Cancel any active indexing operation
 	 */
 	public cancelIndexing(): void {
-		if (this._isProcessing) {
-			console.log("[CodeIndexOrchestrator] Cancelling active indexing operation")
-			this.scanner.cancel()
-			// Set _isProcessing to false immediately so the UI updates
-			// and subsequent operations know indexing is no longer active
-			this._isProcessing = false
-		}
+		console.log("[CodeIndexOrchestrator] Cancelling active indexing operation")
+		this.scanner.cancel()
+		// Set _isProcessing to false immediately so the UI updates
+		// and subsequent operations know indexing is no longer active
+		this._isProcessing = false
 	}
 
 	/**
@@ -394,8 +393,11 @@ export class CodeIndexOrchestrator {
 				})
 			}
 
-			// Clear Neo4j graph database if enabled
-			if (this.neo4jService && this.configManager.isNeo4jEnabled) {
+			// Clear Neo4j graph database if enabled or if service is available
+			console.log(`[CodeIndexOrchestrator] Neo4j clearing check: neo4jService=${!!this.neo4jService}`)
+
+			if (this.neo4jService) {
+				console.log("[CodeIndexOrchestrator] Starting Neo4j graph database clear...")
 				try {
 					await this.neo4jService.clearAll()
 					console.log("[CodeIndexOrchestrator] Neo4j graph database cleared successfully")
@@ -409,10 +411,45 @@ export class CodeIndexOrchestrator {
 						location: "clearIndexData:neo4j",
 					})
 				}
+			} else {
+				// Fallback: Try to create a temporary service if config exists
+				// This handles the case where the user disabled Neo4j but wants to delete the index
+				const neo4jConfig = {
+					enabled: true, // Force enable for this operation
+					url: this.configManager.neo4jConfig.url || "",
+					username: this.configManager.neo4jConfig.username || "",
+					password: this.configManager.neo4jConfig.password || "",
+					database: "neo4j", // Default
+				}
+
+				if (neo4jConfig.url && neo4jConfig.username) {
+					console.log(
+						"[CodeIndexOrchestrator] Neo4j service not active, creating temporary connection for clearing...",
+					)
+					const tempService = new Neo4jService(neo4jConfig)
+					try {
+						await tempService.initialize()
+						if (tempService.isConnected()) {
+							await tempService.clearAll()
+							console.log(
+								"[CodeIndexOrchestrator] Neo4j graph database cleared successfully (temp connection)",
+							)
+						}
+					} catch (error: any) {
+						const errorMsg = `Failed to clear Neo4j graph (temp connection): ${error.message}`
+						errors.push(errorMsg)
+						console.error("[CodeIndexOrchestrator]", errorMsg, error)
+					} finally {
+						await tempService.close()
+					}
+				}
 			}
 
 			// Clear cache file
 			await this.cacheManager.clearCacheFile()
+
+			// Reset Neo4j status to idle after clearing
+			this.stateManager.setNeo4jStatus("idle", "")
 
 			// Set final state based on whether errors occurred
 			if (errors.length > 0) {
