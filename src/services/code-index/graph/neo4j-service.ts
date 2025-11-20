@@ -22,6 +22,7 @@ export class Neo4jService implements INeo4jService {
 
 	constructor(config: Neo4jConfig) {
 		this.config = config
+		console.log(`[Neo4jService] Configured to use database: ${this.config.database}`)
 	}
 
 	/**
@@ -47,6 +48,7 @@ export class Neo4jService implements INeo4jService {
 			await this.createIndexes()
 
 			this.connected = true
+			console.log(`[Neo4jService] Successfully connected to Neo4j database: ${this.config.database}`)
 		} catch (error) {
 			this.connected = false
 			throw new Error(`Failed to initialize Neo4j: ${error instanceof Error ? error.message : String(error)}`)
@@ -209,22 +211,69 @@ export class Neo4jService implements INeo4jService {
 		try {
 			// Process each relationship type in batch
 			for (const [type, rels] of relationshipsByType.entries()) {
+				// Sanitize relationship type to be a valid Cypher identifier
+				const sanitizedType = type.replace(/[^a-zA-Z0-9_]/g, "_")
+
+				console.log(`[Neo4jService] Creating ${rels.length} relationships of type ${sanitizedType}`)
+
+				// First, verify that the nodes exist before trying to create relationships
+				const nodeIds = new Set<string>()
+				for (const rel of rels) {
+					nodeIds.add(rel.fromId)
+					nodeIds.add(rel.toId)
+				}
+
+				// Check which nodes exist
+				const checkResult = await session.run(
+					`
+					UNWIND $nodeIds AS nodeId
+					MATCH (n:CodeNode {id: nodeId})
+					RETURN n.id as id
+					`,
+					{ nodeIds: Array.from(nodeIds) },
+				)
+
+				const existingNodeIds = new Set(checkResult.records.map((r) => r.get("id")))
+				console.log(`[Neo4jService] Found ${existingNodeIds.size} of ${nodeIds.size} nodes`)
+
+				// Filter relationships to only include those where both nodes exist
+				const validRels = rels.filter((r) => existingNodeIds.has(r.fromId) && existingNodeIds.has(r.toId))
+
+				if (validRels.length === 0) {
+					console.warn(
+						`[Neo4jService] No valid relationships to create for type ${sanitizedType} - all nodes missing`,
+					)
+					continue
+				}
+
+				if (validRels.length < rels.length) {
+					console.warn(
+						`[Neo4jService] Skipping ${rels.length - validRels.length} relationships with missing nodes`,
+					)
+				}
+
 				await session.run(
 					`
 					UNWIND $relationships AS rel
 					MATCH (from:CodeNode {id: rel.fromId})
 					MATCH (to:CodeNode {id: rel.toId})
-					MERGE (from)-[r:${type}]->(to)
+					MERGE (from)-[r:${sanitizedType}]->(to)
 					SET r += rel.metadata
 					`,
 					{
-						relationships: rels.map((r) => ({
-							fromId: r.fromId,
-							toId: r.toId,
-							metadata: this.sanitizeMetadata(r.metadata),
-						})),
+						relationships: validRels.map((r) => {
+							const sanitized = this.sanitizeMetadata(r.metadata)
+							// Only include metadata if it has properties
+							return {
+								fromId: r.fromId,
+								toId: r.toId,
+								metadata: Object.keys(sanitized).length > 0 ? sanitized : {},
+							}
+						}),
 					},
 				)
+
+				console.log(`[Neo4jService] Created ${validRels.length} relationships of type ${sanitizedType}`)
 			}
 		} finally {
 			await session.close()
@@ -458,14 +507,50 @@ export class Neo4jService implements INeo4jService {
 	}
 
 	/**
-	 * Clear all data from the graph (for testing/reset)
+	 * Clear all data from the graph using batched deletion
+	 * This works with both Neo4j Community Edition and Enterprise/Cloud
 	 */
 	public async clearAll(): Promise<void> {
 		if (!this.isConnected()) return
 
+		console.log(`[Neo4jService] Clearing all data from database ${this.config.database}...`)
+
 		const session = this.getSession()
+		const batchSize = 10000
+		let totalDeleted = 0
+
 		try {
-			await session.run("MATCH (n:CodeNode) DETACH DELETE n")
+			// Keep deleting in batches until nothing left
+			while (true) {
+				const result = await session.run(
+					`
+					MATCH (n)
+					WITH n LIMIT $batchSize
+					DETACH DELETE n
+					RETURN count(n) as deleted
+					`,
+					{ batchSize: neo4j.int(batchSize) },
+				)
+
+				const deleted = result.records[0]?.get("deleted")?.toNumber() || 0
+				totalDeleted += deleted
+
+				if (deleted > 0) {
+					console.log(`[Neo4jService] Deleted ${deleted} nodes (${totalDeleted} total)`)
+				}
+
+				// If we deleted fewer than batch size, we're done
+				if (deleted === 0) {
+					break
+				}
+			}
+
+			console.log(`[Neo4jService] Database cleared successfully - deleted ${totalDeleted} total nodes`)
+		} catch (error) {
+			console.error(
+				`[Neo4jService] Error clearing database: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			throw error
 		} finally {
 			await session.close()
 		}

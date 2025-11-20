@@ -1,3 +1,4 @@
+import * as vscode from "vscode"
 import { ApiHandlerOptions } from "../../shared/api"
 import { ContextProxy } from "../../core/config/ContextProxy"
 import { EmbedderProvider } from "./interfaces/manager"
@@ -90,7 +91,7 @@ export class CodeIndexConfigManager {
 
 		// Read codebaseIndexEnabled from VSCode settings (persists across reinstalls)
 		// Fall back to globalState value, then default to true
-		const vscodeSettingEnabled = this.contextProxy?.getConfiguration("roo-cline")?.get<boolean>("codeIndex.enabled")
+		const vscodeSettingEnabled = vscode.workspace.getConfiguration("roo-cline").get<boolean>("codeIndex.enabled")
 		this.codebaseIndexEnabled = vscodeSettingEnabled ?? codebaseIndexEnabled ?? true
 		this.qdrantUrl = codebaseIndexQdrantUrl
 		this.qdrantApiKey = qdrantApiKey ?? ""
@@ -123,21 +124,8 @@ export class CodeIndexConfigManager {
 		this.openAiOptions = { openAiNativeApiKey: openAiKey }
 
 		// Set embedder provider with support for openai-compatible
-		if (codebaseIndexEmbedderProvider === "ollama") {
-			this.embedderProvider = "ollama"
-		} else if (codebaseIndexEmbedderProvider === "openai-compatible") {
-			this.embedderProvider = "openai-compatible"
-		} else if (codebaseIndexEmbedderProvider === "gemini") {
-			this.embedderProvider = "gemini"
-		} else if (codebaseIndexEmbedderProvider === "mistral") {
-			this.embedderProvider = "mistral"
-		} else if (codebaseIndexEmbedderProvider === "vercel-ai-gateway") {
-			this.embedderProvider = "vercel-ai-gateway"
-		} else if (codebaseIndexEmbedderProvider === "openrouter") {
-			this.embedderProvider = "openrouter"
-		} else {
-			this.embedderProvider = "openai"
-		}
+		// Use the provider from config, or default to "openai" if not set
+		this.embedderProvider = codebaseIndexEmbedderProvider || "openai"
 
 		this.modelId = codebaseIndexEmbedderModelId || undefined
 

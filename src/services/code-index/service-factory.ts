@@ -198,6 +198,10 @@ export class CodeIndexServiceFactory {
 		const config = this.configManager.neo4jConfig
 
 		// Validate required fields and provide defaults
+		// NOTE: We use "neo4j" as the default database name because:
+		// 1. Neo4j Community Edition (90% of self-hosted users) does NOT support multiple databases
+		// 2. Neo4j Aura Free tier also only supports the "neo4j" database
+		// 3. Custom database names require Neo4j Enterprise Edition
 		const neo4jConfig = {
 			enabled: config.enabled,
 			url: config.url || "bolt://localhost:7687",
@@ -220,11 +224,18 @@ export class CodeIndexServiceFactory {
 		context?: vscode.ExtensionContext,
 	): IGraphIndexer | undefined {
 		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
+			console.log("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
 			return undefined
 		}
 
 		// Create error logger for persistent error tracking
 		const errorLogger = context ? new GraphIndexErrorLogger(context) : undefined
+
+		if (!errorLogger) {
+			console.warn("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")
+		} else {
+			console.log("[ServiceFactory] GraphIndexer created WITH error logger")
+		}
 
 		return new GraphIndexer(neo4jService, errorLogger)
 	}
