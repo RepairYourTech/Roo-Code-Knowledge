@@ -132,9 +132,10 @@ export class CodeIndexOrchestrator {
 			return
 		}
 
-		this._isProcessing = true
-		// Reset cancellation flag before starting new indexing operation
+		// Reset cancellation flag before starting
 		this.scanner.resetCancellation()
+
+		this._isProcessing = true
 		this.stateManager.setSystemState("Indexing", "Initializing services...")
 
 		// Track whether we successfully connected to Qdrant and started indexing
@@ -362,14 +363,8 @@ export class CodeIndexOrchestrator {
 	 *
 	 * IMPORTANT: This clears BOTH Qdrant AND Neo4j (if enabled).
 	 * Neo4j depends on Qdrant data, so they must be cleared together.
-	 *
-	 * This can be called even while indexing is in progress - it will cancel
-	 * the active indexing operation before clearing.
 	 */
 	public async clearIndexData(): Promise<void> {
-		// Cancel any active indexing operation first
-		this.cancelIndexing()
-
 		this._isProcessing = true
 
 		const errors: string[] = []
