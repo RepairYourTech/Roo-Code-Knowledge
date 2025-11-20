@@ -74,7 +74,23 @@ export class CodeIndexStateManager {
 			this._totalItems = totalItems
 			this._currentItemUnit = "blocks"
 
-			const message = `Indexed ${this._processedItems} / ${this._totalItems} ${this._currentItemUnit} found`
+			// Calculate combined progress if Neo4j is also indexing
+			let message: string
+			if (this._neo4jStatus === "indexing" && this._neo4jTotalItems > 0) {
+				// Calculate combined percentage: (vector progress + neo4j progress) / 2
+				const vectorPercent =
+					this._totalItems > 0 ? Math.round((this._processedItems / this._totalItems) * 100) : 0
+				const neo4jPercent =
+					this._neo4jTotalItems > 0
+						? Math.round((this._neo4jProcessedItems / this._neo4jTotalItems) * 100)
+						: 0
+				const combinedPercent = Math.round((vectorPercent + neo4jPercent) / 2)
+				message = `Indexing ${combinedPercent}% complete (Vector: ${vectorPercent}%, Graph: ${neo4jPercent}%)`
+			} else {
+				// Just vector indexing
+				message = `Indexed ${this._processedItems} / ${this._totalItems} ${this._currentItemUnit} found`
+			}
+
 			const oldStatus = this._systemStatus
 			const oldMessage = this._statusMessage
 
@@ -143,6 +159,18 @@ export class CodeIndexStateManager {
 			this._neo4jTotalItems = totalItems
 			if (status !== undefined) this._neo4jStatus = status
 			if (message !== undefined) this._neo4jMessage = message
+
+			// If we're currently indexing and Neo4j progress changed, update the combined status message
+			if (this._systemStatus === "Indexing" && progressChanged && this._neo4jStatus === "indexing") {
+				const vectorPercent =
+					this._totalItems > 0 ? Math.round((this._processedItems / this._totalItems) * 100) : 0
+				const neo4jPercent =
+					this._neo4jTotalItems > 0
+						? Math.round((this._neo4jProcessedItems / this._neo4jTotalItems) * 100)
+						: 0
+				const combinedPercent = Math.round((vectorPercent + neo4jPercent) / 2)
+				this._statusMessage = `Indexing ${combinedPercent}% complete (Vector: ${vectorPercent}%, Graph: ${neo4jPercent}%)`
+			}
 
 			this._progressEmitter.fire(this.getCurrentStatus())
 		}
