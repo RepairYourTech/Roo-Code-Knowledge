@@ -1626,46 +1626,65 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						{/* Action Buttons */}
 						<div className="flex items-center justify-between gap-2 pt-6">
 							<div className="flex gap-2">
-								{currentSettings.codebaseIndexEnabled &&
-									(indexingStatus.systemStatus === "Error" ||
-										indexingStatus.systemStatus === "Standby") && (
-										<Button
-											onClick={() => vscode.postMessage({ type: "startIndexing" })}
-											disabled={saveStatus === "saving" || hasUnsavedChanges}>
-											{t("settings:codeIndex.startIndexingButton")}
-										</Button>
-									)}
-
-								{/* Show Clear Index button when status is Indexed or Error, regardless of enabled state */}
-								{(indexingStatus.systemStatus === "Indexed" ||
-									indexingStatus.systemStatus === "Error") && (
-									<AlertDialog>
-										<AlertDialogTrigger asChild>
-											<Button variant="secondary">
-												{t("settings:codeIndex.clearIndexDataButton")}
+								{/* Start/Cancel Toggle Button - Only show when indexing is enabled */}
+								{currentSettings.codebaseIndexEnabled && (
+									<>
+										{/* Show "Start Indexing" when status is Standby or Error */}
+										{(indexingStatus.systemStatus === "Standby" ||
+											indexingStatus.systemStatus === "Error") && (
+											<Button
+												onClick={() => vscode.postMessage({ type: "startIndexing" })}
+												disabled={saveStatus === "saving" || hasUnsavedChanges}>
+												{t("settings:codeIndex.startIndexingButton")}
 											</Button>
-										</AlertDialogTrigger>
-										<AlertDialogContent>
-											<AlertDialogHeader>
-												<AlertDialogTitle>
-													{t("settings:codeIndex.clearDataDialog.title")}
-												</AlertDialogTitle>
-												<AlertDialogDescription>
-													{t("settings:codeIndex.clearDataDialog.description")}
-												</AlertDialogDescription>
-											</AlertDialogHeader>
-											<AlertDialogFooter>
-												<AlertDialogCancel>
-													{t("settings:codeIndex.clearDataDialog.cancelButton")}
-												</AlertDialogCancel>
-												<AlertDialogAction
-													onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
-													{t("settings:codeIndex.clearDataDialog.confirmButton")}
-												</AlertDialogAction>
-											</AlertDialogFooter>
-										</AlertDialogContent>
-									</AlertDialog>
+										)}
+
+										{/* Show "Cancel Indexing" when status is Indexing */}
+										{indexingStatus.systemStatus === "Indexing" && (
+											<Button
+												variant="secondary"
+												onClick={() => vscode.postMessage({ type: "cancelIndexing" })}>
+												{t("settings:codeIndex.cancelIndexingButton") || "Cancel Indexing"}
+											</Button>
+										)}
+									</>
 								)}
+
+								{/* Delete Index Button - Always visible regardless of status */}
+								{/* This allows users to delete the index at any time */}
+								<AlertDialog>
+									<AlertDialogTrigger asChild>
+										<Button variant="destructive">
+											{t("settings:codeIndex.deleteIndexButton") || "Delete Index"}
+										</Button>
+									</AlertDialogTrigger>
+									<AlertDialogContent>
+										<AlertDialogHeader>
+											<AlertDialogTitle>
+												{t("settings:codeIndex.deleteIndexDialog.title") || "Delete Index Data"}
+											</AlertDialogTitle>
+											<AlertDialogDescription>
+												{indexingStatus.systemStatus === "Indexing"
+													? t(
+															"settings:codeIndex.deleteIndexDialog.descriptionWhileIndexing",
+														) ||
+														"This will stop the current indexing operation and delete all index data (both Qdrant and Neo4j). This action cannot be undone. Are you sure?"
+													: t("settings:codeIndex.deleteIndexDialog.description") ||
+														"This will delete all index data (both Qdrant and Neo4j). This action cannot be undone. Are you sure?"}
+											</AlertDialogDescription>
+										</AlertDialogHeader>
+										<AlertDialogFooter>
+											<AlertDialogCancel>
+												{t("settings:codeIndex.deleteIndexDialog.cancelButton") || "Cancel"}
+											</AlertDialogCancel>
+											<AlertDialogAction
+												onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
+												{t("settings:codeIndex.deleteIndexDialog.confirmButton") ||
+													"Delete Index"}
+											</AlertDialogAction>
+										</AlertDialogFooter>
+									</AlertDialogContent>
+								</AlertDialog>
 							</div>
 
 							<Button

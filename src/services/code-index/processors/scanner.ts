@@ -51,6 +51,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 	// Track cumulative Neo4j progress across all batches
 	private neo4jCumulativeFilesProcessed: number = 0
 	private neo4jTotalFilesToProcess: number = 0
+	// Cancellation support
+	private _cancelled: boolean = false
 
 	constructor(
 		private readonly embedder: IEmbedder,
@@ -80,6 +82,21 @@ export class DirectoryScanner implements IDirectoryScanner {
 	}
 
 	/**
+	 * Cancel the current indexing operation
+	 */
+	public cancel(): void {
+		this._cancelled = true
+		console.log("[DirectoryScanner] Indexing cancelled by user")
+	}
+
+	/**
+	 * Reset the cancellation flag (call before starting a new scan)
+	 */
+	public resetCancellation(): void {
+		this._cancelled = false
+	}
+
+	/**
 	 * Recursively scans a directory for code blocks in supported files.
 	 * @param directoryPath The directory to scan
 	 * @param rooIgnoreController Optional RooIgnoreController instance for filtering
@@ -96,6 +113,12 @@ export class DirectoryScanner implements IDirectoryScanner {
 		const directoryPath = directory
 		// Capture workspace context at scan start
 		const scanWorkspace = getWorkspacePathForContext(directoryPath)
+
+		// Check for cancellation before starting
+		if (this._cancelled) {
+			console.log("[DirectoryScanner] Scan aborted - cancelled before start")
+			throw new Error("Indexing cancelled by user")
+		}
 
 		// Get all files recursively (handles .gitignore automatically)
 		const [allPaths, _] = await listFiles(directoryPath, true, MAX_LIST_FILES_LIMIT_CODE_INDEX)
@@ -386,6 +409,12 @@ export class DirectoryScanner implements IDirectoryScanner {
 	): Promise<void> {
 		if (batchBlocks.length === 0) return
 
+		// Check for cancellation before processing batch
+		if (this._cancelled) {
+			console.log("[DirectoryScanner] Batch processing aborted - cancelled")
+			throw new Error("Indexing cancelled by user")
+		}
+
 		let attempts = 0
 		let success = false
 		let lastError: Error | null = null
@@ -393,6 +422,11 @@ export class DirectoryScanner implements IDirectoryScanner {
 		while (attempts < MAX_BATCH_RETRIES && !success) {
 			attempts++
 			try {
+				// Check for cancellation before each retry
+				if (this._cancelled) {
+					console.log("[DirectoryScanner] Batch processing aborted - cancelled during retry")
+					throw new Error("Indexing cancelled by user")
+				}
 				// --- Deletion Step ---
 				const uniqueFilePaths = [
 					...new Set(
