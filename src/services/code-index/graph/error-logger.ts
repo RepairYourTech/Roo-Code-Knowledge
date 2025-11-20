@@ -3,11 +3,17 @@ import * as path from "path"
 import * as vscode from "vscode"
 
 /**
- * Error log entry for Neo4j graph indexing
+ * Supported codebase indexing services
  */
-export interface GraphIndexErrorEntry {
+export type CodebaseIndexService = "neo4j" | "qdrant" | "bm25" | "tree-sitter" | "ast" | "lsp" | "parser" | "embedder"
+
+/**
+ * Error log entry for codebase indexing services
+ */
+export interface CodebaseIndexErrorEntry {
 	timestamp: string
-	filePath: string
+	service: CodebaseIndexService
+	filePath?: string
 	operation: string
 	error: string
 	stack?: string
@@ -18,12 +24,28 @@ export interface GraphIndexErrorEntry {
 }
 
 /**
- * Persistent error logger for Neo4j graph indexing
- * Writes errors to a log file that persists across sessions
+ * Legacy type alias for backward compatibility
+ * @deprecated Use CodebaseIndexErrorEntry instead
  */
-export class GraphIndexErrorLogger {
+export type GraphIndexErrorEntry = CodebaseIndexErrorEntry
+
+/**
+ * Persistent error logger for all codebase indexing services
+ * Writes errors to a unified log file that persists across sessions
+ *
+ * Supports logging errors from:
+ * - Neo4j graph database
+ * - Qdrant vector store
+ * - BM25 search index
+ * - Tree-sitter parser
+ * - AST analysis
+ * - LSP integration
+ * - Code parsers
+ * - Embedding providers
+ */
+export class CodebaseIndexErrorLogger {
 	private logFilePath: string
-	private errorBuffer: GraphIndexErrorEntry[] = []
+	private errorBuffer: CodebaseIndexErrorEntry[] = []
 	private flushTimer: NodeJS.Timeout | null = null
 	private readonly FLUSH_INTERVAL_MS = 5000 // Flush every 5 seconds
 	private readonly MAX_BUFFER_SIZE = 100 // Flush if buffer exceeds this size
@@ -31,8 +53,8 @@ export class GraphIndexErrorLogger {
 	constructor(private readonly context: vscode.ExtensionContext) {
 		// Store log file in extension's global storage path
 		const storagePath = context.globalStorageUri.fsPath
-		this.logFilePath = path.join(storagePath, "neo4j-graph-errors.log")
-		console.log(`[GraphIndexErrorLogger] Error log file: ${this.logFilePath}`)
+		this.logFilePath = path.join(storagePath, "codebase-index-errors.log")
+		console.log(`[CodebaseIndexErrorLogger] Error log file: ${this.logFilePath}`)
 		this.ensureLogDirectory()
 	}
 
@@ -51,8 +73,8 @@ export class GraphIndexErrorLogger {
 	/**
 	 * Log an error with full context
 	 */
-	async logError(entry: Omit<GraphIndexErrorEntry, "timestamp">): Promise<void> {
-		const fullEntry: GraphIndexErrorEntry = {
+	async logError(entry: Omit<CodebaseIndexErrorEntry, "timestamp">): Promise<void> {
+		const fullEntry: CodebaseIndexErrorEntry = {
 			...entry,
 			timestamp: new Date().toISOString(),
 		}
@@ -61,8 +83,10 @@ export class GraphIndexErrorLogger {
 		this.errorBuffer.push(fullEntry)
 
 		// Also log to console for immediate visibility
+		const serviceLabel = entry.service.toUpperCase()
+		const fileContext = entry.filePath ? ` - ${entry.filePath}` : ""
 		console.error(
-			`[Neo4j Graph Error] ${entry.operation} - ${entry.filePath}:`,
+			`[${serviceLabel} Error] ${entry.operation}${fileContext}:`,
 			entry.error,
 			entry.additionalContext || "",
 		)
@@ -125,7 +149,7 @@ export class GraphIndexErrorLogger {
 	/**
 	 * Read all errors from the log file
 	 */
-	async readErrors(limit?: number): Promise<GraphIndexErrorEntry[]> {
+	async readErrors(limit?: number): Promise<CodebaseIndexErrorEntry[]> {
 		try {
 			const content = await fs.readFile(this.logFilePath, "utf-8")
 			const lines = content.trim().split("\n").filter(Boolean)
@@ -133,12 +157,12 @@ export class GraphIndexErrorLogger {
 			const errors = lines
 				.map((line) => {
 					try {
-						return JSON.parse(line) as GraphIndexErrorEntry
+						return JSON.parse(line) as CodebaseIndexErrorEntry
 					} catch {
 						return null
 					}
 				})
-				.filter((e): e is GraphIndexErrorEntry => e !== null)
+				.filter((e): e is CodebaseIndexErrorEntry => e !== null)
 
 			// Return most recent errors first
 			errors.reverse()
@@ -150,6 +174,37 @@ export class GraphIndexErrorLogger {
 			}
 			throw error
 		}
+	}
+
+	/**
+	 * Get errors for a specific service
+	 */
+	async getErrorsForService(service: CodebaseIndexService, limit?: number): Promise<CodebaseIndexErrorEntry[]> {
+		const allErrors = await this.readErrors()
+		const serviceErrors = allErrors.filter((e) => e.service === service)
+		return limit ? serviceErrors.slice(0, limit) : serviceErrors
+	}
+
+	/**
+	 * Get errors for a specific file
+	 */
+	async getErrorsForFile(filePath: string, limit?: number): Promise<CodebaseIndexErrorEntry[]> {
+		const allErrors = await this.readErrors()
+		const fileErrors = allErrors.filter((e) => e.filePath === filePath)
+		return limit ? fileErrors.slice(0, limit) : fileErrors
+	}
+
+	/**
+	 * Get errors for a specific service and file
+	 */
+	async getErrorsForServiceAndFile(
+		service: CodebaseIndexService,
+		filePath: string,
+		limit?: number,
+	): Promise<CodebaseIndexErrorEntry[]> {
+		const allErrors = await this.readErrors()
+		const filtered = allErrors.filter((e) => e.service === service && e.filePath === filePath)
+		return limit ? filtered.slice(0, limit) : filtered
 	}
 
 	/**
@@ -170,22 +225,28 @@ export class GraphIndexErrorLogger {
 	 */
 	async getErrorStats(): Promise<{
 		totalErrors: number
+		errorsByService: Record<string, number>
 		errorsByOperation: Record<string, number>
 		errorsByFile: Record<string, number>
-		recentErrors: GraphIndexErrorEntry[]
+		recentErrors: CodebaseIndexErrorEntry[]
 	}> {
 		const errors = await this.readErrors()
 
+		const errorsByService: Record<string, number> = {}
 		const errorsByOperation: Record<string, number> = {}
 		const errorsByFile: Record<string, number> = {}
 
 		for (const error of errors) {
+			errorsByService[error.service] = (errorsByService[error.service] || 0) + 1
 			errorsByOperation[error.operation] = (errorsByOperation[error.operation] || 0) + 1
-			errorsByFile[error.filePath] = (errorsByFile[error.filePath] || 0) + 1
+			if (error.filePath) {
+				errorsByFile[error.filePath] = (errorsByFile[error.filePath] || 0) + 1
+			}
 		}
 
 		return {
 			totalErrors: errors.length,
+			errorsByService,
 			errorsByOperation,
 			errorsByFile,
 			recentErrors: errors.slice(0, 10),
@@ -201,5 +262,16 @@ export class GraphIndexErrorLogger {
 			this.flushTimer = null
 		}
 		await this.flush()
+	}
+}
+
+/**
+ * Legacy class alias for backward compatibility
+ * @deprecated Use CodebaseIndexErrorLogger instead
+ */
+export class GraphIndexErrorLogger extends CodebaseIndexErrorLogger {
+	constructor(context: vscode.ExtensionContext) {
+		super(context)
+		console.warn("[GraphIndexErrorLogger] This class is deprecated. Use CodebaseIndexErrorLogger instead.")
 	}
 }

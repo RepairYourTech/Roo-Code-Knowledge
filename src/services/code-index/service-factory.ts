@@ -23,7 +23,7 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
 import { Neo4jService } from "./graph/neo4j-service"
 import { GraphIndexer } from "./graph/graph-indexer"
-import { GraphIndexErrorLogger } from "./graph/error-logger"
+import { CodebaseIndexErrorLogger } from "./graph/error-logger"
 import { LSPService } from "./lsp/lsp-service"
 import { SearchOrchestrator } from "./query/search-orchestrator"
 import { HybridSearchService } from "./hybrid-search-service"
@@ -229,7 +229,7 @@ export class CodeIndexServiceFactory {
 		}
 
 		// Create error logger for persistent error tracking
-		const errorLogger = context ? new GraphIndexErrorLogger(context) : undefined
+		const errorLogger = context ? new CodebaseIndexErrorLogger(context) : undefined
 
 		if (!errorLogger) {
 			console.warn("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")

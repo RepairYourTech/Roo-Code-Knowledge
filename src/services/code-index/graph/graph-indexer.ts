@@ -1,7 +1,7 @@
 import { CodeBlock, CallInfo, TestMetadata, TestTarget } from "../interfaces/file-processor"
 import { CodeNode, CodeRelationship, INeo4jService } from "../interfaces/neo4j-service"
 import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
-import { GraphIndexErrorLogger } from "./error-logger"
+import { CodebaseIndexErrorLogger } from "./error-logger"
 import * as path from "path"
 
 /**
@@ -11,7 +11,7 @@ import * as path from "path"
 export class GraphIndexer implements IGraphIndexer {
 	constructor(
 		private neo4jService: INeo4jService,
-		private errorLogger?: GraphIndexErrorLogger,
+		private errorLogger?: CodebaseIndexErrorLogger,
 	) {}
 
 	/**
@@ -80,6 +80,7 @@ export class GraphIndexer implements IGraphIndexer {
 			// Log to persistent error logger
 			if (this.errorLogger) {
 				await this.errorLogger.logError({
+					service: "neo4j",
 					filePath,
 					operation: "indexBlocks",
 					error: errorMessage,
