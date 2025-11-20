@@ -3,6 +3,7 @@ import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedd
 import {
 	MAX_BATCH_TOKENS,
 	MAX_ITEM_TOKENS,
+	MAX_BATCH_ITEMS,
 	MAX_BATCH_RETRIES as MAX_RETRIES,
 	INITIAL_RETRY_DELAY_MS as INITIAL_DELAY_MS,
 } from "../constants"
@@ -39,6 +40,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	private readonly apiKey: string
 	private readonly isFullUrl: boolean
 	private readonly maxItemTokens: number
+	private readonly maxBatchItems: number
 
 	// Global rate limiting state shared across all instances
 	private static globalRateLimitState = {
@@ -56,8 +58,9 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	 * @param apiKey The API key for authentication
 	 * @param modelId Optional model identifier (defaults to "text-embedding-3-small")
 	 * @param maxItemTokens Optional maximum tokens per item (defaults to MAX_ITEM_TOKENS)
+	 * @param maxBatchItems Optional maximum number of items per batch (defaults to MAX_BATCH_ITEMS)
 	 */
-	constructor(baseUrl: string, apiKey: string, modelId?: string, maxItemTokens?: number) {
+	constructor(baseUrl: string, apiKey: string, modelId?: string, maxItemTokens?: number, maxBatchItems?: number) {
 		if (!baseUrl) {
 			throw new Error(t("embeddings:validation.baseUrlRequired"))
 		}
@@ -83,6 +86,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		// Cache the URL type check for performance
 		this.isFullUrl = this.isFullEndpointUrl(baseUrl)
 		this.maxItemTokens = maxItemTokens || MAX_ITEM_TOKENS
+		this.maxBatchItems = maxBatchItems || MAX_BATCH_ITEMS
 	}
 
 	/**
@@ -144,7 +148,9 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 					continue
 				}
 
-				if (currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS) {
+				// Check both token limit AND item count limit
+				// Gemini has a strict limit of 100 items per batch
+				if (currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS && currentBatch.length < this.maxBatchItems) {
 					currentBatch.push(text)
 					currentBatchTokens += itemTokens
 					processedIndices.push(i)

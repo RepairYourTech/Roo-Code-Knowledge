@@ -29,7 +29,9 @@ export const MAX_PENDING_BATCHES = 20 // Maximum number of batches to accumulate
 /**OpenAI Embedder */
 export const MAX_BATCH_TOKENS = 100000
 export const MAX_ITEM_TOKENS = 8191
+export const MAX_BATCH_ITEMS = 2048 // Maximum number of items per batch (OpenAI limit)
 export const BATCH_PROCESSING_CONCURRENCY = 10
 
 /**Gemini Embedder */
 export const GEMINI_MAX_ITEM_TOKENS = 2048
+export const GEMINI_MAX_BATCH_ITEMS = 100 // Gemini's strict limit: "at most 100 requests can be in one batch"
