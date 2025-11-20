@@ -2260,12 +2260,10 @@ export const webviewMessageHandler = async (
 					codebaseIndexSearchMaxResults: settings.codebaseIndexSearchMaxResults,
 					codebaseIndexSearchMinScore: settings.codebaseIndexSearchMinScore,
 					// Neo4j settings (non-sensitive)
-					// CRITICAL: When codebase index is disabled, also disable Neo4j
-					neo4jEnabled: settings.codebaseIndexEnabled
-						? settings.neo4jEnabled !== undefined
+					neo4jEnabled:
+						settings.neo4jEnabled !== undefined
 							? settings.neo4jEnabled
-							: (currentConfig.neo4jEnabled ?? false)
-						: false,
+							: (currentConfig.neo4jEnabled ?? false),
 					neo4jUri: settings.neo4jUri,
 					neo4jUsername: settings.neo4jUsername,
 				}
@@ -2522,6 +2520,20 @@ export const webviewMessageHandler = async (
 				}
 			} catch (error) {
 				provider.log(`Error starting indexing: ${error instanceof Error ? error.message : String(error)}`)
+			}
+			break
+		}
+		case "cancelIndexing": {
+			try {
+				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				if (!manager) {
+					provider.log("Cannot cancel indexing: No workspace folder open")
+					return
+				}
+				manager.cancelIndexing()
+				provider.log("Indexing cancelled by user")
+			} catch (error) {
+				provider.log(`Error cancelling indexing: ${error instanceof Error ? error.message : String(error)}`)
 			}
 			break
 		}

@@ -133,6 +133,8 @@ export class CodeIndexManager {
 		// 2. Check if feature is enabled
 		if (!this.isFeatureEnabled) {
 			if (this._orchestrator) {
+				// Cancel any active indexing operation
+				this._orchestrator.cancelIndexing()
 				this._orchestrator.stopWatcher()
 			}
 			// Close Neo4j connection when indexing is disabled
@@ -213,6 +215,19 @@ export class CodeIndexManager {
 
 		this.assertInitialized()
 		await this._orchestrator!.startIndexing()
+	}
+
+	/**
+	 * Cancels any active indexing operation and sets state back to Standby
+	 */
+	public cancelIndexing(): void {
+		if (!this._orchestrator) {
+			return
+		}
+
+		console.log("[CodeIndexManager] Cancelling indexing operation")
+		this._orchestrator.cancelIndexing()
+		this._stateManager.setSystemState("Standby", "Indexing cancelled by user")
 	}
 
 	/**
@@ -488,6 +503,8 @@ export class CodeIndexManager {
 			if (!isFeatureEnabled) {
 				// Stop the orchestrator if it exists
 				if (this._orchestrator) {
+					// Cancel any active indexing operation
+					this._orchestrator.cancelIndexing()
 					this._orchestrator.stopWatcher()
 				}
 				// Close Neo4j connection when indexing is disabled
