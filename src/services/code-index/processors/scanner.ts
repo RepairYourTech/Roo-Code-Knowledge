@@ -24,6 +24,11 @@ import { Mutex } from "async-mutex"
 import { CacheManager } from "../cache-manager"
 import { t } from "../../../i18n"
 import { buildEmbeddingContext, EnhancedCodeSegment } from "../types/metadata"
+
+// Global mutex for Neo4j file indexing operations to prevent race conditions
+// This ensures that when File A is being indexed (delete + create nodes + create relationships),
+// File B cannot delete its nodes in parallel, which would break relationships from A to B
+const neo4jFileMutex = new Mutex()
 import {
 	QDRANT_CODE_BLOCK_NAMESPACE,
 	MAX_FILE_SIZE_BYTES,
@@ -180,74 +185,69 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 					// Process embeddings if configured
 					if (this.embedder && this.qdrantClient && blocks.length > 0) {
-						// Add to batch accumulators
-						let addedBlocksFromFile = false
-						for (const block of blocks) {
-							const trimmedContent = block.content.trim()
-							if (trimmedContent) {
-								const release = await mutex.acquire()
-								try {
+						const release = await mutex.acquire()
+						try {
+							let addedBlocksFromFile = false
+							for (const block of blocks) {
+								const trimmedContent = block.content.trim()
+								if (trimmedContent) {
 									currentBatchBlocks.push(block)
 									currentBatchTexts.push(trimmedContent)
 									addedBlocksFromFile = true
-
-									// Check if batch threshold is met
-									if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
-										// Wait if we've reached the maximum pending batches
-										while (pendingBatchCount >= MAX_PENDING_BATCHES) {
-											// Wait for at least one batch to complete
-											await Promise.race(activeBatchPromises)
-										}
-
-										// Copy current batch data and clear accumulators
-										const batchBlocks = [...currentBatchBlocks]
-										const batchTexts = [...currentBatchTexts]
-										const batchFileInfos = [...currentBatchFileInfos]
-										currentBatchBlocks = []
-										currentBatchTexts = []
-										currentBatchFileInfos = []
-
-										// Increment pending batch count
-										pendingBatchCount++
-
-										// Queue batch processing
-										const batchPromise = batchLimiter(() =>
-											this.processBatch(
-												batchBlocks,
-												batchTexts,
-												batchFileInfos,
-												scanWorkspace,
-												onError,
-												onBlocksIndexed,
-											),
-										)
-										activeBatchPromises.add(batchPromise)
-
-										// Clean up completed promises to prevent memory accumulation
-										batchPromise.finally(() => {
-											activeBatchPromises.delete(batchPromise)
-											pendingBatchCount--
-										})
-									}
-								} finally {
-									release()
 								}
 							}
-						}
 
-						// Add file info once per file (outside the block loop)
-						if (addedBlocksFromFile) {
-							const release = await mutex.acquire()
-							try {
+							// Add file info once per file (outside the block loop)
+							if (addedBlocksFromFile) {
 								totalBlockCount += fileBlockCount
 								currentBatchFileInfos.push({
 									filePath,
 									fileHash: currentFileHash,
 									isNew: isNewFile,
 								})
-							} finally {
-								release()
+
+								// Check if batch threshold is met AFTER adding all blocks for this file
+								// This ensures a file is never split across batches
+								if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
+									// Wait if we've reached the maximum pending batches
+									while (pendingBatchCount >= MAX_PENDING_BATCHES) {
+										// Wait for at least one batch to complete
+										await Promise.race(activeBatchPromises)
+									}
+
+									// Copy current batch data and clear accumulators
+									const batchBlocks = [...currentBatchBlocks]
+									const batchTexts = [...currentBatchTexts]
+									const batchFileInfos = [...currentBatchFileInfos]
+									currentBatchBlocks = []
+									currentBatchTexts = []
+									currentBatchFileInfos = []
+
+									// Increment pending batch count
+									pendingBatchCount++
+
+									// Queue batch processing
+									const batchPromise = batchLimiter(() =>
+										this.processBatch(
+											batchBlocks,
+											batchTexts,
+											batchFileInfos,
+											scanWorkspace,
+											onError,
+											onBlocksIndexed,
+										),
+									)
+									activeBatchPromises.add(batchPromise)
+
+									// Clean up completed promises to prevent memory accumulation
+									batchPromise.finally(() => {
+										activeBatchPromises.delete(batchPromise)
+										pendingBatchCount--
+									})
+								}
 							}
+						} finally {
+							release()
 						}
 					} else {
 						// Only update hash if not being processed in a batch
@@ -571,19 +571,27 @@ export class DirectoryScanner implements IDirectoryScanner {
 						const batchFileCount = blocksByFile.size
 						this.neo4jTotalFilesToProcess += batchFileCount
 
-						// Index each file's blocks to Neo4j
+						// Index each file's blocks to Neo4j with mutex protection
+						// This prevents race conditions where File A creates relationships to File B's nodes
+						// while File B is being re-indexed (delete + create) in a parallel batch
 						for (const [filePath, fileBlocks] of blocksByFile) {
-							await this.graphIndexer.indexFile(filePath, fileBlocks)
-							this.neo4jCumulativeFilesProcessed++
+							// Acquire mutex before indexing this file
+							const release = await neo4jFileMutex.acquire()
+							try {
+								await this.graphIndexer.indexFile(filePath, fileBlocks)
+								this.neo4jCumulativeFilesProcessed++
 
-							// Report cumulative progress
-							if (this.stateManager) {
-								this.stateManager.reportNeo4jIndexingProgress(
-									this.neo4jCumulativeFilesProcessed,
-									this.neo4jTotalFilesToProcess,
-									"indexing",
-									`Indexed ${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess} files to graph`,
-								)
+								// Report cumulative progress
+								if (this.stateManager) {
+									this.stateManager.reportNeo4jIndexingProgress(
+										this.neo4jCumulativeFilesProcessed,
+										this.neo4jTotalFilesToProcess,
+										"indexing",
+										`Indexed ${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess} files to graph`,
+									)
+								}
+							} finally {
+								release()
 							}
 						}
 					} catch (error) {
