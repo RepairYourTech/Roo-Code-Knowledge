@@ -2260,10 +2260,12 @@ export const webviewMessageHandler = async (
 					codebaseIndexSearchMaxResults: settings.codebaseIndexSearchMaxResults,
 					codebaseIndexSearchMinScore: settings.codebaseIndexSearchMinScore,
 					// Neo4j settings (non-sensitive)
-					neo4jEnabled:
-						settings.neo4jEnabled !== undefined
+					// CRITICAL: When codebase index is disabled, also disable Neo4j
+					neo4jEnabled: settings.codebaseIndexEnabled
+						? settings.neo4jEnabled !== undefined
 							? settings.neo4jEnabled
-							: (currentConfig.neo4jEnabled ?? false),
+							: (currentConfig.neo4jEnabled ?? false)
+						: false,
 					neo4jUri: settings.neo4jUri,
 					neo4jUsername: settings.neo4jUsername,
 				}
