@@ -1,6 +1,6 @@
 import { OpenAICompatibleEmbedder } from "./openai-compatible"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
-import { GEMINI_MAX_ITEM_TOKENS } from "../constants"
+import { GEMINI_MAX_ITEM_TOKENS, GEMINI_MAX_BATCH_ITEMS } from "../constants"
 import { t } from "../../../i18n"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -33,11 +33,13 @@ export class GeminiEmbedder implements IEmbedder {
 		this.modelId = modelId || GeminiEmbedder.DEFAULT_MODEL
 
 		// Create an OpenAI Compatible embedder with Gemini's configuration
+		// Pass GEMINI_MAX_BATCH_ITEMS to enforce Gemini's strict 100-item batch limit
 		this.openAICompatibleEmbedder = new OpenAICompatibleEmbedder(
 			GeminiEmbedder.GEMINI_BASE_URL,
 			apiKey,
 			this.modelId,
 			GEMINI_MAX_ITEM_TOKENS,
+			GEMINI_MAX_BATCH_ITEMS, // Gemini's strict limit: "at most 100 requests can be in one batch"
 		)
 	}
 

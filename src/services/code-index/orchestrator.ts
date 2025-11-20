@@ -35,6 +35,9 @@ export class CodeIndexOrchestrator {
 		if (this._isProcessing) {
 			console.log("[CodeIndexOrchestrator] Cancelling active indexing operation")
 			this.scanner.cancel()
+			// Set _isProcessing to false immediately so the UI updates
+			// and subsequent operations know indexing is no longer active
+			this._isProcessing = false
 		}
 	}
 

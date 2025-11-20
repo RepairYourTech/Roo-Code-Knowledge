@@ -1424,95 +1424,105 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 											</p>
 										)}
 									</div>
-								</div>
-							)}
-						</div>
 
-						{/* Neo4j Graph Database Section - OPTIONAL */}
-						<div className="mt-4">
-							<div className="space-y-3 p-3 border border-vscode-panel-border rounded">
-								<div className="flex items-center justify-between">
-									<h4 className="text-sm font-semibold">Graph Database (Neo4j) - OPTIONAL</h4>
-								</div>
+									{/* Neo4j Graph Database Section - OPTIONAL */}
+									<div className="mt-4 pt-4 border-t border-vscode-panel-border">
+										<div className="space-y-3">
+											<div className="flex items-center justify-between">
+												<h4 className="text-sm font-semibold">
+													Graph Database (Neo4j) - OPTIONAL
+												</h4>
+											</div>
 
-								<VSCodeCheckbox
-									checked={currentSettings.neo4jEnabled}
-									onChange={(e: any) => updateSetting("neo4jEnabled", e.target.checked)}>
-									Enable Neo4j Graph Index
-								</VSCodeCheckbox>
+											<VSCodeCheckbox
+												checked={currentSettings.neo4jEnabled}
+												onChange={(e: any) => updateSetting("neo4jEnabled", e.target.checked)}>
+												Enable Neo4j Graph Index
+											</VSCodeCheckbox>
 
-								<p className="text-xs text-vscode-descriptionForeground">
-									Add graph-based code relationships for enhanced context understanding. Neo4j is
-									optional and disabled by default.
-								</p>
+											<p className="text-xs text-vscode-descriptionForeground">
+												Add graph-based code relationships for enhanced context understanding.
+												Neo4j is optional and disabled by default.
+											</p>
 
-								{currentSettings.neo4jEnabled && (
-									<div className="space-y-3 ml-6">
-										<div className="space-y-2">
-											<label className="text-sm font-medium">URI</label>
-											<VSCodeTextField
-												value={currentSettings.neo4jUri || ""}
-												onInput={(e: any) => updateSetting("neo4jUri", e.target.value)}
-												placeholder="bolt://localhost:7687 or neo4j+s://xxxxx.databases.neo4j.io"
-												className={cn("w-full", {
-													"border-red-500": formErrors.neo4jUri,
-												})}
-											/>
-											{formErrors.neo4jUri && (
-												<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
-													{formErrors.neo4jUri}
-												</p>
+											{currentSettings.neo4jEnabled && (
+												<div className="space-y-3">
+													<div className="space-y-2">
+														<label className="text-sm font-medium">URI</label>
+														<VSCodeTextField
+															value={currentSettings.neo4jUri || ""}
+															onInput={(e: any) =>
+																updateSetting("neo4jUri", e.target.value)
+															}
+															placeholder="bolt://localhost:7687 or neo4j+s://xxxxx.databases.neo4j.io"
+															className={cn("w-full", {
+																"border-red-500": formErrors.neo4jUri,
+															})}
+														/>
+														{formErrors.neo4jUri && (
+															<p className="text-xs text-vscode-errorForeground mt-1 mb-0">
+																{formErrors.neo4jUri}
+															</p>
+														)}
+													</div>
+
+													<div className="space-y-2">
+														<label className="text-sm font-medium">Username</label>
+														<VSCodeTextField
+															value={currentSettings.neo4jUsername || ""}
+															onInput={(e: any) =>
+																updateSetting("neo4jUsername", e.target.value)
+															}
+															placeholder="neo4j"
+															className="w-full"
+														/>
+													</div>
+
+													<div className="space-y-2">
+														<label className="text-sm font-medium">Password</label>
+														<VSCodeTextField
+															type="password"
+															value={currentSettings.neo4jPassword || ""}
+															onInput={(e: any) =>
+																updateSetting("neo4jPassword", e.target.value)
+															}
+															placeholder={
+																currentSettings.neo4jPassword === SECRET_PLACEHOLDER
+																	? SECRET_PLACEHOLDER
+																	: ""
+															}
+															className="w-full"
+														/>
+													</div>
+
+													<div className="text-xs text-vscode-descriptionForeground bg-vscode-editor-background p-2 rounded space-y-1">
+														<p>
+															<strong>💡 Local:</strong> bolt://localhost:7687
+														</p>
+														<p>
+															<strong>💡 Cloud (Neo4j Aura):</strong>{" "}
+															neo4j+s://xxxxx.databases.neo4j.io
+														</p>
+														<p className="mt-2">
+															<strong>Quick Start (Docker):</strong>
+														</p>
+														<code className="block mt-1 p-1 bg-vscode-input-background rounded text-xs">
+															docker run -p 7687:7687 -p 7474:7474 neo4j:latest
+														</code>
+														<p className="mt-2">
+															<VSCodeLink
+																href="https://neo4j.com/cloud/aura-free/"
+																target="_blank">
+																Get free Neo4j Aura account →
+															</VSCodeLink>
+														</p>
+													</div>
+												</div>
 											)}
 										</div>
-
-										<div className="space-y-2">
-											<label className="text-sm font-medium">Username</label>
-											<VSCodeTextField
-												value={currentSettings.neo4jUsername || ""}
-												onInput={(e: any) => updateSetting("neo4jUsername", e.target.value)}
-												placeholder="neo4j"
-												className="w-full"
-											/>
-										</div>
-
-										<div className="space-y-2">
-											<label className="text-sm font-medium">Password</label>
-											<VSCodeTextField
-												type="password"
-												value={currentSettings.neo4jPassword || ""}
-												onInput={(e: any) => updateSetting("neo4jPassword", e.target.value)}
-												placeholder={
-													currentSettings.neo4jPassword === SECRET_PLACEHOLDER
-														? SECRET_PLACEHOLDER
-														: ""
-												}
-												className="w-full"
-											/>
-										</div>
-
-										<div className="text-xs text-vscode-descriptionForeground bg-vscode-editor-background p-2 rounded space-y-1">
-											<p>
-												<strong>💡 Local:</strong> bolt://localhost:7687
-											</p>
-											<p>
-												<strong>💡 Cloud (Neo4j Aura):</strong>{" "}
-												neo4j+s://xxxxx.databases.neo4j.io
-											</p>
-											<p className="mt-2">
-												<strong>Quick Start (Docker):</strong>
-											</p>
-											<code className="block mt-1 p-1 bg-vscode-input-background rounded text-xs">
-												docker run -p 7687:7687 -p 7474:7474 neo4j:latest
-											</code>
-											<p className="mt-2">
-												<VSCodeLink href="https://neo4j.com/cloud/aura-free/" target="_blank">
-													Get free Neo4j Aura account →
-												</VSCodeLink>
-											</p>
-										</div>
 									</div>
-								)}
-							</div>
+								</div>
+							)}
 						</div>
 
 						{/* Advanced Settings Disclosure */}
@@ -1626,59 +1636,46 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						{/* Action Buttons */}
 						<div className="flex items-center justify-between gap-2 pt-6">
 							<div className="flex gap-2">
-								{/* Start/Cancel Toggle Button - Only show when indexing is enabled */}
-								{currentSettings.codebaseIndexEnabled && (
-									<>
-										{/* Show "Start Indexing" when status is Standby or Error */}
-										{(indexingStatus.systemStatus === "Standby" ||
-											indexingStatus.systemStatus === "Error") && (
-											<Button
-												onClick={() => vscode.postMessage({ type: "startIndexing" })}
-												disabled={saveStatus === "saving" || hasUnsavedChanges}>
-												{t("settings:codeIndex.startIndexingButton")}
-											</Button>
-										)}
-
-										{/* Show "Cancel Indexing" when status is Indexing */}
-										{indexingStatus.systemStatus === "Indexing" && (
-											<Button
-												variant="secondary"
-												onClick={() => vscode.postMessage({ type: "cancelIndexing" })}>
-												Cancel Indexing
-											</Button>
-										)}
-									</>
-								)}
-
-								{/* Delete Index Button - Always visible regardless of status */}
-								<AlertDialog>
-									<AlertDialogTrigger asChild>
-										<Button variant="destructive">
-											{t("settings:codeIndex.clearIndexDataButton")}
+								{currentSettings.codebaseIndexEnabled &&
+									(indexingStatus.systemStatus === "Error" ||
+										indexingStatus.systemStatus === "Standby") && (
+										<Button
+											onClick={() => vscode.postMessage({ type: "startIndexing" })}
+											disabled={saveStatus === "saving" || hasUnsavedChanges}>
+											{t("settings:codeIndex.startIndexingButton")}
 										</Button>
-									</AlertDialogTrigger>
-									<AlertDialogContent>
-										<AlertDialogHeader>
-											<AlertDialogTitle>
-												{t("settings:codeIndex.clearDataDialog.title")}
-											</AlertDialogTitle>
-											<AlertDialogDescription>
-												{indexingStatus.systemStatus === "Indexing"
-													? "This will stop the current indexing operation and clear all index data (both Qdrant and Neo4j). This action cannot be undone. Are you sure?"
-													: t("settings:codeIndex.clearDataDialog.description")}
-											</AlertDialogDescription>
-										</AlertDialogHeader>
-										<AlertDialogFooter>
-											<AlertDialogCancel>
-												{t("settings:codeIndex.clearDataDialog.cancelButton")}
-											</AlertDialogCancel>
-											<AlertDialogAction
-												onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
-												{t("settings:codeIndex.clearDataDialog.confirmButton")}
-											</AlertDialogAction>
-										</AlertDialogFooter>
-									</AlertDialogContent>
-								</AlertDialog>
+									)}
+
+								{/* Show Clear Index button when status is Indexed or Error, regardless of enabled state */}
+								{(indexingStatus.systemStatus === "Indexed" ||
+									indexingStatus.systemStatus === "Error") && (
+									<AlertDialog>
+										<AlertDialogTrigger asChild>
+											<Button variant="secondary">
+												{t("settings:codeIndex.clearIndexDataButton")}
+											</Button>
+										</AlertDialogTrigger>
+										<AlertDialogContent>
+											<AlertDialogHeader>
+												<AlertDialogTitle>
+													{t("settings:codeIndex.clearDataDialog.title")}
+												</AlertDialogTitle>
+												<AlertDialogDescription>
+													{t("settings:codeIndex.clearDataDialog.description")}
+												</AlertDialogDescription>
+											</AlertDialogHeader>
+											<AlertDialogFooter>
+												<AlertDialogCancel>
+													{t("settings:codeIndex.clearDataDialog.cancelButton")}
+												</AlertDialogCancel>
+												<AlertDialogAction
+													onClick={() => vscode.postMessage({ type: "clearIndexData" })}>
+													{t("settings:codeIndex.clearDataDialog.confirmButton")}
+												</AlertDialogAction>
+											</AlertDialogFooter>
+										</AlertDialogContent>
+									</AlertDialog>
+								)}
 							</div>
 
 							<Button
