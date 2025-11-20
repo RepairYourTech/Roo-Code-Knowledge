@@ -174,6 +174,11 @@ export class DirectoryScanner implements IDirectoryScanner {
 		// Process all files in parallel with concurrency control
 		const parsePromises = supportedPaths.map((filePath) =>
 			parseLimiter(async () => {
+				// Check for cancellation before processing each file
+				if (this._cancelled) {
+					throw new Error("Indexing cancelled by user")
+				}
+
 				try {
 					// Check file size
 					const stats = await stat(filePath)
@@ -182,10 +187,20 @@ export class DirectoryScanner implements IDirectoryScanner {
 						return
 					}
 
+					// Check for cancellation before reading file
+					if (this._cancelled) {
+						throw new Error("Indexing cancelled by user")
+					}
+
 					// Read file content
 					const content = await vscode.workspace.fs
 						.readFile(vscode.Uri.file(filePath))
 						.then((buffer) => Buffer.from(buffer).toString("utf-8"))
+
+					// Check for cancellation after reading file
+					if (this._cancelled) {
+						throw new Error("Indexing cancelled by user")
+					}
 
 					// Calculate current hash
 					const currentFileHash = createHash("sha256").update(content).digest("hex")
@@ -200,16 +215,32 @@ export class DirectoryScanner implements IDirectoryScanner {
 						return
 					}
 
+					// Check for cancellation before parsing
+					if (this._cancelled) {
+						throw new Error("Indexing cancelled by user")
+					}
+
 					// File is new or changed - parse it using the injected parser function
 					const blocks = await this.codeParser.parseFile(filePath, { content, fileHash: currentFileHash })
 					const fileBlockCount = blocks.length
 					onFileParsed?.(fileBlockCount)
 					processedCount++
 
+					// Check for cancellation after parsing
+					if (this._cancelled) {
+						throw new Error("Indexing cancelled by user")
+					}
+
 					// Process embeddings if configured
 					if (this.embedder && this.qdrantClient && blocks.length > 0) {
 						const release = await mutex.acquire()
 						try {
+							// Check for cancellation before batch accumulation
+							if (this._cancelled) {
+								release()
+								throw new Error("Indexing cancelled by user")
+							}
+
 							let addedBlocksFromFile = false
 							for (const block of blocks) {
 								const trimmedContent = block.content.trim()
@@ -232,8 +263,19 @@ export class DirectoryScanner implements IDirectoryScanner {
 								// Check if batch threshold is met AFTER adding all blocks for this file
 								// This ensures a file is never split across batches
 								if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
+									// Check for cancellation before processing batch
+									if (this._cancelled) {
+										release()
+										throw new Error("Indexing cancelled by user")
+									}
+
 									// Wait if we've reached the maximum pending batches
 									while (pendingBatchCount >= MAX_PENDING_BATCHES) {
+										// Check for cancellation while waiting
+										if (this._cancelled) {
+											release()
+											throw new Error("Indexing cancelled by user")
+										}
 										// Wait for at least one batch to complete
 										await Promise.race(activeBatchPromises)
 									}
@@ -298,12 +340,34 @@ export class DirectoryScanner implements IDirectoryScanner {
 		)
 
 		// Wait for all parsing to complete
-		await Promise.all(parsePromises)
+		try {
+			await Promise.all(parsePromises)
+		} catch (error) {
+			// If cancelled, propagate the error
+			if (error instanceof Error && error.message === "Indexing cancelled by user") {
+				console.log("[DirectoryScanner] File parsing cancelled by user")
+				throw error
+			}
+			// Otherwise, let the error propagate normally
+			throw error
+		}
+
+		// Check for cancellation before processing final batch
+		if (this._cancelled) {
+			console.log("[DirectoryScanner] Scan aborted - cancelled before final batch")
+			throw new Error("Indexing cancelled by user")
+		}
 
 		// Process any remaining items in batch
 		if (currentBatchBlocks.length > 0) {
 			const release = await mutex.acquire()
 			try {
+				// Check for cancellation before final batch
+				if (this._cancelled) {
+					release()
+					throw new Error("Indexing cancelled by user")
+				}
+
 				// Copy current batch data and clear accumulators
 				const batchBlocks = [...currentBatchBlocks]
 				const batchTexts = [...currentBatchTexts]
@@ -332,7 +396,17 @@ export class DirectoryScanner implements IDirectoryScanner {
 		}
 
 		// Wait for all batch processing to complete
-		await Promise.all(activeBatchPromises)
+		try {
+			await Promise.all(activeBatchPromises)
+		} catch (error) {
+			// If cancelled, propagate the error
+			if (error instanceof Error && error.message === "Indexing cancelled by user") {
+				console.log("[DirectoryScanner] Batch processing cancelled by user")
+				throw error
+			}
+			// Otherwise, let the error propagate normally
+			throw error
+		}
 
 		// Report final Neo4j status after all batches complete
 		if (this.graphIndexer && this.stateManager && this.neo4jTotalFilesToProcess > 0) {
