@@ -215,6 +215,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
 	abort: boolean = false
+	currentRequestAbortController?: AbortController
 
 	// TaskStatus
 	idleAsk?: ClineMessage
@@ -313,6 +314,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private tokenUsageSnapshot?: TokenUsage
 	private tokenUsageSnapshotAt?: number
 
+	// Cloud Sync Tracking
+	private cloudSyncedMessageTimestamps: Set<number> = new Set()
+
 	constructor({
 		provider,
 		apiConfiguration,
@@ -385,7 +389,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.autoApprovalHandler = new AutoApprovalHandler()
 
 		this.urlContentFetcher = new UrlContentFetcher(provider.context)
-		this.browserSession = new BrowserSession(provider.context)
+		this.browserSession = new BrowserSession(provider.context, (isActive: boolean) => {
+			// Add a message to indicate browser session status change
+			this.say("browser_session_status", isActive ? "Browser session opened" : "Browser session closed")
+			// Broadcast to browser panel
+			this.broadcastBrowserSessionUpdate()
+
+			// When a browser session becomes active, automatically open/reveal the Browser Session tab
+			if (isActive) {
+				try {
+					// Lazy-load to avoid circular imports at module load time
+					const { BrowserSessionPanelManager } = require("../webview/BrowserSessionPanelManager")
+					const providerRef = this.providerRef.deref()
+					if (providerRef) {
+						BrowserSessionPanelManager.getInstance(providerRef)
+							.show()
+							.catch(() => {})
+					}
+				} catch (err) {
+					console.error("[Task] Failed to auto-open Browser Session panel:", err)
+				}
+			}
+		})
 		this.diffEnabled = enableDiff
 		this.fuzzyMatchThreshold = fuzzyMatchThreshold
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
@@ -646,19 +671,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return readApiMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	private async addToApiConversationHistory(message: Anthropic.MessageParam) {
+	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string) {
 		// Capture the encrypted_content / thought signatures from the provider (e.g., OpenAI Responses API, Google GenAI) if present.
 		// We only persist data reported by the current response body.
 		const handler = this.api as ApiHandler & {
 			getResponseId?: () => string | undefined
 			getEncryptedContent?: () => { encrypted_content: string; id?: string } | undefined
 			getThoughtSignature?: () => string | undefined
+			getSummary?: () => any[] | undefined
 		}
 
 		if (message.role === "assistant") {
 			const responseId = handler.getResponseId?.()
 			const reasoningData = handler.getEncryptedContent?.()
 			const thoughtSignature = handler.getThoughtSignature?.()
+			const reasoningSummary = handler.getSummary?.()
 
 			// Start from the original assistant message
 			const messageWithTs: any = {
@@ -667,10 +694,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				ts: Date.now(),
 			}
 
-			// If we have encrypted_content, embed it as the first content block on the assistant message.
-			// This keeps reasoning + assistant atomic for context management while still allowing providers
-			// to receive a separate reasoning item when we build the request.
-			if (reasoningData?.encrypted_content) {
+			// Store reasoning: plain text (most providers) or encrypted (OpenAI Native)
+			if (reasoning) {
+				const reasoningBlock = {
+					type: "reasoning",
+					text: reasoning,
+					summary: reasoningSummary ?? ([] as any[]),
+				}
+
+				if (typeof messageWithTs.content === "string") {
+					messageWithTs.content = [
+						reasoningBlock,
+						{ type: "text", text: messageWithTs.content } satisfies Anthropic.Messages.TextBlockParam,
+					]
+				} else if (Array.isArray(messageWithTs.content)) {
+					messageWithTs.content = [reasoningBlock, ...messageWithTs.content]
+				} else if (!messageWithTs.content) {
+					messageWithTs.content = [reasoningBlock]
+				}
+			} else if (reasoningData?.encrypted_content) {
+				// OpenAI Native encrypted reasoning
 				const reasoningBlock = {
 					type: "reasoning",
 					summary: [] as any[],
@@ -757,6 +800,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				event: TelemetryEventName.TASK_MESSAGE,
 				properties: { taskId: this.taskId, message },
 			})
+			// Track that this message has been synced to cloud
+			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
 	}
 
@@ -764,6 +809,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.clineMessages = newMessages
 		restoreTodoListForTask(this)
 		await this.saveClineMessages()
+
+		// When overwriting messages (e.g., during task resume), repopulate the cloud sync tracking Set
+		// with timestamps from all non-partial messages to prevent re-syncing previously synced messages
+		this.cloudSyncedMessageTimestamps.clear()
+		for (const msg of newMessages) {
+			if (msg.partial !== true) {
+				this.cloudSyncedMessageTimestamps.add(msg.ts)
+			}
+		}
 	}
 
 	private async updateClineMessage(message: ClineMessage) {
@@ -771,13 +825,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
+		// Check if we should sync to cloud and haven't already synced this message
 		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
+		const hasNotBeenSynced = !this.cloudSyncedMessageTimestamps.has(message.ts)
 
-		if (shouldCaptureMessage) {
+		if (shouldCaptureMessage && hasNotBeenSynced) {
 			CloudService.instance.captureEvent({
 				event: TelemetryEventName.TASK_MESSAGE,
 				properties: { taskId: this.taskId, message },
 			})
+			// Track that this message has been synced to cloud
+			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
 	}
 
@@ -1366,6 +1424,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				contextCondense,
 			})
 		}
+
+		// Broadcast browser session updates to panel when browser-related messages are added
+		if (type === "browser_action" || type === "browser_action_result" || type === "browser_session_status") {
+			this.broadcastBrowserSessionUpdate()
+		}
 	}
 
 	async sayAndCreateMissingParamError(toolName: ToolName, paramName: string, relPath?: string) {
@@ -1690,6 +1753,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		await this.initiateTaskLoop(newUserContent)
 	}
 
+	/**
+	 * Cancels the current HTTP request if one is in progress.
+	 * This immediately aborts the underlying stream rather than waiting for the next chunk.
+	 */
+	public cancelCurrentRequest(): void {
+		if (this.currentRequestAbortController) {
+			console.log(`[Task#${this.taskId}.${this.instanceId}] Aborting current HTTP request`)
+			this.currentRequestAbortController.abort()
+			this.currentRequestAbortController = undefined
+		}
+	}
+
 	public async abortTask(isAbandoned = false) {
 		// Aborting task
 
@@ -1718,6 +1793,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public dispose(): void {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
+
+		// Cancel any in-progress HTTP request
+		try {
+			this.cancelCurrentRequest()
+		} catch (error) {
+			console.error("Error cancelling current request:", error)
+		}
 
 		// Remove provider profile change listener
 		try {
@@ -1785,6 +1867,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.browserSession.closeBrowser()
 		} catch (error) {
 			console.error("Error closing browser session:", error)
+		}
+		// Also close the Browser Session panel when the task is disposed
+		try {
+			const provider = this.providerRef.deref()
+			if (provider) {
+				const { BrowserSessionPanelManager } = require("../webview/BrowserSessionPanelManager")
+				BrowserSessionPanelManager.getInstance(provider).dispose()
+			}
+		} catch (error) {
+			console.error("Error closing browser session panel:", error)
 		}
 
 		try {
@@ -2024,9 +2116,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
 
+			// Remove any existing environment_details blocks before adding fresh ones.
+			// This prevents duplicate environment details when resuming tasks with XML tool calls,
+			// where the old user message content may already contain environment details from the previous session.
+			// We check for both opening and closing tags to ensure we're matching complete environment detail blocks,
+			// not just mentions of the tag in regular content.
+			const contentWithoutEnvDetails = parsedUserContent.filter((block) => {
+				if (block.type === "text" && typeof block.text === "string") {
+					// Check if this text block is a complete environment_details block
+					// by verifying it starts with the opening tag and ends with the closing tag
+					const isEnvironmentDetailsBlock =
+						block.text.trim().startsWith("<environment_details>") &&
+						block.text.trim().endsWith("</environment_details>")
+					return !isEnvironmentDetailsBlock
+				}
+				return true
+			})
+
 			// Add environment details as its own text block, separate from tool
 			// results.
-			const finalUserContent = [...parsedUserContent, { type: "text" as const, text: environmentDetails }]
+			const finalUserContent = [...contentWithoutEnvDetails, { type: "text" as const, text: environmentDetails }]
 
 			// Only add user message to conversation history if:
 			// 1. This is the first attempt (retryAttempt === 0), OR
@@ -2163,10 +2272,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
-					let item = await iterator.next()
+
+					// Helper to race iterator.next() with abort signal
+					const nextChunkWithAbort = async () => {
+						const nextPromise = iterator.next()
+
+						// If we have an abort controller, race it with the next chunk
+						if (this.currentRequestAbortController) {
+							const abortPromise = new Promise<never>((_, reject) => {
+								const signal = this.currentRequestAbortController!.signal
+								if (signal.aborted) {
+									reject(new Error("Request cancelled by user"))
+								} else {
+									signal.addEventListener("abort", () => {
+										reject(new Error("Request cancelled by user"))
+									})
+								}
+							})
+							return await Promise.race([nextPromise, abortPromise])
+						}
+
+						// No abort controller, just return the next chunk normally
+						return await nextPromise
+					}
+
+					let item = await nextChunkWithAbort()
 					while (!item.done) {
 						const chunk = item.value
-						item = await iterator.next()
+						item = await nextChunkWithAbort()
 						if (!chunk) {
 							// Sometimes chunk is undefined, no idea that can cause
 							// it, but this workaround seems to fix it.
@@ -2537,6 +2670,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					}
 				} finally {
 					this.isStreaming = false
+					// Clean up the abort controller when streaming completes
+					this.currentRequestAbortController = undefined
 				}
 
 				// Need to call here in case the stream was aborted.
@@ -2625,21 +2760,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						})
 					}
 
-					// Check if we should preserve reasoning in the assistant message
-					let finalAssistantMessage = assistantMessage
-					if (reasoningMessage && streamModelInfo.preserveReasoning) {
-						// Prepend reasoning in XML tags to the assistant message so it's included in API history
-						finalAssistantMessage = `<think>${reasoningMessage}</think>\n${assistantMessage}`
-					}
-
 					// Build the assistant message content array
 					const assistantContent: Array<Anthropic.TextBlockParam | Anthropic.ToolUseBlockParam> = []
 
 					// Add text content if present
-					if (finalAssistantMessage) {
+					if (assistantMessage) {
 						assistantContent.push({
 							type: "text" as const,
-							text: finalAssistantMessage,
+							text: assistantMessage,
 						})
 					}
 
@@ -2661,10 +2789,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 					}
 
-					await this.addToApiConversationHistory({
-						role: "assistant",
-						content: assistantContent,
-					})
+					await this.addToApiConversationHistory(
+						{
+							role: "assistant",
+							content: assistantContent,
+						},
+						reasoningMessage || undefined,
+					)
 
 					TelemetryService.instance.captureConversationMessage(this.taskId, "assistant")
 
@@ -3154,6 +3285,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			...(shouldIncludeTools ? { tools: allTools, tool_choice: "auto", toolProtocol } : {}),
 		}
 
+		// Create an AbortController to allow cancelling the request mid-stream
+		this.currentRequestAbortController = new AbortController()
+		const abortSignal = this.currentRequestAbortController.signal
+
 		// The provider accepts reasoning items alongside standard messages; cast to the expected parameter type.
 		const stream = this.api.createMessage(
 			systemPrompt,
@@ -3162,14 +3297,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		)
 		const iterator = stream[Symbol.asyncIterator]()
 
+		// Set up abort handling - when the signal is aborted, clean up the controller reference
+		abortSignal.addEventListener("abort", () => {
+			console.log(`[Task#${this.taskId}.${this.instanceId}] AbortSignal triggered for current request`)
+			this.currentRequestAbortController = undefined
+		})
+
 		try {
 			// Awaiting first chunk to see if it will throw an error.
 			this.isWaitingForFirstChunk = true
-			const firstChunk = await iterator.next()
+
+			// Race between the first chunk and the abort signal
+			const firstChunkPromise = iterator.next()
+			const abortPromise = new Promise<never>((_, reject) => {
+				if (abortSignal.aborted) {
+					reject(new Error("Request cancelled by user"))
+				} else {
+					abortSignal.addEventListener("abort", () => {
+						reject(new Error("Request cancelled by user"))
+					})
+				}
+			})
+
+			const firstChunk = await Promise.race([firstChunkPromise, abortPromise])
 			yield firstChunk.value
 			this.isWaitingForFirstChunk = false
 		} catch (error) {
 			this.isWaitingForFirstChunk = false
+			this.currentRequestAbortController = undefined
 			const isContextWindowExceededError = checkContextWindowExceededError(error)
 
 			// If it's a context window error and we haven't exceeded max retries for this error type
@@ -3339,14 +3494,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const cleanConversationHistory: (Anthropic.Messages.MessageParam | ReasoningItemForRequest)[] = []
 
 		for (const msg of messages) {
-			// Legacy path: standalone reasoning items stored as separate messages
-			if (msg.type === "reasoning" && msg.encrypted_content) {
-				cleanConversationHistory.push({
-					type: "reasoning",
-					summary: msg.summary,
-					encrypted_content: msg.encrypted_content!,
-					...(msg.id ? { id: msg.id } : {}),
-				})
+			// Standalone reasoning: send encrypted, skip plain text
+			if (msg.type === "reasoning") {
+				if (msg.encrypted_content) {
+					cleanConversationHistory.push({
+						type: "reasoning",
+						summary: msg.summary,
+						encrypted_content: msg.encrypted_content!,
+						...(msg.id ? { id: msg.id } : {}),
+					})
+				}
 				continue
 			}
 
@@ -3364,13 +3521,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 				const [first, ...rest] = contentArray
 
-				const hasEmbeddedReasoning =
+				// Embedded reasoning: encrypted (send) or plain text (skip)
+				const hasEncryptedReasoning =
 					first && (first as any).type === "reasoning" && typeof (first as any).encrypted_content === "string"
+				const hasPlainTextReasoning =
+					first && (first as any).type === "reasoning" && typeof (first as any).text === "string"
 
-				if (hasEmbeddedReasoning) {
+				if (hasEncryptedReasoning) {
 					const reasoningBlock = first as any
 
-					// Emit a separate reasoning item for the provider
+					// Send as separate reasoning item (OpenAI Native)
 					cleanConversationHistory.push({
 						type: "reasoning",
 						summary: reasoningBlock.summary ?? [],
@@ -3378,7 +3538,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						...(reasoningBlock.id ? { id: reasoningBlock.id } : {}),
 					})
 
-					// Build assistant message without the embedded reasoning block
+					// Send assistant message without reasoning
 					let assistantContent: Anthropic.Messages.MessageParam["content"]
 
 					if (rest.length === 0) {
@@ -3387,6 +3547,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						assistantContent = (rest[0] as Anthropic.Messages.TextBlockParam).text
 					} else {
 						assistantContent = rest
+					}
+
+					cleanConversationHistory.push({
+						role: "assistant",
+						content: assistantContent,
+					} satisfies Anthropic.Messages.MessageParam)
+
+					continue
+				} else if (hasPlainTextReasoning) {
+					// Check if the model's preserveReasoning flag is set
+					// If true, include the reasoning block in API requests
+					// If false/undefined, strip it out (stored for history only, not sent back to API)
+					const shouldPreserveForApi = this.api.getModel().info.preserveReasoning === true
+					let assistantContent: Anthropic.Messages.MessageParam["content"]
+
+					if (shouldPreserveForApi) {
+						// Include reasoning block in the content sent to API
+						assistantContent = contentArray
+					} else {
+						// Strip reasoning out - stored for history only, not sent back to API
+						if (rest.length === 0) {
+							assistantContent = ""
+						} else if (rest.length === 1 && rest[0].type === "text") {
+							assistantContent = (rest[0] as Anthropic.Messages.TextBlockParam).text
+						} else {
+							assistantContent = rest
+						}
 					}
 
 					cleanConversationHistory.push({
@@ -3486,6 +3673,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public get cwd() {
 		return this.workspacePath
+	}
+
+	/**
+	 * Broadcast browser session updates to the browser panel (if open)
+	 */
+	private broadcastBrowserSessionUpdate(): void {
+		const provider = this.providerRef.deref()
+		if (!provider) {
+			return
+		}
+
+		try {
+			const { BrowserSessionPanelManager } = require("../webview/BrowserSessionPanelManager")
+			const panelManager = BrowserSessionPanelManager.getInstance(provider)
+
+			// Get browser session messages
+			const browserSessionStartIndex = this.clineMessages.findIndex(
+				(m) =>
+					m.ask === "browser_action_launch" ||
+					(m.say === "browser_session_status" && m.text?.includes("opened")),
+			)
+
+			const browserSessionMessages =
+				browserSessionStartIndex !== -1 ? this.clineMessages.slice(browserSessionStartIndex) : []
+
+			const isBrowserSessionActive = this.browserSession?.isSessionActive() ?? false
+
+			// Update the panel asynchronously
+			panelManager.updateBrowserSession(browserSessionMessages, isBrowserSessionActive).catch((error: Error) => {
+				console.error("Failed to broadcast browser session update:", error)
+			})
+		} catch (error) {
+			// Silently fail if panel manager is not available
+			console.debug("Browser panel not available for update:", error)
+		}
 	}
 
 	/**
