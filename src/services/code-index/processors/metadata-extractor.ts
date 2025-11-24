@@ -8226,6 +8226,781 @@ export interface CSharpTestingConfiguration {
 	testFramework?: "xunit" | "nunit" | "mstest"
 }
 
+// Build tool configuration metadata types
+export interface BuildToolConfigurationMetadata {
+	toolType: BuildToolType
+	toolName?: string
+	toolVersion?: string
+	configurationType: ConfigurationType
+	filePath?: string
+	environment?: string
+	buildCommand?: string
+	devCommand?: string
+	testCommand?: string
+	dependencies?: BuildToolDependency[]
+	scripts?: Record<string, string>
+	plugins?: BuildToolPlugin[]
+	loaders?: BuildToolLoader[]
+	outputPath?: string
+	sourcePaths?: string[]
+	optimizationLevel?: string
+	targetEnvironment?: string
+	enableSourceMaps?: boolean
+	enableHotReload?: boolean
+	enableMinification?: boolean
+	customSettings?: Record<string, any>
+}
+
+export type BuildToolType =
+	// JavaScript/TypeScript build tools
+	| "webpack"
+	| "vite"
+	| "rollup"
+	| "babel"
+	| "eslint"
+	| "prettier"
+	| "typescript"
+	| "jest"
+	| "vitest"
+	| "mocha"
+	| "cypress"
+	| "playwright"
+	| "npm" // Added for package.json
+	// Python build tools
+	| "poetry"
+	| "pip"
+	| "setuptools"
+	| "pipenv"
+	| "conda"
+	| "pytest"
+	| "black"
+	| "flake8"
+	| "mypy"
+	// Rust build tools
+	| "cargo"
+	| "rustc"
+	| "clippy"
+	| "rustfmt"
+	// Java build tools
+	| "maven"
+	| "gradle"
+	| "ant"
+	| "sbt"
+	| "junit"
+	// C#/.NET build tools
+	| "msbuild"
+	| "nuget"
+	| "dotnet"
+	| "nunit"
+	| "xunit"
+	// PHP build tools
+	| "composer"
+	| "phpunit"
+	| "pest"
+	// Go build tools
+	| "go_modules"
+	| "go_build"
+	| "go_test"
+	// Ruby build tools
+	| "bundler"
+	| "rake"
+	| "rspec"
+	// General build tools
+	| "docker"
+	| "github_actions"
+	| "gitlab_ci"
+	| "jenkins"
+	| "make"
+	| "cmake"
+
+export type ConfigurationType =
+	| "javascript"
+	| "typescript"
+	| "json"
+	| "yaml"
+	| "toml"
+	| "xml"
+	| "ini"
+	| "properties"
+	| "dockerfile"
+	| "makefile"
+	| "cmakelists"
+	| "gradle_build"
+	| "maven_pom"
+	| "csproj"
+	| "sln"
+	| "ruby_gemspec"
+	| "python_setup"
+	| "python_requirements"
+	| "rust_cargo"
+	| "go_mod"
+	| "composer_json"
+	| "ruby"
+	| "text"
+
+export interface BuildToolDependency {
+	name: string
+	version?: string
+	type: "runtime" | "development" | "peer" | "optional"
+	source?: string
+}
+
+export interface BuildToolPlugin {
+	name: string
+	version?: string
+	configuration?: Record<string, any>
+	enabled?: boolean
+}
+
+export interface BuildToolLoader {
+	name: string
+	loaderType?: string
+	options?: Record<string, any>
+	test?: string
+	include?: string[]
+	exclude?: string[]
+}
+
+/**
+ * Extracts build tool configuration metadata from a tree-sitter node
+ * @param node The tree-sitter node to analyze
+ * @param filePath The file path to determine build tool type
+ * @param text The full file content
+ * @returns BuildToolConfigurationMetadata object or undefined if not a build tool configuration
+ */
+export function extractBuildToolConfigurationMetadata(
+	node: Node,
+	filePath: string,
+	text: string,
+): BuildToolConfigurationMetadata | undefined {
+	try {
+		// Determine build tool type based on file path and content
+		const { toolType, configurationType } = determineBuildToolType(filePath, text)
+
+		if (!toolType) {
+			return undefined
+		}
+
+		// Extract build tool-specific information
+		const metadata: BuildToolConfigurationMetadata = {
+			toolType,
+			toolName: extractToolName(node, toolType),
+			toolVersion: extractToolVersion(node, text),
+			configurationType,
+			filePath,
+			environment: extractBuildEnvironment(node, text),
+			buildCommand: extractBuildCommand(node, text),
+			devCommand: extractDevCommand(node, text),
+			testCommand: extractTestCommand(node, text),
+			dependencies: extractBuildDependencies(node, text),
+			scripts: extractBuildScripts(node, text),
+			plugins: extractBuildPlugins(node, text),
+			loaders: extractBuildLoaders(node, text),
+			outputPath: extractOutputPath(node, text),
+			sourcePaths: extractSourcePaths(node, text),
+			optimizationLevel: extractOptimizationLevel(node, text),
+			targetEnvironment: extractTargetEnvironment(node, text),
+			enableSourceMaps: extractSourceMapsEnabled(node, text),
+			enableHotReload: extractHotReloadEnabled(node, text),
+			enableMinification: extractMinificationEnabled(node, text),
+			customSettings: extractCustomSettings(node, text),
+		}
+
+		return metadata
+	} catch (error) {
+		console.debug(`Failed to extract build tool configuration metadata for node type ${node.type}:`, error)
+		return undefined
+	}
+}
+
+// Helper functions for build tool configuration extraction
+
+function determineBuildToolType(
+	filePath: string,
+	text: string,
+): { toolType: BuildToolType; configurationType: ConfigurationType } {
+	const fileName = filePath.split("/").pop() || ""
+	const fileExtension = fileName.split(".").pop() || ""
+	const fileNameLower = fileName.toLowerCase()
+
+	// JavaScript/TypeScript build tools
+	if (fileNameLower.includes("webpack.config")) {
+		return { toolType: "webpack", configurationType: "javascript" }
+	} else if (fileNameLower.includes("vite.config")) {
+		return { toolType: "vite", configurationType: "typescript" }
+	} else if (fileNameLower.includes("rollup.config")) {
+		return { toolType: "rollup", configurationType: "javascript" }
+	} else if (fileNameLower.includes("babel.config") || fileNameLower.includes(".babelrc")) {
+		return { toolType: "babel", configurationType: "javascript" }
+	} else if (fileNameLower.includes("eslint.config") || fileNameLower.includes(".eslintrc")) {
+		return { toolType: "eslint", configurationType: "javascript" }
+	} else if (fileNameLower.includes("prettier.config") || fileNameLower.includes(".prettierrc")) {
+		return { toolType: "prettier", configurationType: "javascript" }
+	} else if (fileNameLower === "tsconfig.json") {
+		return { toolType: "typescript", configurationType: "json" }
+	} else if (fileNameLower === "package.json") {
+		return { toolType: "npm", configurationType: "json" }
+	} else if (fileNameLower.includes("jest.config") || fileNameLower === "jest.config.js") {
+		return { toolType: "jest", configurationType: "javascript" }
+	} else if (fileNameLower.includes("vitest.config")) {
+		return { toolType: "vitest", configurationType: "typescript" }
+	}
+
+	// Python build tools
+	else if (fileNameLower === "pyproject.toml") {
+		return { toolType: "poetry", configurationType: "toml" }
+	} else if (fileNameLower === "poetry.lock") {
+		return { toolType: "poetry", configurationType: "toml" }
+	} else if (fileNameLower === "requirements.txt") {
+		return { toolType: "pip", configurationType: "text" as ConfigurationType }
+	} else if (fileNameLower === "setup.py" || fileNameLower === "setup.cfg") {
+		return { toolType: "setuptools", configurationType: "python" as ConfigurationType }
+	}
+
+	// Rust build tools
+	else if (fileNameLower === "cargo.toml") {
+		return { toolType: "cargo", configurationType: "toml" }
+	} else if (fileNameLower === "cargo.lock") {
+		return { toolType: "cargo", configurationType: "toml" }
+	}
+
+	// Java build tools
+	else if (fileNameLower === "pom.xml") {
+		return { toolType: "maven", configurationType: "maven_pom" }
+	} else if (fileNameLower.includes("build.gradle")) {
+		return { toolType: "gradle", configurationType: "gradle_build" }
+	} else if (fileNameLower === "build.xml") {
+		return { toolType: "ant", configurationType: "xml" }
+	}
+
+	// C#/.NET build tools
+	else if (fileNameLower.endsWith(".csproj")) {
+		return { toolType: "msbuild", configurationType: "csproj" }
+	} else if (fileNameLower.endsWith(".sln")) {
+		return { toolType: "msbuild", configurationType: "sln" }
+	} else if (fileNameLower === "packages.config") {
+		return { toolType: "nuget", configurationType: "xml" }
+	}
+
+	// PHP build tools
+	else if (fileNameLower === "composer.json") {
+		return { toolType: "composer", configurationType: "composer_json" }
+	} else if (fileNameLower === "composer.lock") {
+		return { toolType: "composer", configurationType: "json" as ConfigurationType }
+	}
+
+	// Go build tools
+	else if (fileNameLower === "go.mod") {
+		return { toolType: "go_modules", configurationType: "go_mod" }
+	} else if (fileNameLower === "go.sum") {
+		return { toolType: "go_modules", configurationType: "text" as ConfigurationType }
+	}
+
+	// Ruby build tools
+	else if (fileNameLower === "gemfile") {
+		return { toolType: "bundler", configurationType: "ruby" }
+	} else if (fileNameLower === "gemfile.lock") {
+		return { toolType: "bundler", configurationType: "text" as ConfigurationType }
+	} else if (fileNameLower === "rakefile") {
+		return { toolType: "rake", configurationType: "ruby" }
+	} else if (fileNameLower.endsWith(".gemspec")) {
+		return { toolType: "bundler", configurationType: "ruby_gemspec" }
+	}
+
+	// Docker and CI/CD
+	else if (fileNameLower === "dockerfile") {
+		return { toolType: "docker", configurationType: "dockerfile" }
+	} else if (fileNameLower.includes("docker-compose")) {
+		return { toolType: "docker", configurationType: "yaml" }
+	} else if (fileNameLower === ".github" && filePath.includes("workflows")) {
+		return { toolType: "github_actions", configurationType: "yaml" }
+	} else if (fileNameLower === ".gitlab-ci.yml") {
+		return { toolType: "gitlab_ci", configurationType: "yaml" }
+	} else if (fileNameLower === "jenkinsfile") {
+		return { toolType: "jenkins", configurationType: "text" as ConfigurationType }
+	} else if (fileNameLower === "makefile") {
+		return { toolType: "make", configurationType: "makefile" }
+	} else if (fileNameLower === "cmakelists.txt") {
+		return { toolType: "cmake", configurationType: "cmakelists" }
+	}
+
+	// Default based on file extension
+	if (fileExtension === "json") {
+		return { toolType: "npm" as BuildToolType, configurationType: "json" }
+	} else if (fileExtension === "yaml" || fileExtension === "yml") {
+		return { toolType: "docker" as BuildToolType, configurationType: "yaml" }
+	} else if (fileExtension === "toml") {
+		return { toolType: "cargo" as BuildToolType, configurationType: "toml" }
+	} else if (fileExtension === "xml") {
+		return { toolType: "maven" as BuildToolType, configurationType: "xml" }
+	}
+
+	return { toolType: "npm" as BuildToolType, configurationType: "json" } // Default fallback
+}
+
+function extractToolName(node: Node, toolType: BuildToolType): string | undefined {
+	switch (toolType) {
+		case "webpack":
+		case "vite":
+		case "rollup":
+		case "babel":
+		case "eslint":
+		case "prettier":
+		case "typescript":
+		case "jest":
+		case "vitest":
+			return toolType
+		case "poetry":
+		case "pip":
+		case "setuptools":
+			return toolType
+		case "cargo":
+			return toolType
+		case "maven":
+		case "gradle":
+		case "ant":
+			return toolType
+		case "msbuild":
+		case "nuget":
+		case "dotnet":
+			return toolType
+		case "composer":
+			return toolType
+		case "go_modules":
+			return toolType
+		case "bundler":
+		case "rake":
+			return toolType
+		case "docker":
+			return toolType
+		default:
+			return undefined
+	}
+}
+
+function extractToolVersion(node: Node, text: string): string | undefined {
+	// Extract version from configuration files
+	const versionPatterns = [
+		/["']?version["']?\s*:\s*["']([^"']+)["']/,
+		/["']?toolVersion["']?\s*:\s*["']([^"']+)["']/,
+		/["']?node["']?\s*:\s*["'][^"']*["']?\s*["']?\^(\d+\.\d+\.\d+)["']/,
+		/<project[^>]*version\s*=\s*["']([^"']+)["']/,
+		/<project[^>]*><version[^>]*>([^<]+)<\/version>/,
+	]
+
+	for (const pattern of versionPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractBuildEnvironment(node: Node, text: string): string | undefined {
+	// Extract environment from configuration
+	const envPatterns = [
+		/["']?mode["']?\s*:\s*["']([^"']+)["']/,
+		/["']?NODE_ENV["']?\s*:\s*["']([^"']+)["']/,
+		/["']?environment["']?\s*:\s*["']([^"']+)["']/,
+		/<profile[^>]*id["']?\s*=\s*["']([^"']+)["']/,
+	]
+
+	for (const pattern of envPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractBuildCommand(node: Node, text: string): string | undefined {
+	// Extract build command from package.json scripts or similar
+	const buildPatterns = [
+		/["']?build["']?\s*:\s*["']([^"']+)["']/,
+		/["']?compile["']?\s*:\s*["']([^"']+)["']/,
+		/<exec[^>]*>([^<]+)<\/exec>/,
+	]
+
+	for (const pattern of buildPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractDevCommand(node: Node, text: string): string | undefined {
+	// Extract dev command from package.json scripts or similar
+	const devPatterns = [
+		/["']?dev["']?\s*:\s*["']([^"']+)["']/,
+		/["']?start["']?\s*:\s*["']([^"']+)["']/,
+		/["']?serve["']?\s*:\s*["']([^"']+)["']/,
+	]
+
+	for (const pattern of devPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractTestCommand(node: Node, text: string): string | undefined {
+	// Extract test command from package.json scripts or similar
+	const testPatterns = [
+		/["']?test["']?\s*:\s*["']([^"']+)["']/,
+		/["']?test:script["']?\s*:\s*["']([^"']+)["']/,
+		/<goal[^>]*>([^<]+)<\/goal>/,
+	]
+
+	for (const pattern of testPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractBuildDependencies(node: Node, text: string): BuildToolDependency[] {
+	const dependencies: BuildToolDependency[] = []
+
+	try {
+		// Validate input parameters
+		if (!text || typeof text !== "string") {
+			return dependencies
+		}
+
+		// Extract dependencies from package.json, requirements.txt, etc.
+		const depPatterns = [
+			/["']?dependencies["']?\s*:\s*{([^}]+)}/,
+			/["']?devDependencies["']?\s*:\s*{([^}]+)}/,
+			/["']?peerDependencies["']?\s*:\s*{([^}]+)}/,
+			/["']?optionalDependencies["']?\s*:\s*{([^}]+)}/,
+		]
+
+		for (const pattern of depPatterns) {
+			try {
+				const match = text.match(pattern)
+				if (match) {
+					// This is a simplified extraction - a real implementation would parse the JSON properly
+					const depsText = match[1]
+					if (!depsText) continue
+
+					const depMatches = depsText.match(/["']([^"']+)["']?\s*:\s*["']([^"']+)["']/g)
+					if (depMatches) {
+						// Determine if this is a devDependencies pattern by checking the pattern source
+						const isDevDep = pattern.source.includes("devDependencies")
+						for (const depMatch of depMatches) {
+							try {
+								const depParts = depMatch.match(/["']([^"']+)["']?\s*:\s*["']([^"']+)["']/)
+								if (depParts && depParts[1]) {
+									dependencies.push({
+										name: depParts[1],
+										version: depParts[2] || undefined,
+										type: isDevDep ? "development" : "runtime",
+									})
+								}
+							} catch (depError) {
+								console.warn("Failed to parse individual dependency:", depError)
+							}
+						}
+					}
+				}
+			} catch (patternError) {
+				console.warn("Failed to process dependency pattern:", patternError)
+			}
+		}
+	} catch (error) {
+		console.warn("Failed to extract build dependencies:", error)
+	}
+
+	return dependencies
+}
+
+function extractBuildScripts(node: Node, text: string): Record<string, string> {
+	const scripts: Record<string, string> = {}
+
+	try {
+		// Validate input parameters
+		if (!text || typeof text !== "string") {
+			return scripts
+		}
+
+		// Extract scripts from package.json or similar
+		const scriptsPattern = /["']?scripts["']?\s*:\s*{([^}]+)}/
+		const match = text.match(scriptsPattern)
+		if (match) {
+			// This is a simplified extraction - a real implementation would parse the JSON properly
+			const scriptsText = match[1]
+			if (!scriptsText) return scripts
+
+			const scriptMatches = scriptsText.match(/["']([^"']+)["']?\s*:\s*["']([^"']+)["']/g)
+			if (scriptMatches) {
+				for (const scriptMatch of scriptMatches) {
+					try {
+						const scriptParts = scriptMatch.match(/["']([^"']+)["']?\s*:\s*["']([^"']+)["']/)
+						if (scriptParts && scriptParts[1] && scriptParts[2]) {
+							scripts[scriptParts[1]] = scriptParts[2]
+						}
+					} catch (scriptError) {
+						console.warn("Failed to parse individual script:", scriptError)
+					}
+				}
+			}
+		}
+	} catch (error) {
+		console.warn("Failed to extract build scripts:", error)
+	}
+
+	return scripts
+}
+
+function extractBuildPlugins(node: Node, text: string): BuildToolPlugin[] {
+	const plugins: BuildToolPlugin[] = []
+
+	try {
+		// Validate input parameters
+		if (!text || typeof text !== "string") {
+			return plugins
+		}
+
+		// Extract plugins from webpack, rollup, etc.
+		const pluginPatterns = [/["']?plugins["']?\s*:\s*\[([^\]]+)\]/, /["']?loaders["']?\s*:\s*\[([^\]]+)\]/]
+
+		for (const pattern of pluginPatterns) {
+			try {
+				const match = text.match(pattern)
+				if (match) {
+					// This is a simplified extraction - a real implementation would parse the array properly
+					const pluginsText = match[1]
+					if (!pluginsText) continue
+
+					const pluginMatches = pluginsText.match(/["']([^"']+)["']?/g)
+					if (pluginMatches) {
+						for (const pluginMatch of pluginMatches) {
+							try {
+								const pluginParts = pluginMatch.match(/["']([^"']+)["']?/)
+								if (pluginParts && pluginParts[1]) {
+									plugins.push({
+										name: pluginParts[1],
+										enabled: true,
+									})
+								}
+							} catch (pluginError) {
+								console.warn("Failed to parse individual plugin:", pluginError)
+							}
+						}
+					}
+				}
+			} catch (patternError) {
+				console.warn("Failed to process plugin pattern:", patternError)
+			}
+		}
+	} catch (error) {
+		console.warn("Failed to extract build plugins:", error)
+	}
+
+	return plugins
+}
+
+function extractBuildLoaders(node: Node, text: string): BuildToolLoader[] {
+	const loaders: BuildToolLoader[] = []
+
+	// Extract loaders from webpack, etc.
+	const loaderPatterns = [
+		/["']?module["']?\s*:\s*{[^}]*["']?rules["']?\s*:\s*\[([^\]]+)\]/,
+		/["']?loaders["']?\s*:\s*\[([^\]]+)\]/,
+	]
+
+	for (const pattern of loaderPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			// This is a simplified extraction - a real implementation would parse the array properly
+			const loadersText = match[1]
+			const loaderMatches = loadersText.match(/["']([^"']+)["']?/g)
+			if (loaderMatches) {
+				for (const loaderMatch of loaderMatches) {
+					loaders.push({
+						name: loaderMatch[1],
+						loaderType: "module",
+					})
+				}
+			}
+		}
+	}
+
+	return loaders
+}
+
+function extractOutputPath(node: Node, text: string): string | undefined {
+	// Extract output path from configuration
+	const outputPathPatterns = [
+		/["']?output["']?\s*:\s*{[^}]*["']?path["']?\s*:\s*["']([^"']+)["']/,
+		/["']?distDir["']?\s*:\s*["']([^"']+)["']/,
+		/["']?outDir["']?\s*:\s*["']([^"']+)["']/,
+		/<outputDirectory[^>]*>([^<]+)<\/outputDirectory>/,
+		/<build><outputDirectory[^>]*>([^<]+)<\/outputDirectory><\/build>/,
+	]
+
+	for (const pattern of outputPathPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractSourcePaths(node: Node, text: string): string[] {
+	const sourcePaths: string[] = []
+
+	// Extract source paths from configuration
+	const sourcePathPatterns = [
+		/["']?src["']?\s*:\s*\[([^\]]+)\]/,
+		/["']?include["']?\s*:\s*\[([^\]]+)\]/,
+		/<sourceDirectory[^>]*>([^<]+)<\/sourceDirectory>/,
+		/<build><sourceDirectory[^>]*>([^<]+)<\/sourceDirectory><\/build>/,
+	]
+
+	for (const pattern of sourcePathPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			// This is a simplified extraction - a real implementation would parse the array properly
+			const pathsText = match[1]
+			const pathMatches = pathsText.match(/["']([^"']+)["']?/g)
+			if (pathMatches) {
+				for (const pathMatch of pathMatches) {
+					sourcePaths.push(pathMatch[1])
+				}
+			}
+		}
+	}
+
+	return [...new Set(sourcePaths)]
+}
+
+function extractOptimizationLevel(node: Node, text: string): string | undefined {
+	// Extract optimization level from configuration
+	const optimizationPatterns = [
+		/["']?optimization["']?\s*:\s*["']([^"']+)["']/,
+		/["']?mode["']?\s*:\s*["']([^"']+)["']/,
+		/<configuration><optimize[^>]*>([^<]+)<\/optimize><\/configuration>/,
+	]
+
+	for (const pattern of optimizationPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractTargetEnvironment(node: Node, text: string): string | undefined {
+	// Extract target environment from configuration
+	const targetPatterns = [
+		/["']?target["']?\s*:\s*["']([^"']+)["']/,
+		/["']?browserslist["']?\s*:\s*\[([^\]]+)\]/,
+		/<target[^>]*>([^<]+)<\/target>/,
+	]
+
+	for (const pattern of targetPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1]
+		}
+	}
+
+	return undefined
+}
+
+function extractSourceMapsEnabled(node: Node, text: string): boolean | undefined {
+	// Extract source maps setting from configuration
+	const sourceMapPatterns = [
+		/["']?sourceMap["']?\s*:\s*(true|false)/,
+		/["']?sourcemap["']?\s*:\s*(true|false)/,
+		/<configuration><sourceMap[^>]*>([^<]+)<\/sourceMap><\/configuration>/,
+	]
+
+	for (const pattern of sourceMapPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1] === "true"
+		}
+	}
+
+	return undefined
+}
+
+function extractHotReloadEnabled(node: Node, text: string): boolean | undefined {
+	// Extract hot reload setting from configuration
+	const hotReloadPatterns = [
+		/["']?hot["']?\s*:\s*(true|false)/,
+		/["']?liveReload["']?\s*:\s*(true|false)/,
+		/<configuration><hot[^>]*>([^<]+)<\/hot><\/configuration>/,
+	]
+
+	for (const pattern of hotReloadPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1] === "true"
+		}
+	}
+
+	return undefined
+}
+
+function extractMinificationEnabled(node: Node, text: string): boolean | undefined {
+	// Extract minification setting from configuration
+	const minificationPatterns = [
+		/["']?minify["']?\s*:\s*(true|false)/,
+		/["']?minimize["']?\s*:\s*(true|false)/,
+		/<configuration><minify[^>]*>([^<]+)<\/minify><\/configuration>/,
+	]
+
+	for (const pattern of minificationPatterns) {
+		const match = text.match(pattern)
+		if (match) {
+			return match[1] === "true"
+		}
+	}
+
+	return undefined
+}
+
+function extractCustomSettings(node: Node, text: string): Record<string, any> {
+	const customSettings: Record<string, any> = {}
+
+	// Extract custom settings from configuration
+	// This is a simplified implementation - a real implementation would need to parse the configuration properly
+	const customPatterns = [
+		{ regex: /["']?resolve["']?\s*:\s*{([^}]+)}/, name: "resolve" },
+		{ regex: /["']?alias["']?\s*:\s*{([^}]+)}/, name: "alias" },
+		{ regex: /["']?define["']?\s*:\s*{([^}]+)}/, name: "define" },
+	]
+
+	for (const pattern of customPatterns) {
+		const match = text.match(pattern.regex)
+		if (match) {
+			customSettings[pattern.name] = match[1]
+		}
+	}
+
+	return customSettings
+}
+
 // Helper functions for Django metadata extraction
 
 function isDjangoView(nodeText: string): boolean {

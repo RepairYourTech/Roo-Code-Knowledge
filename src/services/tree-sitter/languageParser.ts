@@ -20,6 +20,8 @@ import {
 	ocamlQuery,
 	solidityQuery,
 	tomlQuery,
+	xmlQuery,
+	yamlQuery,
 	vueQuery,
 	luaQuery,
 	systemrdlQuery,
@@ -182,6 +184,15 @@ export async function loadRequiredLanguageParsers(filesToParse: string[], source
 			case "toml":
 				language = await loadLanguage("toml", sourceDirectory)
 				query = new Query(language, tomlQuery)
+				break
+			case "xml":
+				language = await loadLanguage("xml", sourceDirectory)
+				query = new Query(language, xmlQuery)
+				break
+			case "yaml":
+			case "yml":
+				language = await loadLanguage("yaml", sourceDirectory)
+				query = new Query(language, yamlQuery)
 				break
 			case "vue":
 				language = await loadLanguage("vue", sourceDirectory)
