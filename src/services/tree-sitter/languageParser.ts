@@ -36,6 +36,7 @@ export interface LanguageParser {
 	[key: string]: {
 		parser: ParserT
 		query: QueryT
+		language: LanguageT
 	}
 }
 
@@ -235,7 +236,7 @@ export async function loadRequiredLanguageParsers(filesToParse: string[], source
 
 		const parser = new Parser()
 		parser.setLanguage(language)
-		parsers[parserKey] = { parser, query }
+		parsers[parserKey] = { parser, query, language }
 	}
 
 	return parsers

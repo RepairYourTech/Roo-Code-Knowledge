@@ -1,7 +1,7 @@
 // npx vitest services/tree-sitter/__tests__/yamlQuery.spec.ts
 
 import * as path from "path"
-import { Parser, Query } from "web-tree-sitter"
+import { Parser, Query, Language } from "web-tree-sitter"
 import { loadRequiredLanguageParsers } from "../languageParser"
 import yamlQuery from "../queries/yaml"
 
@@ -11,6 +11,7 @@ const WASM_DIR = path.join(__dirname, "../../../node_modules/tree-sitter-wasms/o
 describe("YAML Query - General Config Pattern", () => {
 	let parser: Parser
 	let query: Query
+	let language: Language
 
 	beforeAll(async () => {
 		const parsers = await loadRequiredLanguageParsers(["test.yaml"], WASM_DIR)
@@ -18,6 +19,7 @@ describe("YAML Query - General Config Pattern", () => {
 		expect(parsers.yaml.query).toBeDefined()
 		parser = parsers.yaml.parser
 		query = parsers.yaml.query
+		language = parsers.yaml.language
 	})
 
 	describe("Document wrapper restriction", () => {
@@ -34,7 +36,7 @@ another_top: another_value
 `
 
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 
 			// Filter for general_config captures
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
@@ -71,7 +73,7 @@ cache:
 `
 
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			// Should capture all 3 top-level mappings
@@ -100,7 +102,7 @@ top_level:
 `
 
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			// Should only capture top_level, not nested_level or deep_level
@@ -121,7 +123,7 @@ top_level:
 		it("should handle empty YAML gracefully", () => {
 			const yamlContent = ""
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			expect(generalConfigCaptures.length).toBe(0)
@@ -133,7 +135,7 @@ top_level:
 # Another comment
 `
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			expect(generalConfigCaptures.length).toBe(0)
@@ -151,7 +153,7 @@ array_value:
 `
 
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			// Should capture all 4 top-level mappings
@@ -186,7 +188,7 @@ array_value:
 
 			// Test with document wrapper (current implementation)
 			const startTime = performance.now()
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 			const endTime = performance.now()
 
@@ -206,7 +208,7 @@ array_value:
 	describe("Query syntax validation", () => {
 		it("should have valid tree-sitter query syntax", () => {
 			// The query should be valid tree-sitter syntax
-			expect(() => new Query(parser.getLanguage(), yamlQuery)).not.toThrow()
+			expect(() => new Query(language, yamlQuery)).not.toThrow()
 		})
 
 		it("should have proper capture structure", () => {
@@ -214,7 +216,7 @@ array_value:
 test_key: test_value
 `
 			const tree = parser.parse(yamlContent)
-			const captures = query.captures(tree.rootNode)
+			const captures = query.captures(tree!.rootNode)
 			const generalConfigCaptures = captures.filter((capture) => capture.name === "definition.general_config")
 
 			expect(generalConfigCaptures.length).toBe(1)
