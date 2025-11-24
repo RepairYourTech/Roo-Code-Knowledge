@@ -85,7 +85,7 @@ export default `
 (method_declaration
   name: (identifier) @junit.test_display_name
   modifiers: (modifiers
-    (marker_annotation
+    (annotation
       name: (identifier) @junit.test_annotation
       (#eq? @junit.test_annotation "Test")
       arguments: (annotation_argument_list
@@ -134,13 +134,13 @@ export default `
 ; JUnit 5 - Assertions
 (method_invocation
   name: (identifier) @junit.assertion_method
-  (#match? @junit.assertion_method "^(assertEquals|assertNotEquals|assertTrue|assertFalse|assertNull|assertNotNull|assertSame|assertNotSame|assertArrayEquals|assertIterableEquals|assertLinesMatch|assertThrows|assertDoesNotThrow|assertTimeout|assertTimeoutPreemptively|fail|assumeTrue|assumeFalse)$"))
+  (#match? @junit.assertion_method "^(assertEquals|assertNotEquals|assertTrue|assertFalse|assertNull|assertNotNull|assertSame|assertNotSame|assertArrayEquals|assertIterableEquals|assertLinesMatch|assertThrows|assertDoesNotThrow|assertTimeout|assertTimeoutPreemptively|fail|assumeTrue|assumeFalse)$")
   arguments: (argument_list)?) @definition.junit_assertion
 
 ; JUnit 5 - Assumptions
 (method_invocation
   name: (identifier) @junit.assumption_method
-  (#match? @junit.assumption_method "^(assumeTrue|assumeFalse|assumingThat)$"))
+  (#match? @junit.assumption_method "^(assumeTrue|assumeFalse|assumingThat)$")
   arguments: (argument_list)?) @definition.junit_assumption
 
 ; JUnit 4 - Test method patterns (backward compatibility)
@@ -176,7 +176,7 @@ export default `
 (method_declaration
   name: (identifier) @testng.param_test_name
   modifiers: (modifiers
-    (marker_annotation
+    (annotation
       name: (identifier) @testng.test_annotation
       (#eq? @testng.test_annotation "Test")
       arguments: (annotation_argument_list

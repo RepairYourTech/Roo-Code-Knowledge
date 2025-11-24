@@ -115,6 +115,219 @@ export class CodeParser implements ICodeParser {
 	}
 
 	/**
+	 * Extract semantic identifier from CSS and markdown nodes
+	 * @param node The tree-sitter node
+	 * @param fileExt File extension (e.g., 'css', 'md')
+	 * @returns Semantic identifier or null
+	 */
+	private extractSemanticIdentifier(node: Node, fileExt: string): string | null {
+		// CSS specific extractions
+		if (fileExt === "css") {
+			// CSS declarations: extract property name (e.g., "color", "margin")
+			if (node.type === "declaration") {
+				const propertyNode = node.childForFieldName("property")
+				if (propertyNode) {
+					return propertyNode.text
+				}
+			}
+
+			// CSS keyframes: extract animation name
+			if (node.type === "keyframes_statement") {
+				const nameNode = node.children.find((c) => c?.type === "keyframes_name")
+				if (nameNode) {
+					return nameNode.text
+				}
+			}
+
+			// CSS rules: extract selector text (first selector)
+			if (node.type === "rule_set") {
+				const selectorsNode =
+					node.childForFieldName("selectors") || node.children.find((c) => c?.type === "selectors")
+				if (selectorsNode && selectorsNode.children.length > 0) {
+					// Get first selector text, limit length
+					const selectorText = selectorsNode.children[0]?.text || ""
+					if (selectorText) {
+						return selectorText.length > 50 ? selectorText.slice(0, 50) + "..." : selectorText
+					}
+				}
+			}
+		}
+
+		// Markdown specific extractions
+		if (fileExt === "md" || fileExt === "markdown") {
+			// Markdown content: extract first 30 chars
+			if (node.type === "markdown_content" || node.type.startsWith("markdown_")) {
+				const text = node.text.trim()
+				if (text) {
+					// Replace newlines/tabs with spaces, limit length
+					const cleanText = text.replace(/[\n\t]+/g, " ").trim()
+					return cleanText.length > 30 ? cleanText.slice(0, 30) + "..." : cleanText
+				}
+			}
+		}
+
+		// JavaScript/TypeScript specific extractions
+		if (fileExt === "js" || fileExt === "jsx" || fileExt === "ts" || fileExt === "tsx") {
+			// Anonymous function expressions
+			if (node.type === "function" || node.type === "function_expression") {
+				// Try to get parent variable name
+				const parent = node.parent
+				if (parent?.type === "variable_declarator") {
+					const nameNode = parent.childForFieldName("name")
+					if (nameNode) {
+						return nameNode.text
+					}
+				}
+				return "anonymous_function"
+			}
+
+			// Arrow functions
+			if (node.type === "arrow_function") {
+				// Try to get parent variable/property name
+				const parent = node.parent
+				if (parent?.type === "variable_declarator") {
+					const nameNode = parent.childForFieldName("name")
+					if (nameNode) {
+						return nameNode.text
+					}
+				}
+				if (parent?.type === "pair") {
+					const keyNode = parent.childForFieldName("key")
+					if (keyNode) {
+						return keyNode.text
+					}
+				}
+				return "arrow_function"
+			}
+
+			// Import statements: extract module name
+			if (node.type === "import_statement") {
+				const sourceNode = node.childForFieldName("source")
+				if (sourceNode) {
+					// Remove quotes and extract filename
+					const modulePath = sourceNode.text.replace(/['"]/g, "")
+					const moduleName = modulePath.split("/").pop() || modulePath
+					return `import_${moduleName}`
+				}
+				return "import"
+			}
+
+			// Export statements
+			if (node.type === "export_statement") {
+				const declarationNode = node.childForFieldName("declaration")
+				if (declarationNode) {
+					const nameNode = declarationNode.childForFieldName("name")
+					if (nameNode) {
+						return `export_${nameNode.text}`
+					}
+				}
+				const valueNode = node.childForFieldName("value")
+				if (valueNode) {
+					return "default_export"
+				}
+				return "export"
+			}
+		}
+
+		// Python specific extractions
+		if (fileExt === "py") {
+			// Lambda functions
+			if (node.type === "lambda") {
+				// Try to get parent variable name
+				const parent = node.parent
+				if (parent?.type === "assignment") {
+					const leftNode = parent.childForFieldName("left")
+					if (leftNode) {
+						return leftNode.text
+					}
+				}
+				return "lambda"
+			}
+
+			// Import statements
+			if (node.type === "import_statement" || node.type === "import_from_statement") {
+				const nameNode = node.childForFieldName("name") || node.children.find((c) => c?.type === "dotted_name")
+				if (nameNode) {
+					return `import_${nameNode.text}`
+				}
+				return "import"
+			}
+
+			// Decorators
+			if (node.type === "decorator") {
+				const nameNode = node.children.find((c) => c?.type === "identifier")
+				if (nameNode) {
+					return `@${nameNode.text}`
+				}
+				return "decorator"
+			}
+		}
+
+		// Java specific extractions
+		if (fileExt === "java") {
+			// Lambda expressions
+			if (node.type === "lambda_expression") {
+				// Try to get parent variable/parameter name
+				const parent = node.parent
+				if (parent?.type === "variable_declarator") {
+					const nameNode = parent.childForFieldName("name")
+					if (nameNode) {
+						return nameNode.text
+					}
+				}
+				return "lambda"
+			}
+
+			// Anonymous classes
+			if (node.type === "object_creation_expression") {
+				const typeNode = node.childForFieldName("type")
+				if (typeNode && node.children.some((c) => c?.type === "class_body")) {
+					return `anonymous_${typeNode.text}`
+				}
+			}
+
+			// Import statements
+			if (node.type === "import_declaration") {
+				const nameNode = node.children.find((c) => c?.type === "scoped_identifier" || c?.type === "identifier")
+				if (nameNode) {
+					const parts = nameNode.text.split(".")
+					return `import_${parts[parts.length - 1]}`
+				}
+				return "import"
+			}
+		}
+
+		// C# specific extractions
+		if (fileExt === "cs") {
+			// Lambda expressions
+			if (node.type === "lambda_expression") {
+				const parent = node.parent
+				if (parent?.type === "variable_declarator") {
+					const nameNode = parent.childForFieldName("name")
+					if (nameNode) {
+						return nameNode.text
+					}
+				}
+				return "lambda"
+			}
+
+			// Anonymous objects
+			if (node.type === "anonymous_object_creation_expression") {
+				return "anonymous_object"
+			}
+		}
+
+		// Generic fallback for common anonymous patterns across languages
+		const anonymousPatterns = ["anonymous_function", "anonymous_class", "closure", "block"]
+
+		if (anonymousPatterns.some((pattern) => node.type.includes(pattern))) {
+			return node.type.replace(/_/g, " ")
+		}
+
+		return null
+	}
+
+	/**
 	 * Parses file content into code blocks
 	 * @param filePath Path to the file
 	 * @param content File content
@@ -293,6 +506,7 @@ export class CodeParser implements ICodeParser {
 					const identifier =
 						currentNode.childForFieldName("name")?.text ||
 						currentNode.children.find((c) => c?.type === "identifier")?.text ||
+						this.extractSemanticIdentifier(currentNode, ext) ||
 						null
 					const type = currentNode.type
 					const start_line = adjustedStartLine // Use adjusted start line (includes comments)

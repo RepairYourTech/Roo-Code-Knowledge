@@ -14,7 +14,7 @@ import {
 import * as fs from "fs/promises"
 import * as path from "path"
 import { loadRequiredLanguageParsers, LanguageParser } from "../../tree-sitter/languageParser"
-import { QueryCapture } from "web-tree-sitter"
+import { Query, QueryCapture } from "web-tree-sitter"
 
 /**
  * File category types for purpose extraction
@@ -276,7 +276,11 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 
 		// Check cache first
 		if (this.fileSummaryCache.has(filePath)) {
-			return this.fileSummaryCache.get(filePath)
+			// On cache hit, remove and re-insert to mark as most-recently-used
+			const summary = this.fileSummaryCache.get(filePath)!
+			this.fileSummaryCache.delete(filePath)
+			this.fileSummaryCache.set(filePath, summary)
+			return summary
 		}
 
 		try {
@@ -480,10 +484,6 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		const result = await this.neo4jService.executeQuery(query, { nodeId, limit })
 		return this.convertNodesToReferences(result.nodes)
 	}
-
-	/**
-	 * Calculates dependency depth (max depth in dependency tree)
-	 */
 	private async calculateDependencyDepth(nodeId: string): Promise<number> {
 		if (!this.neo4jService) {
 			return 0
@@ -495,9 +495,15 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		`
 
 		const result = await this.neo4jService.executeQuery(query, { nodeId })
-		// For aggregation queries, Neo4j returns a single node with the result
-		// We'll return 0 if no nodes found (simple heuristic)
-		return result.nodes.length > 0 ? 3 : 0
+		// Extract the aggregated maxDepth value from the first result
+		// Neo4j aggregation queries return results as plain objects, not CodeNode instances
+		if (result.nodes.length > 0) {
+			const record = result.nodes[0] as any
+			if (record.maxDepth !== undefined) {
+				return record.maxDepth as number
+			}
+		}
+		return 0
 	}
 
 	/**
@@ -591,11 +597,12 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		`
 
 		const result = await this.neo4jService.executeQuery(query, { filePath })
+		// Extract names from nodes
 		return result.nodes.map((node) => node.name).filter((name): name is string => !!name)
 	}
 
 	/**
-	 * Calculates file-level test coverage
+	 * Calculates test coverage percentage for a file
 	 */
 	private async calculateFileTestCoverage(filePath: string): Promise<number> {
 		if (!this.neo4jService) {
@@ -613,9 +620,15 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		`
 
 		const result = await this.neo4jService.executeQuery(query, { filePath })
-		// For aggregation queries, we'll use a simple heuristic
-		// If we have nodes, assume some coverage, otherwise 0
-		return result.nodes.length > 0 ? 50 : 0
+		// Extract the calculated coverage percentage
+		// Note: Neo4j aggregation queries return results as plain objects, not CodeNode instances
+		if (result.nodes.length > 0) {
+			const record = result.nodes[0] as any
+			if (record.coverage !== undefined) {
+				return record.coverage as number
+			}
+		}
+		return 0
 	}
 
 	/**
@@ -756,13 +769,24 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 			const tree = parser.parse(content)
 
 			// Extract comments using language-specific queries
-			const commentQuery = this.getCommentQuery(ext)
-			if (!commentQuery) {
-				return { headerComments: [], purposeComments: [], todoComments: [] }
-			}
+			const commentQueryString = this.getCommentQuery(ext)
+			let captures: QueryCapture[] = []
 
-			// Use the existing query to capture comments
-			const captures = tree ? existingQuery.captures(tree.rootNode) : []
+			if (commentQueryString) {
+				// Use the comment-specific query if available
+				// Get Language from web-tree-sitter module and create query
+				const { Language } = require("web-tree-sitter")
+				// The parser's language is already set, we need to load it to create a new query
+				// Since we already have the parser configured, we can create the query from the parserInfo
+				// For now, skip custom comment queries since we don't have direct access to Language
+				// Fall back to existing query
+				if (existingQuery) {
+					captures = tree ? existingQuery.captures(tree.rootNode) : []
+				}
+			} else if (existingQuery) {
+				// Fall back to the existing query if no comment query is available
+				captures = tree ? existingQuery.captures(tree.rootNode) : []
+			}
 
 			return this.processCommentCaptures(captures, content)
 		} catch (error) {
@@ -842,9 +866,9 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 	 * - Purpose comments: Comments containing purpose-related keywords
 	 * - TODO comments: Comments containing task-related keywords (TODO, FIXME, etc.)
 	 *
-	 * @param captures - Array of QueryCapture objects from tree-sitter parsing
-	 * @param content - Original file content for line number reference
-	 * @returns CommentAnalysis object with categorized comment arrays
+	 * @param captures - Tree-sitter query captures containing comment nodes
+	 * @param content - File content for line splitting
+	 * @returns CommentAnalysis with categorized comments
 	 */
 	private processCommentCaptures(captures: QueryCapture[], content: string): CommentAnalysis {
 		const lines = content.split("\n")
@@ -856,8 +880,8 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		captures.sort((a, b) => a.node.startPosition.row - b.node.startPosition.row)
 
 		for (const capture of captures) {
-			// Only process comment captures (those with @doc tag)
-			if (capture.name !== "doc") {
+			// Only process comment captures (those with @comment tag)
+			if (capture.name !== "comment") {
 				continue
 			}
 
@@ -1369,8 +1393,14 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 
 	/**
 	 * Caches file summary with LRU eviction
+	 * Entries are re-inserted on access to enforce LRU ordering
 	 */
 	private cacheFileSummary(filePath: string, summary: FileSummaryContext): void {
+		// If key already exists, delete it to ensure it becomes the newest entry
+		if (this.fileSummaryCache.has(filePath)) {
+			this.fileSummaryCache.delete(filePath)
+		}
+
 		// Simple LRU: if cache is full, remove oldest entry
 		if (this.fileSummaryCache.size >= this.CACHE_SIZE_LIMIT) {
 			const firstKey = this.fileSummaryCache.keys().next().value

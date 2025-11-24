@@ -65,6 +65,7 @@ interface LocalCodeIndexSettings {
 	codebaseIndexEmbedderModelDimension?: number // Generic dimension for all providers
 	codebaseIndexSearchMaxResults?: number
 	codebaseIndexSearchMinScore?: number
+	maxFileDiscoveryLimit: number
 
 	// Neo4j settings (following Qdrant pattern - single set of fields for both local and cloud)
 	neo4jEnabled: boolean
@@ -92,6 +93,7 @@ const createValidationSchema = (provider: EmbedderProvider, neo4jEnabled: boolea
 			.min(1, t("settings:codeIndex.validation.qdrantUrlRequired"))
 			.url(t("settings:codeIndex.validation.invalidQdrantUrl")),
 		codeIndexQdrantApiKey: z.string().optional(),
+		maxFileDiscoveryLimit: z.number().min(0).max(1000000).default(50000),
 		// Neo4j validation (only when enabled)
 		neo4jEnabled: z.boolean(),
 		neo4jUri: neo4jEnabled
@@ -223,6 +225,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		codebaseIndexEmbedderModelDimension: undefined,
 		codebaseIndexSearchMaxResults: CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 		codebaseIndexSearchMinScore: CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_MIN_SCORE,
+		maxFileDiscoveryLimit: 50000,
 		neo4jEnabled: false,
 		neo4jUri: "bolt://localhost:7687",
 		neo4jUsername: "neo4j",
@@ -266,6 +269,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 					codebaseIndexConfig.codebaseIndexSearchMaxResults ?? CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 				codebaseIndexSearchMinScore:
 					codebaseIndexConfig.codebaseIndexSearchMinScore ?? CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_MIN_SCORE,
+				maxFileDiscoveryLimit: codebaseIndexConfig.maxFileDiscoveryLimit ?? 50000,
 				neo4jEnabled: codebaseIndexConfig.neo4jEnabled ?? false,
 				neo4jUri: codebaseIndexConfig.neo4jUri || "bolt://localhost:7687",
 				neo4jUsername: codebaseIndexConfig.neo4jUsername || "neo4j",
@@ -360,6 +364,8 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						codebaseIndexSearchMinScore:
 							backendSettings.codebaseIndexSearchMinScore ??
 							currentSettingsRef.current.codebaseIndexSearchMinScore,
+						maxFileDiscoveryLimit:
+							backendSettings.maxFileDiscoveryLimit ?? currentSettingsRef.current.maxFileDiscoveryLimit,
 						codebaseIndexOpenAiCompatibleBaseUrl:
 							backendSettings.codebaseIndexOpenAiCompatibleBaseUrl ??
 							currentSettingsRef.current.codebaseIndexOpenAiCompatibleBaseUrl,
@@ -1774,6 +1780,42 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 														CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 													)
 												}>
+												<span className="codicon codicon-discard" />
+											</VSCodeButton>
+										</div>
+									</div>
+
+									{/* Max File Discovery Limit Slider */}
+									<div className="space-y-2">
+										<div className="flex items-center gap-2">
+											<label className="text-sm font-medium">Max Files to Index</label>
+											<StandardTooltip content="Maximum number of files to index (0 = unlimited). Default: 50,000.">
+												<span className="codicon codicon-info text-xs text-vscode-descriptionForeground cursor-help" />
+											</StandardTooltip>
+										</div>
+										<div className="flex items-center gap-2">
+											<Slider
+												min={0}
+												max={1000000}
+												step={1000}
+												value={[currentSettings.maxFileDiscoveryLimit]}
+												onValueChange={(values) =>
+													updateSetting("maxFileDiscoveryLimit", values[0])
+												}
+												className="flex-1"
+												data-testid="max-file-limit-slider"
+											/>
+											<span className="w-12 text-center">
+												{currentSettings.maxFileDiscoveryLimit === 0
+													? "Unlimited"
+													: currentSettings.maxFileDiscoveryLimit >= 1000
+														? `${currentSettings.maxFileDiscoveryLimit / 1000}k`
+														: currentSettings.maxFileDiscoveryLimit}
+											</span>
+											<VSCodeButton
+												appearance="icon"
+												title={t("settings:codeIndex.resetToDefault")}
+												onClick={() => updateSetting("maxFileDiscoveryLimit", 50000)}>
 												<span className="codicon codicon-discard" />
 											</VSCodeButton>
 										</div>

@@ -135,10 +135,11 @@ export default `
   (#match? @helm.key "^(apiVersion|kind|metadata|spec|values|templates|Chart|appVersion|dependencies|maintainers|sources|icon)$")
   value: (_) @helm.value)) @definition.helm_config
 
-; General configuration mappings
-(block_mapping_pair
-  key: (flow_node) @config.key
-  value: (_) @config.value) @definition.general_config
+; General configuration mappings (top-level only)
+(document
+  (block_mapping_pair
+    key: (flow_node) @config.key
+    value: (_) @config.value)) @definition.general_config
 
 ; Array configurations (for lists of dependencies, plugins, etc.)
 (flow_node

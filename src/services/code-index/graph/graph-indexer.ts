@@ -394,7 +394,7 @@ export class GraphIndexer implements IGraphIndexer {
 		if (!identifier || identifier.trim() === "") {
 			identifier = this.generateSyntheticIdentifier(block)
 			this.log(
-				`[GraphIndexer] Generated synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
+				`[GraphIndexer] Using fallback synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
 			)
 		}
 

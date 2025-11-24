@@ -77,7 +77,7 @@ import { Package } from "../../../shared/package"
 const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
 const QDRANT_CODE_BLOCK_NAMESPACE = uuidv5("code-blocks", DNS_NAMESPACE)
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 10 // 10MB
-const MAX_LIST_FILES_LIMIT_CODE_INDEX = 10000
+const MAX_LIST_FILES_LIMIT_CODE_INDEX = 50000
 const BATCH_SEGMENT_THRESHOLD = 100
 const PARSING_CONCURRENCY = 4
 const BATCH_PROCESSING_CONCURRENCY = 2
@@ -447,8 +447,13 @@ export class DirectoryScanner implements IDirectoryScanner {
 			throw new Error("Indexing cancelled by user")
 		}
 
+		// Get configured limit
+		const config = vscode.workspace.getConfiguration(Package.name)
+		const userMaxFiles = config.get<number>("codeIndex.maxFileDiscoveryLimit", MAX_LIST_FILES_LIMIT_CODE_INDEX)
+		const effectiveLimit = userMaxFiles === 0 ? Number.MAX_SAFE_INTEGER : userMaxFiles
+
 		// Get all files recursively (handles .gitignore automatically)
-		const [allPaths, _] = await listFiles(directoryPath, true, MAX_LIST_FILES_LIMIT_CODE_INDEX)
+		const [allPaths, _] = await listFiles(directoryPath, true, effectiveLimit)
 
 		// Filter out directories (marked with trailing '/')
 		const filePaths = allPaths.filter((p) => !p.endsWith("/"))

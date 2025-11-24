@@ -19,6 +19,7 @@ import {
 import { HybridSearchResult } from "../hybrid-search-service"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { ImportInfo } from "../types/metadata"
+import { ReachabilityAnalyzer, UnreachableNode } from "./reachability"
 
 /**
  * Service for calculating code quality metrics including complexity,
@@ -32,8 +33,15 @@ export class QualityMetricsService implements IQualityMetricsService {
 	private readonly CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
 	private languageParsers: LanguageParser = {}
 	private pendingParserLoads: Map<string, Promise<LanguageParser>> = new Map()
+	private reachabilityAnalyzer: ReachabilityAnalyzer
 
-	constructor(private neo4jService: INeo4jService | null) {}
+	constructor(private neo4jService: INeo4jService | null) {
+		this.reachabilityAnalyzer = new ReachabilityAnalyzer({
+			maxAnalysisDepth: 1000,
+			enableDebugging: false,
+			maxAnalysisTime: 10000, // 10 seconds
+		})
+	}
 
 	/**
 	 * Enriches search results with quality metrics
@@ -1201,18 +1209,19 @@ export class QualityMetricsService implements IQualityMetricsService {
 				return []
 			}
 
-			// Find unreachable code patterns
-			const unreachableNodes = this.findUnreachableNodes(tree.rootNode, ext)
+			// Use the new reachability analyzer
+			const context = this.reachabilityAnalyzer.createContext()
+			this.reachabilityAnalyzer.analyze(tree.rootNode, context, ext)
 
-			// Convert to CodeReference objects
-			return unreachableNodes.map((node) => ({
-				nodeId: `unreachable-${filePath}-${node.startPosition.row}`,
-				name: `unreachable_code_${node.type}`,
+			// Convert to CodeReference objects with enhanced information
+			return context.getUnreachableNodes().map((unreachable: UnreachableNode) => ({
+				nodeId: `unreachable-${filePath}-${unreachable.line}`,
+				name: `unreachable_code_${unreachable.reason}`,
 				filePath,
-				startLine: node.startPosition.row + 1, // Convert to 1-based
-				endLine: node.endPosition.row + 1,
-				type: node.type,
-				snippet: node.text.trim().substring(0, 100),
+				startLine: unreachable.line,
+				endLine: unreachable.node.endPosition.row + 1,
+				type: unreachable.node.type,
+				snippet: unreachable.snippet,
 			}))
 		} catch (error) {
 			console.debug(`Failed to analyze file ${filePath} for unreachable code:`, error)
@@ -1221,75 +1230,20 @@ export class QualityMetricsService implements IQualityMetricsService {
 	}
 
 	/**
-	 * Finds unreachable nodes in AST by analyzing control flow
+	 * Finds unreachable nodes using the new scoped reachability context system
 	 * @param rootNode Root node of the AST
 	 * @param language File extension for language-specific analysis
 	 * @returns Array of unreachable AST nodes
 	 */
 	private findUnreachableNodes(rootNode: Node, language: string): Node[] {
-		const unreachableNodes: Node[] = []
+		// Create new reachability context for this analysis
+		const context = this.reachabilityAnalyzer.createContext()
 
-		// Define control flow nodes that can create unreachable code
-		const controlFlowNodes = [
-			"return_statement",
-			"throw_statement",
-			"break_statement",
-			"continue_statement",
-			"exit_statement", // PHP
-			"die_statement", // PHP
-			"goto_statement", // C/C++
-		]
+		// Analyze the AST with proper scope tracking
+		this.reachabilityAnalyzer.analyze(rootNode, context, language)
 
-		// Define conditional nodes that might have unreachable branches
-		const conditionalNodes = [
-			"if_statement",
-			"else_clause",
-			"elif_clause",
-			"switch_statement",
-			"case_clause",
-			"default_clause",
-			"try_statement",
-			"catch_clause",
-			"finally_clause",
-		]
-
-		// Traverse the AST
-		const traverse = (node: Node, context: { hasUnreachablePath: boolean } = { hasUnreachablePath: false }) => {
-			// Check if this is a control flow node that terminates execution
-			if (controlFlowNodes.includes(node.type)) {
-				context.hasUnreachablePath = true
-			}
-
-			// If we're in an unreachable context and this is a significant statement, mark it
-			if (context.hasUnreachablePath && this.isSignificantStatement(node)) {
-				unreachableNodes.push(node)
-			}
-
-			// Analyze conditional nodes for always-true/false conditions
-			if (conditionalNodes.includes(node.type)) {
-				const hasUnreachableBranch = this.analyzeConditionalForUnreachableCode(node, language)
-				if (hasUnreachableBranch) {
-					// Find the unreachable branch
-					this.findUnreachableBranches(node, unreachableNodes)
-				}
-			}
-
-			// Process children
-			for (const child of node.children || []) {
-				if (child) {
-					// Reset context for certain nodes that start new blocks
-					const childContext = { ...context }
-					if (node.type === "function_declaration" || node.type === "function_definition") {
-						childContext.hasUnreachablePath = false
-					}
-
-					traverse(child, childContext)
-				}
-			}
-		}
-
-		traverse(rootNode)
-		return unreachableNodes
+		// Convert unreachable nodes back to the expected format
+		return context.getUnreachableNodes().map((unreachable: UnreachableNode) => unreachable.node)
 	}
 
 	/**
