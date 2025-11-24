@@ -4,6 +4,7 @@ import { GEMINI_MAX_ITEM_TOKENS, GEMINI_MAX_BATCH_ITEMS } from "../constants"
 import { t } from "../../../i18n"
 import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
+import * as vscode from "vscode"
 
 /**
  * Gemini embedder implementation that wraps the OpenAI Compatible embedder
@@ -18,16 +19,20 @@ export class GeminiEmbedder implements IEmbedder {
 	private static readonly GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 	private static readonly DEFAULT_MODEL = "gemini-embedding-001"
 	private readonly modelId: string
+	private readonly outputChannel?: vscode.OutputChannel
 
 	/**
 	 * Creates a new Gemini embedder
 	 * @param apiKey The Gemini API key for authentication
 	 * @param modelId The model ID to use (defaults to gemini-embedding-001)
+	 * @param outputChannel Optional OutputChannel for error notifications
 	 */
-	constructor(apiKey: string, modelId?: string) {
+	constructor(apiKey: string, modelId?: string, outputChannel?: vscode.OutputChannel) {
 		if (!apiKey) {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
+
+		this.outputChannel = outputChannel
 
 		// Use provided model or default
 		this.modelId = modelId || GeminiEmbedder.DEFAULT_MODEL
@@ -40,6 +45,7 @@ export class GeminiEmbedder implements IEmbedder {
 			this.modelId,
 			GEMINI_MAX_ITEM_TOKENS,
 			GEMINI_MAX_BATCH_ITEMS, // Gemini's strict limit: "at most 100 requests can be in one batch"
+			outputChannel,
 		)
 	}
 
@@ -89,6 +95,18 @@ export class GeminiEmbedder implements IEmbedder {
 	get embedderInfo(): EmbedderInfo {
 		return {
 			name: "gemini",
+		}
+	}
+
+	public getProviderInfo(): {
+		provider: string
+		modelId: string
+		baseUrl: string
+	} {
+		return {
+			provider: "gemini",
+			modelId: this.modelId,
+			baseUrl: GeminiEmbedder.GEMINI_BASE_URL,
 		}
 	}
 }

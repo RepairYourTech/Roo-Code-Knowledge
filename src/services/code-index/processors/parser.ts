@@ -18,18 +18,14 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
-// TODO: Phase 2 - metadata-extractor.ts not yet implemented
-// import { extractSymbolMetadata, extractImportInfo } from "./metadata-extractor"
+import {
+	extractSymbolMetadata,
+	extractImportInfo,
+	extractReactComponentMetadata,
+	extractReactHookMetadata,
+	extractJSXMetadata,
+} from "./metadata-extractor"
 import { ImportInfo } from "../types/metadata"
-
-// Stub functions until metadata-extractor is implemented
-function extractSymbolMetadata(_node: any, _text: string): any {
-	return undefined
-}
-
-function extractImportInfo(_node: any): ImportInfo | null {
-	return null
-}
 
 /**
  * Implementation of the code parser interface
@@ -232,8 +228,27 @@ export class CodeParser implements ICodeParser {
 						// Will be handled in the "create a block" section below
 					} else {
 						// >ABSOLUTE_MAX_CHARS: Need to split, but intelligently
-						// For now, fall back to processing children
-						// TODO: Implement splitAtLogicalBoundaries() for very large functions
+						// Implement splitAtLogicalBoundaries() for very large functions
+						try {
+							const logicalChunks = this.splitAtLogicalBoundaries(
+								currentNode,
+								filePath,
+								fileHash,
+								seenSegmentHashes,
+								content,
+								fileImports,
+								testMetadata,
+							)
+							if (logicalChunks.length > 0) {
+								results.push(...logicalChunks)
+								continue // Skip the "create a block" section
+							}
+						} catch (error) {
+							console.debug(`Failed to split at logical boundaries for ${filePath}:`, error)
+							// Fall back to processing children if logical splitting fails
+						}
+
+						// Fallback: process children or use line-based chunking
 						if (currentNode.children.filter((child) => child !== null).length > 0) {
 							queue.push(...currentNode.children.filter((child) => child !== null))
 						} else {
@@ -294,6 +309,10 @@ export class CodeParser implements ICodeParser {
 						// Phase 2: Extract enhanced metadata for TypeScript/JavaScript
 						let symbolMetadata = undefined
 						let documentation = undefined
+						let reactComponentMetadata = undefined
+						let reactHookMetadata = undefined
+						let jsxMetadata = undefined
+
 						if (ext === "ts" || ext === "tsx" || ext === "js" || ext === "jsx") {
 							try {
 								// CRITICAL FIX: Pass full file content, not just currentNode.text
@@ -302,6 +321,14 @@ export class CodeParser implements ICodeParser {
 								// would try to access lines[50] in an array that only has as many lines as the node)
 								symbolMetadata = extractSymbolMetadata(currentNode, content) || undefined
 								documentation = symbolMetadata?.documentation
+
+								// Extract React-specific metadata for TSX/TS files
+								if (ext === "tsx" || ext === "ts") {
+									reactComponentMetadata =
+										extractReactComponentMetadata(currentNode, content) || undefined
+									reactHookMetadata = extractReactHookMetadata(currentNode) || undefined
+									jsxMetadata = extractJSXMetadata(currentNode) || undefined
+								}
 							} catch (error) {
 								// Silently fail metadata extraction - don't break indexing
 								console.debug(`Failed to extract metadata for ${filePath}:${start_line}`, error)
@@ -332,6 +359,10 @@ export class CodeParser implements ICodeParser {
 							imports: fileImports.length > 0 ? fileImports : undefined, // Phase 3: Include imports (Rule 4)
 							calls, // Phase 10: Include function calls
 							testMetadata, // Phase 10, Task 2: Include test metadata
+							// React-specific metadata
+							reactComponentMetadata,
+							reactHookMetadata,
+							jsxMetadata,
 						})
 					}
 				}
@@ -901,8 +932,24 @@ export class CodeParser implements ICodeParser {
 			return this.parsePythonCallExpression(callNode)
 		}
 
-		// For other languages, return null for now
-		// TODO: Implement parsers for Rust, Go, Java, C++, etc.
+		// Parse call expressions for other supported languages
+		if (language === "rs") {
+			return this.parseRustCallExpression(callNode)
+		}
+
+		if (language === "go") {
+			return this.parseGoCallExpression(callNode)
+		}
+
+		if (language === "java") {
+			return this.parseJavaCallExpression(callNode)
+		}
+
+		if (["cpp", "c", "cc", "cxx", "hpp", "h"].includes(language)) {
+			return this.parseCppCallExpression(callNode)
+		}
+
+		// For unsupported languages, return null
 		return null
 	}
 
@@ -1012,6 +1059,283 @@ export class CodeParser implements ICodeParser {
 					column,
 					receiver: isStatic ? undefined : objectName,
 					qualifier: isStatic ? objectName : undefined,
+				}
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Parse a Rust call expression
+	 */
+	private parseRustCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		const functionNode = callNode.childForFieldName("function")
+		if (!functionNode) {
+			return null
+		}
+
+		// Simple function call: foo()
+		if (functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		// Method call: obj.method() or Type::static_method()
+		if (functionNode.type === "field_expression") {
+			const objectNode = functionNode.childForFieldName("value")
+			const fieldNode = functionNode.childForFieldName("field")
+
+			if (objectNode && fieldNode) {
+				const objectName = objectNode.text
+				const methodName = fieldNode.text
+
+				// Check if it's a static method (Type::method) or instance method (obj.method)
+				const isStatic = objectNode.type === "type_identifier" || objectNode.type === "generic_type"
+
+				return {
+					calleeName: methodName,
+					callType: isStatic ? "static_method" : "method",
+					line,
+					column,
+					receiver: isStatic ? undefined : objectName,
+					qualifier: isStatic ? objectName : undefined,
+				}
+			}
+		}
+
+		// Macro call: macro!()
+		if (functionNode.type === "macro_invocation") {
+			const macroNode = functionNode.childForFieldName("macro")
+			if (macroNode && macroNode.type === "identifier") {
+				return {
+					calleeName: macroNode.text,
+					callType: "function",
+					line,
+					column,
+				}
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Parse a Go call expression
+	 */
+	private parseGoCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		const functionNode = callNode.childForFieldName("function")
+		if (!functionNode) {
+			return null
+		}
+
+		// Simple function call: foo()
+		if (functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		// Method call: obj.method() or Type.method()
+		if (functionNode.type === "selector_expression") {
+			const operandNode = functionNode.childForFieldName("operand")
+			const fieldNode = functionNode.childForFieldName("field")
+
+			if (operandNode && fieldNode) {
+				const operandName = operandNode.text
+				const methodName = fieldNode.text
+
+				// Check if it's a static method (Type.method) or instance method (obj.method)
+				const isStatic = /^[A-Z]/.test(operandName)
+
+				return {
+					calleeName: methodName,
+					callType: isStatic ? "static_method" : "method",
+					line,
+					column,
+					receiver: isStatic ? undefined : operandName,
+					qualifier: isStatic ? operandName : undefined,
+				}
+			}
+		}
+
+		// Package function call: package.Function()
+		if (functionNode.type === "qualified_type") {
+			const packageNode = functionNode.childForFieldName("package")
+			const nameNode = functionNode.childForFieldName("name")
+
+			if (packageNode && nameNode) {
+				return {
+					calleeName: nameNode.text,
+					callType: "function",
+					line,
+					column,
+					qualifier: packageNode.text,
+				}
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Parse a Java call expression
+	 */
+	private parseJavaCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		// Handle method invocations
+		if (callNode.type === "method_invocation") {
+			const objectNode = callNode.childForFieldName("object")
+			const nameNode = callNode.childForFieldName("name")
+
+			if (nameNode) {
+				const methodName = nameNode.text
+
+				// Static method call: Class.method()
+				if (objectNode && objectNode.type === "identifier") {
+					const isStatic = /^[A-Z]/.test(objectNode.text)
+					return {
+						calleeName: methodName,
+						callType: isStatic ? "static_method" : "method",
+						line,
+						column,
+						receiver: isStatic ? undefined : objectNode.text,
+						qualifier: isStatic ? objectNode.text : undefined,
+					}
+				}
+
+				// Method call without explicit object (this.method() or local method)
+				return {
+					calleeName: methodName,
+					callType: "method",
+					line,
+					column,
+				}
+			}
+		}
+
+		// Handle object creation expressions (constructor calls)
+		if (callNode.type === "object_creation_expression") {
+			const typeNode = callNode.childForFieldName("type")
+			if (typeNode) {
+				return {
+					calleeName: typeNode.text,
+					callType: "constructor",
+					line,
+					column,
+				}
+			}
+		}
+
+		// Handle regular call expressions
+		const functionNode = callNode.childForFieldName("function")
+		if (functionNode && functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		return null
+	}
+
+	/**
+	 * Parse a C++ call expression
+	 */
+	private parseCppCallExpression(callNode: Node): CallInfo | null {
+		const line = callNode.startPosition.row + 1 // Convert to 1-based
+		const column = callNode.startPosition.column
+
+		const functionNode = callNode.childForFieldName("function")
+		if (!functionNode) {
+			return null
+		}
+
+		// Simple function call: foo()
+		if (functionNode.type === "identifier") {
+			return {
+				calleeName: functionNode.text,
+				callType: "function",
+				line,
+				column,
+			}
+		}
+
+		// Method call: obj->method() or obj.method()
+		if (functionNode.type === "field_expression") {
+			const objectNode = functionNode.childForFieldName("argument")
+			const fieldNode = functionNode.childForFieldName("field")
+
+			if (objectNode && fieldNode) {
+				const objectName = objectNode.text
+				const methodName = fieldNode.text
+
+				return {
+					calleeName: methodName,
+					callType: "method",
+					line,
+					column,
+					receiver: objectName,
+				}
+			}
+		}
+
+		// Template function call: foo<T>()
+		if (functionNode.type === "template_function") {
+			const nameNode = functionNode.childForFieldName("name")
+			if (nameNode && nameNode.type === "identifier") {
+				return {
+					calleeName: nameNode.text,
+					callType: "function",
+					line,
+					column,
+				}
+			}
+		}
+
+		// Namespace qualified call: std::foo()
+		if (functionNode.type === "qualified_identifier") {
+			const scopeNode = functionNode.childForFieldName("scope")
+			const nameNode = functionNode.childForFieldName("name")
+
+			if (scopeNode && nameNode) {
+				return {
+					calleeName: nameNode.text,
+					callType: "function",
+					line,
+					column,
+					qualifier: scopeNode.text,
+				}
+			}
+		}
+
+		// Constructor call: new MyClass()
+		const parentNode = callNode.parent
+		if (parentNode && parentNode.type === "new_expression") {
+			const typeNode = parentNode.childForFieldName("type")
+			if (typeNode) {
+				return {
+					calleeName: typeNode.text,
+					callType: "constructor",
+					line,
+					column,
 				}
 			}
 		}
@@ -1333,7 +1657,627 @@ export class CodeParser implements ICodeParser {
 
 		return testFrameworks.some((framework) => source.toLowerCase().includes(framework))
 	}
+
+	/**
+	 * Splits a large function or semantic unit at logical boundaries to create meaningful chunks.
+	 * This function analyzes the AST to identify natural breaking points that preserve semantic coherence.
+	 *
+	 * @param node The large AST node to split (typically a function or class)
+	 * @param filePath Path to the source file
+	 * @param fileHash Hash of the entire file
+	 * @param seenSegmentHashes Set of already seen segment hashes to avoid duplicates
+	 * @param fileContent Full file content (needed for context extraction)
+	 * @param fileImports File-level import information to include in chunks
+	 * @param testMetadata Test metadata if this is a test file
+	 * @returns Array of CodeBlock chunks split at logical boundaries
+	 */
+	private splitAtLogicalBoundaries(
+		node: Node,
+		filePath: string,
+		fileHash: string,
+		seenSegmentHashes: Set<string>,
+		fileContent: string,
+		fileImports: ImportInfo[],
+		testMetadata?: TestMetadata,
+	): CodeBlock[] {
+		const ext = path.extname(filePath).slice(1).toLowerCase()
+		const chunks: CodeBlock[] = []
+
+		try {
+			// Identify logical boundaries within the node
+			const boundaries = this.identifyLogicalBoundaries(node, ext)
+
+			if (boundaries.length === 0) {
+				// No logical boundaries found, fall back to line-based chunking
+				return this._chunkLeafNodeByLines(node, filePath, fileHash, seenSegmentHashes)
+			}
+
+			// Create chunks based on identified boundaries
+			const nodeLines = fileContent.split("\n")
+			const startLine = node.startPosition.row
+			const endLine = node.endPosition.row
+
+			// Group boundaries into balanced chunks
+			const chunkGroups = this.groupBoundariesIntoChunks(
+				boundaries,
+				nodeLines,
+				startLine,
+				endLine,
+				SEMANTIC_MAX_CHARS,
+			)
+
+			// Create CodeBlock objects for each chunk group
+			for (const group of chunkGroups) {
+				const chunk = this.createChunkFromBoundaryGroup(
+					group,
+					node,
+					filePath,
+					fileHash,
+					fileContent,
+					fileImports,
+					testMetadata,
+					seenSegmentHashes,
+					ext,
+				)
+				if (chunk) {
+					chunks.push(chunk)
+				}
+			}
+
+			return chunks
+		} catch (error) {
+			console.debug(`Error in splitAtLogicalBoundaries for ${filePath}:`, error)
+			// Fall back to line-based chunking on error
+			return this._chunkLeafNodeByLines(node, filePath, fileHash, seenSegmentHashes)
+		}
+	}
+
+	/**
+	 * Identifies logical boundaries within a large AST node where it can be meaningfully split.
+	 * These boundaries represent natural breaking points that preserve semantic coherence.
+	 *
+	 * @param node The AST node to analyze
+	 * @param language The programming language extension
+	 * @returns Array of boundary objects with position and type information
+	 */
+	private identifyLogicalBoundaries(node: Node, language: string): LogicalBoundary[] {
+		const boundaries: LogicalBoundary[] = []
+
+		// Get language-specific boundary patterns
+		const patterns = this.getLanguageBoundaryPatterns(language)
+
+		// Traverse the AST to find boundary nodes
+		const traverse = (currentNode: Node, depth: number = 0) => {
+			// Skip the root node itself
+			if (currentNode.id === node.id) {
+				for (const child of currentNode.children) {
+					if (child) traverse(child, depth + 1)
+				}
+				return
+			}
+
+			// Check if current node represents a logical boundary
+			const boundaryType = this.getBoundaryType(currentNode, patterns)
+			if (boundaryType) {
+				boundaries.push({
+					node: currentNode,
+					type: boundaryType,
+					startLine: currentNode.startPosition.row,
+					endLine: currentNode.endPosition.row,
+					depth,
+					text: currentNode.text,
+					priority: this.getBoundaryPriority(boundaryType, depth),
+				})
+			}
+
+			// Continue traversing children
+			for (const child of currentNode.children) {
+				if (child) traverse(child, depth + 1)
+			}
+		}
+
+		traverse(node)
+
+		// Sort boundaries by position and priority
+		return boundaries.sort((a, b) => {
+			if (a.startLine !== b.startLine) {
+				return a.startLine - b.startLine
+			}
+			// If same line, prioritize by boundary type priority
+			return b.priority - a.priority
+		})
+	}
+
+	/**
+	 * Gets language-specific boundary patterns for logical splitting.
+	 * Different languages have different constructs that make good splitting points.
+	 *
+	 * @param language The programming language extension
+	 * @returns Object containing boundary patterns for the language
+	 */
+	private getLanguageBoundaryPatterns(language: string): LanguageBoundaryPatterns {
+		const commonPatterns: LanguageBoundaryPatterns = {
+			controlFlow: [
+				"if_statement",
+				"else_clause",
+				"switch_statement",
+				"case",
+				"for_statement",
+				"while_statement",
+				"do_statement",
+			],
+			functions: ["function_declaration", "function_expression", "arrow_function", "method_definition"],
+			classes: ["class_declaration", "class_expression", "interface_declaration", "struct_item"],
+			blocks: ["block", "statement_block"],
+			comments: ["comment", "block_comment", "line_comment"],
+		}
+
+		// Language-specific adjustments
+		switch (language) {
+			case "py":
+				return {
+					...commonPatterns,
+					controlFlow: [
+						...commonPatterns.controlFlow,
+						"if_statement",
+						"elif_clause",
+						"else_clause",
+						"for_statement",
+						"while_statement",
+						"try_statement",
+						"except_clause",
+						"finally_clause",
+						"with_statement",
+					],
+					functions: ["function_definition", "lambda_function"],
+					classes: ["class_definition"],
+				}
+
+			case "rs":
+				return {
+					...commonPatterns,
+					controlFlow: [
+						...commonPatterns.controlFlow,
+						"match_expression",
+						"match_arm",
+						"if_expression",
+						"if_let_expression",
+						"loop_expression",
+						"while_expression",
+						"for_expression",
+						"unsafe_block",
+					],
+					functions: ["function_item", "closure_expression"],
+					classes: ["struct_item", "enum_item", "impl_item", "trait_item"],
+				}
+
+			case "go":
+				return {
+					...commonPatterns,
+					controlFlow: [
+						...commonPatterns.controlFlow,
+						"if_statement",
+						"else_clause",
+						"switch_statement",
+						"case_clause",
+						"default_clause",
+						"for_statement",
+						"range_clause",
+						"select_statement",
+						"communication_clause",
+						"go_statement",
+						"defer_statement",
+					],
+					functions: ["function_declaration"],
+					classes: ["struct_type", "interface_type"],
+				}
+
+			case "java":
+			case "cs":
+				return {
+					...commonPatterns,
+					controlFlow: [
+						...commonPatterns.controlFlow,
+						"if_statement",
+						"else_statement",
+						"switch_statement",
+						"switch_expression",
+						"for_statement",
+						"enhanced_for_statement",
+						"while_statement",
+						"do_statement",
+						"try_statement",
+						"catch_clause",
+						"finally_clause",
+					],
+					functions: ["method_declaration", "constructor_declaration"],
+					classes: ["class_declaration", "interface_declaration", "enum_declaration", "record_declaration"],
+				}
+
+			case "cpp":
+			case "c":
+			case "cc":
+			case "cxx":
+			case "hpp":
+			case "h":
+				return {
+					...commonPatterns,
+					controlFlow: [
+						...commonPatterns.controlFlow,
+						"if_statement",
+						"else_clause",
+						"switch_statement",
+						"case_label",
+						"default_label",
+						"for_statement",
+						"range_based_for_statement",
+						"while_statement",
+						"do_statement",
+						"try_statement",
+						"catch_clause",
+						"finally_clause",
+					],
+					functions: ["function_definition", "declaration"],
+					classes: ["class_specifier", "struct_specifier", "union_specifier", "enum_specifier"],
+				}
+
+			default:
+				// Default to TypeScript/JavaScript patterns
+				return commonPatterns
+		}
+	}
+
+	/**
+	 * Determines the boundary type for a given node based on language patterns.
+	 *
+	 * @param node The AST node to classify
+	 * @param patterns Language-specific boundary patterns
+	 * @returns Boundary type or null if not a boundary
+	 */
+	private getBoundaryType(node: Node, patterns: LanguageBoundaryPatterns): BoundaryType | null {
+		const nodeType = node.type
+
+		// Check each boundary category
+		if (patterns.controlFlow.includes(nodeType)) {
+			return "control_flow"
+		}
+		if (patterns.functions.includes(nodeType)) {
+			return "function"
+		}
+		if (patterns.classes.includes(nodeType)) {
+			return "class"
+		}
+		if (patterns.blocks.includes(nodeType)) {
+			return "block"
+		}
+		if (patterns.comments.includes(nodeType)) {
+			return "comment"
+		}
+
+		return null
+	}
+
+	/**
+	 * Gets the priority score for a boundary type and depth.
+	 * Higher priority boundaries are preferred for splitting.
+	 *
+	 * @param boundaryType The type of boundary
+	 * @param depth The nesting depth of the boundary
+	 * @returns Priority score (higher = preferred for splitting)
+	 */
+	private getBoundaryPriority(boundaryType: BoundaryType, depth: number): number {
+		const basePriorities: Record<BoundaryType, number> = {
+			control_flow: 100,
+			function: 90,
+			class: 80,
+			block: 60,
+			comment: 40,
+		}
+
+		// Adjust priority based on depth (prefer boundaries at reasonable depths)
+		const depthAdjustment = depth <= 3 ? 0 : (depth - 3) * -10
+
+		return basePriorities[boundaryType] + depthAdjustment
+	}
+
+	/**
+	 * Groups identified boundaries into balanced chunks that respect size limits.
+	 * This algorithm tries to create chunks of roughly equal size while respecting logical boundaries.
+	 *
+	 * @param boundaries Array of identified boundaries
+	 * @param nodeLines Array of all lines in the node
+	 * @param startLine Starting line number of the node
+	 * @param endLine Ending line number of the node
+	 * @param maxChunkSize Maximum desired chunk size in characters
+	 * @returns Array of chunk groups with their boundaries
+	 */
+	private groupBoundariesIntoChunks(
+		boundaries: LogicalBoundary[],
+		nodeLines: string[],
+		startLine: number,
+		endLine: number,
+		maxChunkSize: number,
+	): BoundaryChunkGroup[] {
+		const chunks: BoundaryChunkGroup[] = []
+
+		if (boundaries.length === 0) {
+			// No boundaries, create single chunk
+			chunks.push({
+				boundaries: [],
+				startLine,
+				endLine,
+				estimatedSize: nodeLines.slice(startLine, endLine + 1).join("\n").length,
+			})
+			return chunks
+		}
+
+		let currentChunk: BoundaryChunkGroup = {
+			boundaries: [],
+			startLine: startLine,
+			endLine: startLine,
+			estimatedSize: 0,
+		}
+
+		let lastBoundaryLine = startLine
+
+		for (let i = 0; i < boundaries.length; i++) {
+			const boundary = boundaries[i]
+			const nextBoundary = boundaries[i + 1]
+
+			// Calculate size if we include this boundary
+			const linesToInclude = nodeLines.slice(lastBoundaryLine, boundary.endLine + 1)
+			const sizeWithBoundary = linesToInclude.join("\n").length
+
+			// Check if adding this boundary would exceed the limit
+			if (currentChunk.estimatedSize + sizeWithBoundary > maxChunkSize && currentChunk.boundaries.length > 0) {
+				// Current chunk is full, finalize it
+				currentChunk.endLine = boundary.startLine - 1
+				chunks.push(currentChunk)
+
+				// Start new chunk with this boundary
+				currentChunk = {
+					boundaries: [boundary],
+					startLine: boundary.startLine,
+					endLine: boundary.endLine,
+					estimatedSize: sizeWithBoundary,
+				}
+				lastBoundaryLine = boundary.endLine + 1
+			} else {
+				// Add boundary to current chunk
+				currentChunk.boundaries.push(boundary)
+				currentChunk.endLine = boundary.endLine
+				currentChunk.estimatedSize += sizeWithBoundary
+				lastBoundaryLine = boundary.endLine + 1
+			}
+
+			// Handle the last boundary
+			if (i === boundaries.length - 1) {
+				// Include any remaining lines after the last boundary
+				const remainingLines = nodeLines.slice(lastBoundaryLine, endLine + 1)
+				if (remainingLines.length > 0) {
+					currentChunk.estimatedSize += remainingLines.join("\n").length
+					currentChunk.endLine = endLine
+				}
+				chunks.push(currentChunk)
+			}
+		}
+
+		return chunks
+	}
+
+	/**
+	 * Creates a CodeBlock from a boundary chunk group.
+	 * This method extracts the content, metadata, and context for a chunk.
+	 *
+	 * @param group The boundary chunk group
+	 * @param originalNode The original large node being split
+	 * @param filePath Path to the source file
+	 * @param fileHash Hash of the entire file
+	 * @param fileContent Full file content
+	 * @param fileImports File-level import information
+	 * @param testMetadata Test metadata if applicable
+	 * @param seenSegmentHashes Set of seen hashes to avoid duplicates
+	 * @param language The programming language extension
+	 * @returns CodeBlock or null if creation fails
+	 */
+	private createChunkFromBoundaryGroup(
+		group: BoundaryChunkGroup,
+		originalNode: Node,
+		filePath: string,
+		fileHash: string,
+		fileContent: string,
+		fileImports: ImportInfo[],
+		testMetadata: TestMetadata | undefined,
+		seenSegmentHashes: Set<string>,
+		language: string,
+	): CodeBlock | null {
+		try {
+			const lines = fileContent.split("\n")
+			const chunkLines = lines.slice(group.startLine, group.endLine + 1)
+			const chunkContent = chunkLines.join("\n")
+
+			// Skip if too small
+			if (chunkContent.length < MIN_BLOCK_CHARS) {
+				return null
+			}
+
+			// Create segment hash
+			const contentPreview = chunkContent.slice(0, 100)
+			const segmentHash = createHash("sha256")
+				.update(
+					`${filePath}-${group.startLine + 1}-${group.endLine + 1}-${chunkContent.length}-${contentPreview}`,
+				)
+				.digest("hex")
+
+			// Skip if already seen
+			if (seenSegmentHashes.has(segmentHash)) {
+				return null
+			}
+			seenSegmentHashes.add(segmentHash)
+
+			// Extract metadata for the chunk
+			let symbolMetadata = undefined
+			let documentation = undefined
+			let calls: CallInfo[] | undefined = undefined
+
+			// For TypeScript/JavaScript, try to extract enhanced metadata
+			if (["ts", "tsx", "js", "jsx"].includes(language)) {
+				try {
+					// Create a temporary node for metadata extraction
+					const tempContent = chunkContent
+					const tempTree = this.loadedParsers[language]?.parser.parse(tempContent)
+					if (tempTree) {
+						const tempNode = tempTree.rootNode.descendantForIndex(0)
+						if (tempNode) {
+							symbolMetadata = extractSymbolMetadata(tempNode, tempContent) || undefined
+							documentation = symbolMetadata?.documentation
+						}
+					}
+				} catch (error) {
+					// Silently fail metadata extraction
+					console.debug(`Failed to extract metadata for chunk ${filePath}:${group.startLine + 1}`, error)
+				}
+			}
+
+			// Extract function calls from the chunk
+			try {
+				const tempTree = this.loadedParsers[language]?.parser.parse(chunkContent)
+				if (tempTree) {
+					const extractedCalls = this.extractCalls(tempTree.rootNode, filePath)
+					calls = extractedCalls.length > 0 ? extractedCalls : undefined
+				}
+			} catch (error) {
+				// Silently fail call extraction
+				console.debug(`Failed to extract calls for chunk ${filePath}:${group.startLine + 1}`, error)
+			}
+
+			// Determine chunk type and identifier
+			const chunkType = this.determineChunkType(group, originalNode)
+			const identifier = this.determineChunkIdentifier(group, originalNode)
+
+			return {
+				file_path: filePath,
+				identifier,
+				type: chunkType,
+				start_line: group.startLine + 1, // Convert to 1-based
+				end_line: group.endLine + 1, // Convert to 1-based
+				content: chunkContent,
+				segmentHash,
+				fileHash,
+				symbolMetadata,
+				documentation,
+				imports: fileImports.length > 0 ? fileImports : undefined,
+				calls,
+				testMetadata,
+			}
+		} catch (error) {
+			console.debug(`Failed to create chunk from boundary group for ${filePath}:`, error)
+			return null
+		}
+	}
+
+	/**
+	 * Determines the appropriate type for a chunk based on its boundaries.
+	 *
+	 * @param group The boundary chunk group
+	 * @param originalNode The original node being split
+	 * @returns String representing the chunk type
+	 */
+	private determineChunkType(group: BoundaryChunkGroup, originalNode: Node): string {
+		// If the chunk contains function boundaries, mark it as such
+		if (group.boundaries.some((b) => b.type === "function")) {
+			return "function_chunk"
+		}
+
+		// If the chunk contains class boundaries, mark it as such
+		if (group.boundaries.some((b) => b.type === "class")) {
+			return "class_chunk"
+		}
+
+		// If the chunk contains control flow boundaries, mark it as such
+		if (group.boundaries.some((b) => b.type === "control_flow")) {
+			return "control_flow_chunk"
+		}
+
+		// Default to the original node type with _chunk suffix
+		return `${originalNode.type}_chunk`
+	}
+
+	/**
+	 * Determines an appropriate identifier for a chunk.
+	 *
+	 * @param group The boundary chunk group
+	 * @param originalNode The original node being split
+	 * @returns String identifier or null
+	 */
+	private determineChunkIdentifier(group: BoundaryChunkGroup, originalNode: Node): string | null {
+		// Try to use the original node's identifier with a suffix
+		const originalIdentifier =
+			originalNode.childForFieldName("name")?.text ||
+			originalNode.children.find((c) => c?.type === "identifier")?.text
+
+		if (originalIdentifier) {
+			// Add a suffix to distinguish chunks
+			const chunkIndex = group.startLine - originalNode.startPosition.row
+			return `${originalIdentifier}_chunk_${Math.floor(chunkIndex / 10) + 1}`
+		}
+
+		// Try to find a meaningful identifier from the first boundary
+		if (group.boundaries.length > 0) {
+			const firstBoundary = group.boundaries[0]
+			const boundaryIdentifier =
+				firstBoundary.node.childForFieldName("name")?.text ||
+				firstBoundary.node.children.find((c) => c?.type === "identifier")?.text
+
+			if (boundaryIdentifier) {
+				return boundaryIdentifier
+			}
+		}
+
+		return null
+	}
 }
 
 // Export a singleton instance for convenience
 export const codeParser = new CodeParser()
+
+// Type definitions for the logical boundary system
+
+/**
+ * Represents a logical boundary within a code node where it can be split
+ */
+interface LogicalBoundary {
+	node: Node
+	type: BoundaryType
+	startLine: number
+	endLine: number
+	depth: number
+	text: string
+	priority: number
+}
+
+/**
+ * Types of logical boundaries for code splitting
+ */
+type BoundaryType = "control_flow" | "function" | "class" | "block" | "comment"
+
+/**
+ * Language-specific boundary patterns
+ */
+interface LanguageBoundaryPatterns {
+	controlFlow: string[]
+	functions: string[]
+	classes: string[]
+	blocks: string[]
+	comments: string[]
+}
+
+/**
+ * Represents a group of boundaries that form a logical chunk
+ */
+interface BoundaryChunkGroup {
+	boundaries: LogicalBoundary[]
+	startLine: number
+	endLine: number
+	estimatedSize: number
+}

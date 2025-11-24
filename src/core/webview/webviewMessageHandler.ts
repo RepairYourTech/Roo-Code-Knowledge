@@ -2692,6 +2692,11 @@ export const webviewMessageHandler = async (
 			await vscode.commands.executeCommand(getCommand("focusPanel"))
 			break
 		}
+		case "showOutput": {
+			// Execute the focusPanel command to show the output panel
+			await vscode.commands.executeCommand(getCommand("focusPanel"))
+			break
+		}
 		case "filterMarketplaceItems": {
 			if (marketplaceManager && message.filters) {
 				try {

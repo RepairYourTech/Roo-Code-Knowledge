@@ -37,6 +37,9 @@ export interface MarketplaceInstalledMetadata {
 	global: Record<string, { type: string }>
 }
 
+// Error categorization for better user guidance
+export type ErrorCategory = "connection" | "authentication" | "rate-limit" | "configuration" | "unknown"
+
 // Indexing status types
 export interface IndexingStatus {
 	systemStatus: string
@@ -45,11 +48,24 @@ export interface IndexingStatus {
 	totalItems: number
 	currentItemUnit?: string
 	workspacePath?: string
+	// Vector indexing status
+	vectorStatus?: "idle" | "indexing" | "indexed" | "error"
+	vectorMessage?: string
+	vectorErrorCategory?: ErrorCategory
+	vectorErrorTimestamp?: number
+	vectorRetrySuggestion?: string
 	// Neo4j graph indexing progress (optional - only present when Neo4j is enabled)
 	neo4jProcessedItems?: number
 	neo4jTotalItems?: number
-	neo4jStatus?: "idle" | "indexing" | "indexed" | "error" | "disabled"
+	neo4jStatus?: "idle" | "indexing" | "indexed" | "error" | "disabled" | "connection-failed" | "resource-exhausted"
 	neo4jMessage?: string
+	neo4jLastError?: string
+	neo4jConsecutiveFailures?: number
+	neo4jErrorCategory?: ErrorCategory
+	neo4jErrorTimestamp?: number
+	neo4jRetrySuggestion?: string
+	// System health
+	systemHealth?: "healthy" | "degraded" | "failed"
 }
 
 export interface IndexingStatusUpdateMessage {

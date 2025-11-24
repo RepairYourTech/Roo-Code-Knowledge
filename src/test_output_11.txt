@@ -1,0 +1,139 @@
+
+ RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
+
+xxxxxxxxx
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle completely empty configuration gracefully
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:46:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle partial configuration (missing Qdrant URL)
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:66:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/9]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle boundary values for search settings
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:88:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/9]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle extreme boundary values for search settings
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:108:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/9]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should reject out-of-bounds values
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:127:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/9]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should load valid configuration successfully
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:50:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/9]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should reject invalid configuration and return previous snapshot
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:66:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/9]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should warn on production safety issues but apply config
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:95:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[8/9]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should validate Neo4j configuration when enabled
+ReferenceError: configSchemaVersion is not defined
+ ❯ CodeIndexConfigManager._readConfigurationFromStorage services/code-index/config-manager.ts:192:4
+    190|    neo4jPassword: neo4jPassword ?? "",
+    191|    neo4jDatabase: "neo4j",
+    192|    configSchemaVersion,
+       |    ^
+    193|    // We need to calculate isConfigured for the object to be complete …
+    194|    isConfigured: this._calculateIsConfigured(embedderProvider, {
+ ❯ new CodeIndexConfigManager services/code-index/config-manager.ts:42:23
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:120:19
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[9/9]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  9 failed (9)
+   Start at  18:56:25
+   Duration  711ms (transform 305ms, setup 72ms, collect 747ms, tests 34ms, environment 0ms, prepare 140ms)
+

@@ -19,6 +19,7 @@ import { t } from "../../i18n"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "./shared/validation-helpers"
+import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
 
 export class CodeIndexManager {
 	// --- Singleton Implementation ---
@@ -35,6 +36,10 @@ export class CodeIndexManager {
 	private _bm25Index: BM25IndexService | undefined
 	private _cacheManager: CacheManager | undefined
 	private _neo4jService: any | undefined // INeo4jService - track for cleanup
+
+	// OutputChannel for logging
+	private readonly _outputChannel: vscode.OutputChannel
+	private readonly _log: LogFunction
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -79,6 +84,8 @@ export class CodeIndexManager {
 		this.workspacePath = workspacePath
 		this.context = context
 		this._stateManager = new CodeIndexStateManager()
+		this._outputChannel = vscode.window.createOutputChannel("Roo Code - Indexing")
+		this._log = createOutputChannelLogger(this._outputChannel)
 	}
 
 	// --- Public API ---
@@ -107,6 +114,19 @@ export class CodeIndexManager {
 
 	public get isFeatureConfigured(): boolean {
 		return this._configManager?.isFeatureConfigured ?? false
+	}
+
+	public get outputChannel(): vscode.OutputChannel {
+		return this._outputChannel
+	}
+
+	/**
+	 * Public getter for the service factory to allow diagnostic commands
+	 * to create service instances without accessing private fields.
+	 * Returns undefined if the manager has not been initialized yet.
+	 */
+	public get serviceFactory(): CodeIndexServiceFactory | undefined {
+		return this._serviceFactory
 	}
 
 	public get isInitialized(): boolean {
@@ -142,10 +162,10 @@ export class CodeIndexManager {
 			if (this._neo4jService) {
 				try {
 					await this._neo4jService.close()
-					console.log("[CodeIndexManager] Neo4j connection closed (indexing disabled)")
+					this._log("[CodeIndexManager] Neo4j connection closed (indexing disabled)")
 					this._neo4jService = undefined
 				} catch (error) {
-					console.error("[CodeIndexManager] Error closing Neo4j connection:", error)
+					this._log("[CodeIndexManager] Error closing Neo4j connection:", error)
 				}
 			}
 			return { requiresRestart }
@@ -234,7 +254,7 @@ export class CodeIndexManager {
 			return
 		}
 
-		console.log("[CodeIndexManager] Cancelling indexing operation")
+		this._log("[CodeIndexManager] Cancelling indexing operation")
 		this._orchestrator.cancelIndexing()
 		this._stateManager.setSystemState("Standby", "Indexing cancelled by user")
 	}
@@ -277,7 +297,7 @@ export class CodeIndexManager {
 			this._stateManager.setSystemState("Standby", "")
 		} catch (error) {
 			// Log error but continue with recovery - clearing service instances is more important
-			console.error("Failed to clear error state during recovery:", error)
+			this._log("Failed to clear error state during recovery:", error)
 		} finally {
 			// Force re-initialization by clearing service instances
 			// This ensures a clean slate even if state update failed
@@ -303,14 +323,15 @@ export class CodeIndexManager {
 			this._neo4jService
 				.close()
 				.then(() => {
-					console.log("[CodeIndexManager] Neo4j connection closed (dispose)")
+					this._log("[CodeIndexManager] Neo4j connection closed (dispose)")
 					this._neo4jService = undefined
 				})
 				.catch((error: any) => {
-					console.error("[CodeIndexManager] Error closing Neo4j connection on dispose:", error)
+					this._log("[CodeIndexManager] Error closing Neo4j connection on dispose:", error)
 				})
 		}
 		this._stateManager.dispose()
+		this._outputChannel.dispose()
 	}
 
 	/**
@@ -389,6 +410,7 @@ export class CodeIndexManager {
 			this._configManager!,
 			this.workspacePath,
 			this._cacheManager!,
+			this._outputChannel,
 		)
 
 		const ignoreInstance = ignore()
@@ -407,7 +429,7 @@ export class CodeIndexManager {
 			ignoreInstance.add(".gitignore")
 		} catch (error) {
 			// Should never happen: reading file failed even though it exists
-			console.error("Unexpected error loading .gitignore:", error)
+			this._log("Unexpected error loading .gitignore:", error)
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
@@ -436,8 +458,8 @@ export class CodeIndexManager {
 		// Initialize Neo4j if enabled
 		if (neo4jService) {
 			try {
-				console.log("[CodeIndexManager] Initializing Neo4j service...")
-				console.log(
+				this._log("[CodeIndexManager] Initializing Neo4j service...")
+				this._log(
 					`[CodeIndexManager] Neo4j config: ${JSON.stringify({
 						url: this._configManager!.neo4jConfig.url?.replace(/\/\/.*@/, "//***:***"), // Hide credentials in logs
 						database: this._configManager!.neo4jConfig.database,
@@ -448,14 +470,14 @@ export class CodeIndexManager {
 
 				// Verify connection after initialization
 				if (neo4jService.isConnected()) {
-					console.log("[CodeIndexManager] Neo4j service initialized and connected successfully")
+					this._log("[CodeIndexManager] Neo4j service initialized and connected successfully")
 					// Track neo4jService for cleanup
 					this._neo4jService = neo4jService
 
 					// Set Neo4j status to idle (ready for indexing)
 					this._stateManager.setNeo4jStatus("idle", "Neo4j graph indexing ready")
 				} else {
-					console.error(
+					this._log(
 						"[CodeIndexManager] Neo4j service initialization completed but connection verification failed",
 					)
 					this._stateManager.setNeo4jStatus("error", "Neo4j connection verification failed")
@@ -471,7 +493,7 @@ export class CodeIndexManager {
 				const errorMessage = error instanceof Error ? error.message : String(error)
 				const errorStack = error instanceof Error ? error.stack : undefined
 
-				console.error("[CodeIndexManager] Failed to initialize Neo4j:", {
+				this._log("[CodeIndexManager] Failed to initialize Neo4j:", {
 					error: errorMessage,
 					stack: errorStack,
 					config: {
@@ -479,9 +501,6 @@ export class CodeIndexManager {
 						database: this._configManager!.neo4jConfig.database,
 					},
 				})
-
-				// Set Neo4j status to error to prevent false "Ready" state
-				this._stateManager.setNeo4jStatus("error", `Neo4j initialization failed: ${errorMessage}`)
 
 				// Report detailed error to telemetry
 				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
@@ -491,13 +510,23 @@ export class CodeIndexManager {
 					errorType: "initialization_failed",
 				})
 
+				// Categorize the Neo4j error
+				const categorized = this._stateManager.categorizeError(error)
+				this._stateManager.setNeo4jStatus(
+					"error",
+					"Neo4j initialization failed",
+					error instanceof Error ? error.message : String(error),
+					categorized.category,
+					categorized.retrySuggestion,
+				)
+
 				// Don't fail entire initialization if Neo4j connection fails (graceful degradation)
-				console.warn(
+				this._log(
 					"[CodeIndexManager] Continuing with vector indexing only - Neo4j graph indexing will be unavailable",
 				)
 			}
 		} else {
-			console.log("[CodeIndexManager] Neo4j service not created - graph indexing disabled")
+			this._log("[CodeIndexManager] Neo4j service not created - graph indexing disabled")
 			this._stateManager.setNeo4jStatus("disabled", "Neo4j graph indexing is disabled")
 		}
 
@@ -505,6 +534,14 @@ export class CodeIndexManager {
 		const validationResult = await this._serviceFactory.validateEmbedder(embedder)
 		if (!validationResult.valid) {
 			const errorMessage = validationResult.error || "Embedder configuration validation failed"
+			// Categorize embedder validation errors as configuration errors
+			this._stateManager.setVectorStatus(
+				"error",
+				errorMessage,
+				"configuration",
+				errorMessage,
+				"Review embedder configuration and API key",
+			)
 			this._stateManager.setSystemState("Error", errorMessage)
 			throw new Error(errorMessage)
 		}
@@ -520,6 +557,7 @@ export class CodeIndexManager {
 			fileWatcher,
 			graphIndexer,
 			neo4jService,
+			this._outputChannel,
 		)
 
 		// (Re)Initialize search service (keep for backward compatibility)
@@ -575,10 +613,10 @@ export class CodeIndexManager {
 				if (this._neo4jService) {
 					try {
 						await this._neo4jService.close()
-						console.log("[CodeIndexManager] Neo4j connection closed (indexing disabled via settings)")
+						this._log("[CodeIndexManager] Neo4j connection closed (indexing disabled via settings)")
 						this._neo4jService = undefined
 					} catch (error) {
-						console.error("[CodeIndexManager] Error closing Neo4j connection:", error)
+						this._log("[CodeIndexManager] Error closing Neo4j connection:", error)
 					}
 				}
 				// Explicitly set Neo4j status to disabled so UI updates
@@ -601,7 +639,7 @@ export class CodeIndexManager {
 					await this._recreateServices()
 				} catch (error) {
 					// Error state already set in _recreateServices
-					console.error("Failed to recreate services:", error)
+					this._log("Failed to recreate services:", error)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: error instanceof Error ? error.message : String(error),
 						stack: error instanceof Error ? error.stack : undefined,

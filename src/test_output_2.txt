@@ -1,0 +1,56 @@
+
+ RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
+
+6:51:57 PM [vite] (ssr) warning: Duplicate key "codebaseIndexSearchMinScore" in object literal
+86 |  			codebaseIndexSearchMinScore: undefined,
+87 |  			codebaseIndexSearchMaxResults: undefined,
+88 |  		codebaseIndexSearchMinScore: 0.4,
+   |    ^
+89 |  		codebaseIndexSearchMaxResults: 50,
+90 |  		neo4jEnabled: false,
+
+  Plugin: vite:esbuild
+  File: /home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/code-index/config-manager.ts
+6:51:57 PM [vite] (ssr) warning: Duplicate key "codebaseIndexSearchMaxResults" in object literal
+87 |  			codebaseIndexSearchMaxResults: undefined,
+88 |  		codebaseIndexSearchMinScore: 0.4,
+89 |  		codebaseIndexSearchMaxResults: 50,
+   |    ^
+90 |  		neo4jEnabled: false,
+91 |  		neo4jUri: "bolt://localhost:7687",
+
+  Plugin: vite:esbuild
+  File: /home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/code-index/config-manager.ts
+
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts [ services/code-index/__tests__/config-edge-cases.test.ts ]
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts [ services/code-index/__tests__/config-manager-validation.test.ts ]
+Error: Transform failed with 1 error:
+/home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/code-index/config-validator.ts:293:8: ERROR: Expected ";" but found "validateUrl"
+  Plugin: vite:esbuild
+  File: /home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/code-index/config-validator.ts:293:8
+  
+  Expected ";" but found "validateUrl"
+  291 |  		field: string,
+  292 |  	): { valid: boolean; error?: ConfigurationValidationError } {
+  293 |  	static validateUrl(url: string, protocols: string[], field: string): ConfigurationValidationResult {
+      |          ^
+  294 |  		// console.log(`Validating URL: ${url} with protocols ${protocols}`)
+  295 |  		try {
+  
+ ❯ failureErrorWithLog ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:1467:15
+ ❯ ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:736:50
+ ❯ responseCallbacks.<computed> ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:603:9
+ ❯ handleIncomingPacket ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:658:12
+ ❯ Socket.readFromStdout ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:581:7
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  no tests
+   Start at  18:51:57
+   Duration  788ms (transform 326ms, setup 111ms, collect 0ms, tests 0ms, environment 0ms, prepare 146ms)
+

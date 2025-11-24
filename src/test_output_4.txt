@@ -1,0 +1,99 @@
+
+ RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
+
+··xxx·x·x
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 5 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle boundary values for search settings
+AssertionError: expected undefined to be 1 // Object.is equality
+
+[32m- Expected:[39m 
+1
+
+[31m+ Received:[39m 
+undefined
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:92:49
+     90| 
+     91|   expect(result.currentConfig.searchMinScore).toBe(0)
+     92|   expect(result.currentConfig.searchMaxResults).toBe(1)
+       |                                                 ^
+     93|  })
+     94| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/5]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle extreme boundary values for search settings
+AssertionError: expected undefined to be 1000 // Object.is equality
+
+[32m- Expected:[39m 
+1000
+
+[31m+ Received:[39m 
+undefined
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:112:49
+    110| 
+    111|   expect(result.currentConfig.searchMinScore).toBe(1.0)
+    112|   expect(result.currentConfig.searchMaxResults).toBe(1000)
+       |                                                 ^
+    113|  })
+    114| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/5]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should reject out-of-bounds values
+AssertionError: expected 0.4 to be undefined
+
+[32m- Expected:[39m 
+undefined
+
+[31m+ Received:[39m 
+0.4
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:140:47
+    138|   // Since we initialized with empty/default, `searchMinScore` might b…
+    139|   // CodeIndexConfigManager initializes `searchMinScore` as undefined.
+    140|   expect(result.currentConfig.searchMinScore).toBeUndefined()
+       |                                               ^
+    141|  })
+    142| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/5]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should reject invalid configuration and return previous snapshot
+AssertionError: expected 'not-a-url' to be 'http://localhost:6333' // Object.is equality
+
+Expected: [32m"http://localhost:6333"[39m
+Received: [31m"not-a-url"[39m
+
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:82:42
+     80|   // And result.currentConfig should match snapshot because validation…
+     81|   
+     82|   expect(result.currentConfig.qdrantUrl).toBe("http://localhost:6333")…
+       |                                          ^
+     83|   expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+     84|  })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/5]⎯
+
+ FAIL  services/code-index/__tests__/config-manager-validation.test.ts > CodeIndexConfigManager Validation > should validate Neo4j configuration when enabled
+TypeError: Cannot read properties of undefined (reading 'message')
+ ❯ CodeIndexConfigManager.loadConfiguration services/code-index/config-manager.ts:378:67
+    376|    // Show notification to user
+    377|    vscode.window.showErrorMessage(
+    378|     `Code Index Configuration Error: ${validationResult.errors[0].mess…
+       |                                                                   ^
+    379|    )
+    380| 
+ ❯ services/code-index/__tests__/config-manager-validation.test.ts:121:18
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/5]⎯
+
+
+ Test Files  2 failed (2)
+      Tests  5 failed | 4 passed (9)
+   Start at  18:52:52
+   Duration  662ms (transform 276ms, setup 84ms, collect 688ms, tests 47ms, environment 0ms, prepare 91ms)
+

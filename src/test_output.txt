@@ -1,0 +1,89 @@
+
+ RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
+
+·xxxx
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle partial configuration (missing Qdrant URL)
+AssertionError: expected false to be true // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- true[39m
+[31m+ false[39m
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:72:45
+     70|   expect(result.currentConfig.qdrantUrl).toBe("http://localhost:6333")
+     71|   // Should be configured because defaults are valid
+     72|   expect(result.currentConfig.isConfigured).toBe(true)
+       |                                             ^
+     73|  })
+     74| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle boundary values for search settings
+AssertionError: expected 0.4 to be +0 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 0[39m
+[31m+ 0.4[39m
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:91:47
+     89|   const result = await configManager.loadConfiguration()
+     90| 
+     91|   expect(result.currentConfig.searchMinScore).toBe(0)
+       |                                               ^
+     92|   expect(result.currentConfig.searchMaxResults).toBe(1)
+     93|  })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle extreme boundary values for search settings
+AssertionError: expected 0.4 to be 1 // Object.is equality
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[32m- 1[39m
+[31m+ 0.4[39m
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:111:47
+    109|   const result = await configManager.loadConfiguration()
+    110| 
+    111|   expect(result.currentConfig.searchMinScore).toBe(1.0)
+       |                                               ^
+    112|   expect(result.currentConfig.searchMaxResults).toBe(1000)
+    113|  })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should reject out-of-bounds values
+AssertionError: expected 0.4 to be undefined
+
+[32m- Expected:[39m 
+undefined
+
+[31m+ Received:[39m 
+0.4
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:140:47
+    138|   // Since we initialized with empty/default, `searchMinScore` might b…
+    139|   // CodeIndexConfigManager initializes `searchMinScore` as undefined.
+    140|   expect(result.currentConfig.searchMinScore).toBeUndefined()
+       |                                               ^
+    141|  })
+    142| })
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  4 failed | 1 passed (5)
+   Start at  18:49:55
+   Duration  666ms (transform 286ms, setup 39ms, collect 377ms, tests 23ms, environment 0ms, prepare 71ms)
+

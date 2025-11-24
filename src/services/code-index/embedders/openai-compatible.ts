@@ -14,6 +14,7 @@ import { TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { Mutex } from "async-mutex"
 import { handleOpenAIError } from "../../../api/providers/utils/openai-error-handler"
+import * as vscode from "vscode"
 
 interface EmbeddingItem {
 	embedding: string | number[]
@@ -41,6 +42,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	private readonly isFullUrl: boolean
 	private readonly maxItemTokens: number
 	private readonly maxBatchItems: number
+	private readonly outputChannel?: vscode.OutputChannel
 
 	// Global rate limiting state shared across all instances
 	private static globalRateLimitState = {
@@ -59,8 +61,16 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	 * @param modelId Optional model identifier (defaults to "text-embedding-3-small")
 	 * @param maxItemTokens Optional maximum tokens per item (defaults to MAX_ITEM_TOKENS)
 	 * @param maxBatchItems Optional maximum number of items per batch (defaults to MAX_BATCH_ITEMS)
+	 * @param outputChannel Optional OutputChannel for error notifications
 	 */
-	constructor(baseUrl: string, apiKey: string, modelId?: string, maxItemTokens?: number, maxBatchItems?: number) {
+	constructor(
+		baseUrl: string,
+		apiKey: string,
+		modelId?: string,
+		maxItemTokens?: number,
+		maxBatchItems?: number,
+		outputChannel?: vscode.OutputChannel,
+	) {
 		if (!baseUrl) {
 			throw new Error(t("embeddings:validation.baseUrlRequired"))
 		}
@@ -70,6 +80,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		this.baseUrl = baseUrl
 		this.apiKey = apiKey
+		this.outputChannel = outputChannel
 
 		// Wrap OpenAI client creation to handle invalid API key characters
 		try {
@@ -348,14 +359,58 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 						)
 						await new Promise((resolve) => setTimeout(resolve, delayMs))
 						continue
+					} else {
+						// Last retry attempt - show user notification and throw
+						const action = await vscode.window.showErrorMessage(
+							`Embedding API rate limit exceeded after ${MAX_RETRIES} retries. Please wait before retrying or check your API quota.`,
+							"Show Output",
+						)
+						if (action === "Show Output") {
+							this.outputChannel?.show()
+						}
+						// Log and throw immediately to prevent other notifications
+						console.error(
+							`OpenAI Compatible embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`,
+							error,
+						)
+						throw formatEmbeddingError(error, MAX_RETRIES)
 					}
+				} else if (httpError?.status === 401 || httpError?.status === 403) {
+					// Check for authentication errors (401/403)
+					const action = await vscode.window.showErrorMessage(
+						"Embedding API authentication failed. Please verify your API key configuration.",
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						this.outputChannel?.show()
+					}
+					// Log and throw immediately to prevent other notifications
+					console.error(`OpenAI Compatible embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
+					throw formatEmbeddingError(error, MAX_RETRIES)
+				} else {
+					// Check for connection errors
+					const errorMessage = error instanceof Error ? error.message : String(error)
+					if (
+						errorMessage.includes("ECONNREFUSED") ||
+						errorMessage.includes("ETIMEDOUT") ||
+						errorMessage.includes("network") ||
+						errorMessage.includes("connect")
+					) {
+						const action = await vscode.window.showErrorMessage(
+							`Failed to connect to embedding API at ${this.baseUrl}. Please verify the URL and check your network connection.`,
+							"Show Output",
+						)
+						if (action === "Show Output") {
+							this.outputChannel?.show()
+						}
+					}
+
+					// Log the error for debugging
+					console.error(`OpenAI Compatible embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
+
+					// Format and throw the error
+					throw formatEmbeddingError(error, MAX_RETRIES)
 				}
-
-				// Log the error for debugging
-				console.error(`OpenAI Compatible embedder error (attempt ${attempts + 1}/${MAX_RETRIES}):`, error)
-
-				// Format and throw the error
-				throw formatEmbeddingError(error, MAX_RETRIES)
 			}
 		}
 
@@ -403,6 +458,42 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 					stack: error instanceof Error ? error.stack : undefined,
 					location: "OpenAICompatibleEmbedder:validateConfiguration",
 				})
+
+				// Show user-facing error notifications based on error type
+				const httpError = error as HttpError
+				const errorMessage = error instanceof Error ? error.message : String(error)
+
+				if (httpError?.status === 401 || httpError?.status === 403) {
+					const action = await vscode.window.showErrorMessage(
+						"Embedder authentication failed. Please verify your API key.",
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						this.outputChannel?.show()
+					}
+				} else if (
+					errorMessage.includes("ECONNREFUSED") ||
+					errorMessage.includes("ETIMEDOUT") ||
+					errorMessage.includes("network") ||
+					errorMessage.includes("connect")
+				) {
+					const action = await vscode.window.showErrorMessage(
+						"Failed to connect to embedding API. Please verify the base URL and network connectivity.",
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						this.outputChannel?.show()
+					}
+				} else if (!httpError || httpError.status === undefined || httpError.status >= 500) {
+					const action = await vscode.window.showErrorMessage(
+						"Embedding API returned invalid response. Please verify the model ID and API compatibility.",
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						this.outputChannel?.show()
+					}
+				}
+
 				throw error
 			}
 		}, "openai-compatible")
@@ -414,6 +505,22 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	get embedderInfo(): EmbedderInfo {
 		return {
 			name: "openai-compatible",
+		}
+	}
+
+	public getProviderInfo(): {
+		provider: string
+		modelId: string
+		baseUrl: string
+		maxItemTokens: number
+		maxBatchItems: number
+	} {
+		return {
+			provider: "openai-compatible",
+			modelId: this.defaultModelId,
+			baseUrl: this.baseUrl,
+			maxItemTokens: this.maxItemTokens,
+			maxBatchItems: this.maxBatchItems,
 		}
 	}
 

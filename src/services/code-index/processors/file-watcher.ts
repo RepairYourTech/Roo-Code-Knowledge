@@ -32,6 +32,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
+import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
 
 /**
  * Implementation of the file watcher interface
@@ -91,7 +92,9 @@ export class FileWatcher implements IFileWatcher {
 		batchSegmentThreshold?: number,
 		graphIndexer?: IGraphIndexer,
 		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
+		private readonly outputChannel?: vscode.OutputChannel,
 	) {
+		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
 		this.bm25Index = bm25Index
 		this.graphIndexer = graphIndexer
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
@@ -113,6 +116,8 @@ export class FileWatcher implements IFileWatcher {
 			}
 		}
 	}
+
+	private readonly log: LogFunction
 
 	/**
 	 * Initializes the file watcher
@@ -237,8 +242,38 @@ export class FileWatcher implements IFileWatcher {
 							await this.graphIndexer.removeFile(path)
 						}
 					} catch (error) {
-						// Log error but don't fail the entire deletion process
-						console.error(`[FileWatcher] Error removing files from Neo4j`, error)
+						// Log error with full context but don't fail the entire deletion process
+						const errorMessage = error instanceof Error ? error.message : String(error)
+						const errorStack = error instanceof Error ? error.stack : undefined
+
+						this.log(`[FileWatcher] Neo4j file  removal failed:`, {
+							operation: "delete",
+							affectedFiles: Array.from(allPathsToClearFromDB),
+							error: errorMessage,
+							stack: errorStack,
+							timestamp: new Date().toISOString(),
+						})
+
+						// Update state manager with error details
+						if (this.stateManager) {
+							const categorized = this.stateManager.categorizeError(error as Error)
+							this.stateManager.setNeo4jStatus(
+								"error",
+								`Failed to remove ${allPathsToClearFromDB.size} files from graph`,
+								errorMessage,
+								categorized.category,
+								categorized.retrySuggestion,
+							)
+						}
+
+						// Capture telemetry with file count
+						TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+							error: sanitizeErrorMessage(errorMessage),
+							stack: errorStack ? sanitizeErrorMessage(errorStack) : undefined,
+							location: "fileWatcher:_handleBatchDeletions:neo4jRemoval",
+							operation: "neo4j_remove_files",
+							affectedFileCount: allPathsToClearFromDB.size,
+						})
 					}
 				}
 
@@ -310,7 +345,7 @@ export class FileWatcher implements IFileWatcher {
 					return { path: fileDetail.path, result: result, error: undefined }
 				} catch (e) {
 					const error = e as Error
-					console.error(`[FileWatcher] Unhandled exception processing file ${fileDetail.path}:`, e)
+					this.log(`[FileWatcher] Unhandled exception processing file ${fileDetail.path}:`, e)
 					return { path: fileDetail.path, result: undefined, error: error }
 				}
 			})
@@ -355,7 +390,7 @@ export class FileWatcher implements IFileWatcher {
 				} else {
 					const error = settledResult.reason as Error
 					const rejectedPath = (settledResult.reason as any)?.path || "unknown"
-					console.error("[FileWatcher] A file processing promise was rejected:", settledResult.reason)
+					this.log("[FileWatcher] A file processing promise was rejected:", settledResult.reason)
 					batchResults.push({
 						path: rejectedPath,
 						status: "error",
@@ -531,7 +566,24 @@ export class FileWatcher implements IFileWatcher {
 			overallBatchError,
 		)
 
-		// Finalize
+		// Finalize and report batch summary
+		const neo4jErrorCount = batchResults.filter(
+			(r) => r.error && r.error.message.toLowerCase().includes("neo4j"),
+		).length
+
+		if (neo4jErrorCount > 0 && this.stateManager) {
+			this.log(
+				`[FileWatcher] Batch completed with ${neo4jErrorCount} Neo4j errors out of ${totalFilesInBatch} total files`,
+			)
+			this.stateManager.setNeo4jStatus(
+				"error",
+				`Batch processing completed with errors`,
+				`${neo4jErrorCount} files failed Neo4j indexing in this batch`,
+				"unknown",
+				"Review output logs for detailed error information",
+			)
+		}
+
 		this._onDidFinishBatchProcessing.fire({
 			processedFiles: batchResults,
 			batchError: overallBatchError,
@@ -624,17 +676,38 @@ export class FileWatcher implements IFileWatcher {
 						this.stateManager.reportNeo4jIndexingProgress(1, 1, "indexed", "Graph index updated")
 					}
 				} catch (error) {
-					// Log error but don't fail the entire file processing
+					// Log error but don't fail the entire file processing (graceful degradation)
 					const errorMessage = error instanceof Error ? error.message : String(error)
-					console.error(`[FileWatcher] Error indexing file to Neo4j: ${filePath}`, error)
+					const errorStack = error instanceof Error ? error.stack : undefined
+
+					this.log(`[FileWatcher] Neo4j indexing failed for ${filePath}:`, {
+						filePath,
+						operation: "index",
+						error: errorMessage,
+						stack: errorStack,
+						timestamp: new Date().toISOString(),
+					})
+
+					// Update state manager with categorized error details
 					if (this.stateManager) {
-						this.stateManager.reportNeo4jIndexingProgress(
-							0,
-							0,
+						const categorized = this.stateManager.categorizeError(error as Error)
+						this.stateManager.setNeo4jStatus(
 							"error",
-							`Graph indexing failed: ${errorMessage}`,
+							`Graph indexing failed for ${path.basename(filePath)}`,
+							errorMessage,
+							categorized.category,
+							categorized.retrySuggestion,
 						)
 					}
+
+					// Capture telemetry with full context
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(errorMessage),
+						stack: errorStack ? sanitizeErrorMessage(errorStack) : undefined,
+						location: "fileWatcher:processFile:neo4jIndexing",
+						filePath: filePath,
+						operation: "neo4j_index_file",
+					})
 				}
 			}
 

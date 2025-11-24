@@ -24,6 +24,7 @@ import { Mutex } from "async-mutex"
 import { CacheManager } from "../cache-manager"
 import { t } from "../../../i18n"
 import { buildEmbeddingContext, EnhancedCodeSegment } from "../types/metadata"
+import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
 
 // Per-file mutex map for Neo4j file indexing operations to prevent race conditions
 // This allows concurrent indexing of different files while preventing concurrent indexing of the same file
@@ -164,7 +165,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 	 * @param filePath The file whose mutex should be released
 	 */
 	private breakDeadlock(filePath: string): void {
-		console.warn(`[DirectoryScanner] Breaking deadlock for file: ${filePath}`)
+		this.log(`[DirectoryScanner] Breaking deadlock for file: ${filePath}`)
 		const mutex = fileMutexMap.get(filePath)
 		if (mutex) {
 			// Force cleanup of the mutex
@@ -178,7 +179,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 	 */
 	private async waitForTransactionSlot(): Promise<void> {
 		while (activeNeo4jTransactions >= MAX_CONCURRENT_TRANSACTIONS) {
-			console.log(
+			this.log(
 				`[DirectoryScanner] Waiting for Neo4j transaction slot (${activeNeo4jTransactions}/${MAX_CONCURRENT_TRANSACTIONS} active)`,
 			)
 			await new Promise((resolve) => setTimeout(resolve, 100))
@@ -193,7 +194,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		const release = await mutex.acquire()
 		try {
 			if (activeNeo4jTransactions < 0) {
-				console.warn(
+				this.log(
 					`[DirectoryScanner] Active transactions counter was negative (${activeNeo4jTransactions}), resetting to 0`,
 				)
 				activeNeo4jTransactions = 0
@@ -213,7 +214,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		try {
 			activeNeo4jTransactions--
 			if (activeNeo4jTransactions < 0) {
-				console.warn(
+				this.log(
 					`[DirectoryScanner] Active transactions counter went negative (${activeNeo4jTransactions}), clamping to 0`,
 				)
 				activeNeo4jTransactions = 0
@@ -234,7 +235,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Check if circuit breaker should be reset (5 minute timeout)
 		if (state.isOpen && now - state.lastFailureTime > 5 * 60 * 1000) {
-			console.log(`[DirectoryScanner] Circuit breaker reset for ${errorType}`)
+			this.log(`[DirectoryScanner] Circuit breaker reset for ${errorType}`)
 			state.consecutiveFailures = 0
 			state.isOpen = false
 			return false
@@ -253,7 +254,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		state.lastFailureTime = Date.now()
 
 		if (state.consecutiveFailures >= 3) {
-			console.error(
+			this.log(
 				`[DirectoryScanner] Circuit breaker opened for ${errorType} (${state.consecutiveFailures} consecutive failures)`,
 			)
 			state.isOpen = true
@@ -267,7 +268,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 	private resetCircuitBreaker(errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"): void {
 		const state = circuitBreakerState[errorType]
 		if (state.consecutiveFailures > 0) {
-			console.log(`[DirectoryScanner] Circuit breaker reset for ${errorType} after successful operation`)
+			this.log(`[DirectoryScanner] Circuit breaker reset for ${errorType} after successful operation`)
 			state.consecutiveFailures = 0
 			state.isOpen = false
 		}
@@ -342,9 +343,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// If there are remaining nodes (cycle), add them in any order
 		if (result.length < files.length) {
-			console.warn(
-				"[DirectoryScanner] Circular dependency detected, processing remaining files in arbitrary order",
-			)
+			this.log("[DirectoryScanner] Circular dependency detected, processing remaining files in arbitrary order")
 			for (const file of files) {
 				if (!result.includes(file)) {
 					result.push(file)
@@ -387,7 +386,9 @@ export class DirectoryScanner implements IDirectoryScanner {
 		batchSegmentThreshold?: number,
 		private readonly graphIndexer?: IGraphIndexer,
 		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
+		private readonly outputChannel?: vscode.OutputChannel,
 	) {
+		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
 		if (batchSegmentThreshold !== undefined) {
@@ -404,12 +405,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 		}
 	}
 
+	private readonly log: LogFunction
+
 	/**
 	 * Cancel the current indexing operation
 	 */
 	public cancel(): void {
 		this._cancelled = true
-		console.log("[DirectoryScanner] Indexing cancelled by user")
+		this.log("[DirectoryScanner] Indexing cancelled by user")
 	}
 
 	/**
@@ -439,7 +442,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Check for cancellation before starting
 		if (this._cancelled) {
-			console.log("[DirectoryScanner] Scan aborted - cancelled before start")
+			this.log("[DirectoryScanner] Scan aborted - cancelled before start")
 			throw new Error("Indexing cancelled by user")
 		}
 
@@ -629,7 +632,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 						await this.cacheManager.updateHash(filePath, currentFileHash)
 					}
 				} catch (error) {
-					console.error(`Error processing file ${filePath} in workspace ${scanWorkspace}:`, error)
+					this.log(`Error processing file ${filePath} in workspace ${scanWorkspace}:`, error)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
@@ -655,7 +658,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		} catch (error) {
 			// If cancelled, propagate the error
 			if (error instanceof Error && error.message === "Indexing cancelled by user") {
-				console.log("[DirectoryScanner] File parsing cancelled by user")
+				this.log("[DirectoryScanner] File parsing cancelled by user")
 				throw error
 			}
 			// Otherwise, let the error propagate normally
@@ -664,7 +667,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Check for cancellation before processing final batch
 		if (this._cancelled) {
-			console.log("[DirectoryScanner] Scan aborted - cancelled before final batch")
+			this.log("[DirectoryScanner] Scan aborted - cancelled before final batch")
 			throw new Error("Indexing cancelled by user")
 		}
 
@@ -711,7 +714,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		} catch (error) {
 			// If cancelled, propagate the error
 			if (error instanceof Error && error.message === "Indexing cancelled by user") {
-				console.log("[DirectoryScanner] Batch processing cancelled by user")
+				this.log("[DirectoryScanner] Batch processing cancelled by user")
 				throw error
 			}
 			// Otherwise, let the error propagate normally
@@ -741,7 +744,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 						const errorStatus = error?.status || error?.response?.status || error?.statusCode
 						const errorMessage = error instanceof Error ? error.message : String(error)
 
-						console.error(
+						this.log(
 							`[DirectoryScanner] Failed to delete points for ${cachedFilePath} in workspace ${scanWorkspace}:`,
 							error,
 						)
@@ -768,7 +771,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 							)
 						}
 						// Log error and continue processing instead of re-throwing
-						console.error(`Failed to delete points for removed file: ${cachedFilePath}`, error)
+						this.log(`Failed to delete points for removed file: ${cachedFilePath}`, error)
 					}
 				}
 			}
@@ -795,7 +798,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Check for cancellation before processing batch
 		if (this._cancelled) {
-			console.log("[DirectoryScanner] Batch processing aborted - cancelled")
+			this.log("[DirectoryScanner] Batch processing aborted - cancelled")
 			throw new Error("Indexing cancelled by user")
 		}
 
@@ -824,7 +827,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 			try {
 				// Check for cancellation before each retry
 				if (this._cancelled) {
-					console.log("[DirectoryScanner] Batch processing aborted - cancelled during retry")
+					this.log("[DirectoryScanner] Batch processing aborted - cancelled during retry")
 					throw new Error("Indexing cancelled by user")
 				}
 
@@ -832,7 +835,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 				for (const [filePath, fileBlocks] of blocksByFile) {
 					const fileInfo = fileInfosByFile.get(filePath)
 					if (!fileInfo) {
-						console.warn(`[DirectoryScanner] No file info found for ${filePath}, skipping`)
+						this.log(`[DirectoryScanner] No file info found for ${filePath}, skipping`)
 						continue
 					}
 
@@ -846,20 +849,17 @@ export class DirectoryScanner implements IDirectoryScanner {
 							throw new Error("Indexing cancelled by user")
 						}
 
-						console.log(`[DirectoryScanner] Processing file with full lifecycle mutex: ${filePath}`)
+						this.log(`[DirectoryScanner] Processing file with full lifecycle mutex: ${filePath}`)
 
 						// Step 1: Delete existing points for modified files (Qdrant operation)
 						if (!fileInfo.isNew) {
 							try {
 								await this.qdrantClient.deletePointsByMultipleFilePaths([filePath])
-								console.log(`[DirectoryScanner] Deleted existing points for modified file: ${filePath}`)
+								this.log(`[DirectoryScanner] Deleted existing points for modified file: ${filePath}`)
 							} catch (deleteError: any) {
 								const errorMessage =
 									deleteError instanceof Error ? deleteError.message : String(deleteError)
-								console.error(
-									`[DirectoryScanner] Failed to delete points for ${filePath}:`,
-									deleteError,
-								)
+								this.log(`[DirectoryScanner] Failed to delete points for ${filePath}:`, deleteError)
 
 								// Mark batch as failed for transaction coordination
 								batchFailed = true
@@ -959,7 +959,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 						await this.qdrantClient.upsertPoints(points)
 						onBlocksIndexed?.(fileBlocks.length)
-						console.log(`[DirectoryScanner] Upserted ${fileBlocks.length} points for file: ${filePath}`)
+						this.log(`[DirectoryScanner] Upserted ${fileBlocks.length} points for file: ${filePath}`)
 
 						// Step 4: Add to BM25 index if available
 						if (this.bm25Index) {
@@ -1007,10 +1007,10 @@ export class DirectoryScanner implements IDirectoryScanner {
 							await this.incrementActiveTransactions()
 
 							try {
-								console.log(`[DirectoryScanner] Starting Neo4j indexing for file: ${filePath}`)
+								this.log(`[DirectoryScanner] Starting Neo4j indexing for file: ${filePath}`)
 								await this.graphIndexer.indexFile(filePath, fileBlocks)
 								this.neo4jCumulativeFilesProcessed++
-								console.log(
+								this.log(
 									`[DirectoryScanner] Successfully indexed file to Neo4j: ${filePath} (${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess})`,
 								)
 
@@ -1036,12 +1036,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 								const errorMessage = error instanceof Error ? error.message : String(error)
 								const errorStack = error instanceof Error ? error.stack : undefined
 
-								console.error(`[DirectoryScanner] Error indexing to Neo4j:`, {
+								this.log(`[Neo4j Connection Error] Error indexing file to Neo4j:`, {
+									filePath: filePath,
 									error: errorMessage,
 									stack: errorStack,
-									filePath: filePath,
-									processedFiles: this.neo4jCumulativeFilesProcessed,
-									totalFiles: this.neo4jTotalFilesToProcess,
+									processedFiles: `${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess}`,
+									circuitBreakerState: Object.entries(circuitBreakerState)
+										.map(([type, state]) => `${type}: ${state.consecutiveFailures}/3 failures`)
+										.join(", "),
 								})
 
 								// Determine error type for circuit breaker
@@ -1052,7 +1054,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 									errorMessage.includes("timeout")
 								) {
 									errorType = "connectionErrors"
-									console.error(
+									this.log(
 										`[DirectoryScanner] Neo4j connection issue detected - possible resource exhaustion. Consider reducing batch size or concurrency.`,
 									)
 								} else if (errorMessage.includes("deadlock") || errorMessage.includes("lock")) {
@@ -1063,34 +1065,42 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 								// Update circuit breaker for specific error type
 								this.updateCircuitBreaker(errorType)
-								console.warn(
-									`[DirectoryScanner] Neo4j ${errorType} consecutive failures: ${circuitBreakerState[errorType].consecutiveFailures}/3`,
-								)
+								const cbState = circuitBreakerState[errorType]
+								this.log(`[Neo4j ${errorType}] Consecutive failures: ${cbState.consecutiveFailures}/3`)
 
-								// Report detailed error to state manager
-								if (this.stateManager) {
+								// Update state manager with cumulative circuit breaker statistics
+								if (this.stateManager && cbState.consecutiveFailures < 3) {
+									// Only update if circuit breaker hasn't opened yet (will be updated in the circuit breaker block if it opens)
 									this.stateManager.reportNeo4jIndexingProgress(
 										this.neo4jCumulativeFilesProcessed,
 										this.neo4jTotalFilesToProcess,
 										"error",
-										`Graph indexing failed: ${errorMessage} (${errorType} failure ${circuitBreakerState[errorType].consecutiveFailures}/3)`,
+										`Graph indexing error: ${errorMessage} (${errorType} failure ${cbState.consecutiveFailures}/3)`,
 									)
 								}
 
-								// Report to telemetry for monitoring
+								// Report to telemetry for monitoring with full error context
 								TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 									error: sanitizeErrorMessage(errorMessage),
 									stack: sanitizeErrorMessage(errorStack || ""),
 									location: "processBatch:neo4jIndexing",
 									filePath: filePath,
 									errorType: errorType,
-									circuitBreakerState: circuitBreakerState[errorType],
+									circuitBreakerState: cbState,
+									cumulativeStats: {
+										processedFiles: this.neo4jCumulativeFilesProcessed,
+										totalFiles: this.neo4jTotalFilesToProcess,
+									},
 								})
 
 								// Circuit breaker: stop Neo4j indexing after consecutive failures
 								if (this.isCircuitBreakerOpen(errorType)) {
-									console.error(
-										`[DirectoryScanner] Neo4j circuit breaker triggered for ${errorType} - disabling Neo4j indexing for this batch.`,
+									const cbState = circuitBreakerState[errorType]
+									this.log(
+										`[Neo4j Circuit Breaker] Circuit breaker triggered for ${errorType} - disabling Neo4j indexing for this batch.`,
+									)
+									this.log(
+										`[Neo4j Circuit Breaker] State: ${cbState.consecutiveFailures} consecutive failures`,
 									)
 
 									// Report circuit breaker activation to telemetry
@@ -1103,6 +1113,18 @@ export class DirectoryScanner implements IDirectoryScanner {
 										circuitBreakerState: circuitBreakerState[errorType],
 									})
 
+									// Update state manager with detailed circuit breaker status
+									if (this.stateManager) {
+										const categorized = this.stateManager.categorizeError(error as Error)
+										this.stateManager.setNeo4jStatus(
+											"error",
+											`Neo4j indexing disabled - circuit breaker triggered (${errorType})`,
+											errorMessage,
+											categorized.category,
+											`Circuit breaker activated after ${cbState.consecutiveFailures} consecutive ${errorType}. ${categorized.retrySuggestion}`,
+										)
+									}
+
 									// Don't re-throw for circuit breaker - continue with vector indexing
 									return
 								}
@@ -1113,14 +1135,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 									errorMessage.includes("authorization") ||
 									errorMessage.includes("invalid database")
 								) {
-									console.error(
+									this.log(
 										`[DirectoryScanner] Critical Neo4j error - stopping indexing: ${errorMessage}`,
 									)
 									throw new Error(`Neo4j critical error: ${errorMessage}`)
 								}
 
 								// For other errors, log and continue with vector indexing (graceful degradation)
-								console.warn(
+								this.log(
 									`[DirectoryScanner] Neo4j error handled gracefully - continuing with vector indexing: ${errorMessage}`,
 								)
 							} finally {
@@ -1133,9 +1155,9 @@ export class DirectoryScanner implements IDirectoryScanner {
 						// Only update if batch didn't fail (transaction coordination)
 						if (!batchFailed) {
 							await this.cacheManager.updateHash(fileInfo.filePath, fileInfo.fileHash)
-							console.log(`[DirectoryScanner] Updated cache hash for file: ${filePath}`)
+							this.log(`[DirectoryScanner] Updated cache hash for file: ${filePath}`)
 						} else {
-							console.warn(
+							this.log(
 								`[DirectoryScanner] File processing failed - not updating cache hash for: ${filePath}`,
 							)
 
@@ -1148,14 +1170,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 					} finally {
 						// Release mutex for this file
 						release()
-						console.log(`[DirectoryScanner] Released mutex for file: ${filePath}`)
+						this.log(`[DirectoryScanner] Released mutex for file: ${filePath}`)
 					}
 				}
 
 				success = true
 			} catch (error) {
 				lastError = error as Error
-				console.error(
+				this.log(
 					`[DirectoryScanner] Error processing batch (attempt ${attempts}) in workspace ${scanWorkspace}:`,
 					error,
 				)
@@ -1175,12 +1197,12 @@ export class DirectoryScanner implements IDirectoryScanner {
 		}
 
 		if (!success && lastError) {
-			console.error(`[DirectoryScanner] Failed to process batch after ${MAX_BATCH_RETRIES} attempts`)
-			if (onError) {
-				// Preserve the original error message from embedders which now have detailed i18n messages
-				const errorMessage = lastError.message || "Unknown error"
+			this.log(`[DirectoryScanner] Failed to process batch after ${MAX_BATCH_RETRIES} attempts`)
+			// Preserve the original error message from embedders which now have detailed i18n messages
+			const errorMessage = lastError.message || "Unknown error"
 
-				// For other errors, provide context
+			// Always call onError callback if provided for additional reporting
+			if (onError) {
 				onError(
 					new Error(
 						t("embeddings:scanner.failedToProcessBatchWithError", {
@@ -1190,6 +1212,16 @@ export class DirectoryScanner implements IDirectoryScanner {
 					),
 				)
 			}
+
+			// Always throw to ensure errors propagate to orchestrator, even if onError callback not provided
+			// This ensures batch processing failures are never silently swallowed
+			throw new Error(
+				t("embeddings:scanner.failedToProcessBatchWithError", {
+					maxRetries: MAX_BATCH_RETRIES,
+					errorMessage,
+				}),
+				{ cause: lastError },
+			)
 		}
 	}
 }

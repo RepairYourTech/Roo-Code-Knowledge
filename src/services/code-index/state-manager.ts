@@ -18,12 +18,18 @@ export type VectorStatus = "idle" | "indexing" | "indexed" | "error"
 // Overall system health status
 export type SystemHealth = "healthy" | "degraded" | "failed"
 
+// Error categorization for better user guidance
+export type ErrorCategory = "connection" | "authentication" | "rate-limit" | "configuration" | "unknown"
+
 export interface IndexingComponentStatus {
 	vector: {
 		status: VectorStatus
 		processedItems: number
 		totalItems: number
 		message?: string
+		errorCategory?: ErrorCategory
+		errorTimestamp?: number
+		retrySuggestion?: string
 	}
 	neo4j: {
 		status: Neo4jStatus
@@ -32,6 +38,9 @@ export interface IndexingComponentStatus {
 		message?: string
 		lastError?: string
 		consecutiveFailures: number
+		errorCategory?: ErrorCategory
+		errorTimestamp?: number
+		retrySuggestion?: string
 	}
 	system: {
 		health: SystemHealth
@@ -62,6 +71,16 @@ export class CodeIndexStateManager {
 	// System health tracking
 	private _systemHealth: SystemHealth = "healthy"
 
+	// Detailed error tracking for vector store
+	private _vectorErrorCategory: ErrorCategory | undefined
+	private _vectorErrorTimestamp: number | undefined
+	private _vectorRetrySuggestion: string | undefined
+
+	// Detailed error tracking for Neo4j
+	private _neo4jErrorCategory: ErrorCategory | undefined
+	private _neo4jErrorTimestamp: number | undefined
+	private _neo4jRetrySuggestion: string | undefined
+
 	private _progressEmitter = new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
 
 	// --- Public API ---
@@ -86,9 +105,15 @@ export class CodeIndexStateManager {
 			neo4jMessage: this._neo4jMessage,
 			neo4jLastError: this._neo4jLastError,
 			neo4jConsecutiveFailures: this._neo4jConsecutiveFailures,
+			neo4jErrorCategory: this._neo4jErrorCategory,
+			neo4jErrorTimestamp: this._neo4jErrorTimestamp,
+			neo4jRetrySuggestion: this._neo4jRetrySuggestion,
 			// Vector indexing status
 			vectorStatus: this._vectorStatus,
 			vectorMessage: this._vectorMessage,
+			vectorErrorCategory: this._vectorErrorCategory,
+			vectorErrorTimestamp: this._vectorErrorTimestamp,
+			vectorRetrySuggestion: this._vectorRetrySuggestion,
 			// System health
 			systemHealth: this._systemHealth,
 		}
@@ -104,6 +129,9 @@ export class CodeIndexStateManager {
 				processedItems: this._processedItems,
 				totalItems: this._totalItems,
 				message: this._vectorMessage,
+				errorCategory: this._vectorErrorCategory,
+				errorTimestamp: this._vectorErrorTimestamp,
+				retrySuggestion: this._vectorRetrySuggestion,
 			},
 			neo4j: {
 				status: this._neo4jStatus,
@@ -112,12 +140,83 @@ export class CodeIndexStateManager {
 				message: this._neo4jMessage,
 				lastError: this._neo4jLastError,
 				consecutiveFailures: this._neo4jConsecutiveFailures,
+				errorCategory: this._neo4jErrorCategory,
+				errorTimestamp: this._neo4jErrorTimestamp,
+				retrySuggestion: this._neo4jRetrySuggestion,
 			},
 			system: {
 				health: this._systemHealth,
 				overallState: this._systemStatus,
 				message: this._statusMessage,
 			},
+		}
+	}
+
+	/**
+	 * Categorize an error and provide retry suggestion
+	 */
+	public categorizeError(error: Error | string): { category: ErrorCategory; retrySuggestion: string } {
+		const errorMessage = typeof error === "string" ? error : error.message
+		const lowerMessage = errorMessage.toLowerCase()
+
+		// Check for connection errors
+		if (
+			lowerMessage.includes("econnrefused") ||
+			lowerMessage.includes("etimedout") ||
+			lowerMessage.includes("network") ||
+			lowerMessage.includes("unreachable") ||
+			lowerMessage.includes("connect")
+		) {
+			return {
+				category: "connection",
+				retrySuggestion: "Verify service is running and accessible",
+			}
+		}
+
+		// Check for authentication errors
+		if (
+			lowerMessage.includes("authentication") ||
+			lowerMessage.includes("unauthorized") ||
+			lowerMessage.includes("401") ||
+			lowerMessage.includes("403") ||
+			lowerMessage.includes("invalid credentials") ||
+			lowerMessage.includes("api key")
+		) {
+			return {
+				category: "authentication",
+				retrySuggestion: "Check API key or credentials",
+			}
+		}
+
+		// Check for rate limit errors
+		if (
+			lowerMessage.includes("rate limit") ||
+			lowerMessage.includes("429") ||
+			lowerMessage.includes("quota") ||
+			lowerMessage.includes("too many requests")
+		) {
+			return {
+				category: "rate-limit",
+				retrySuggestion: "Wait and retry, or upgrade your plan",
+			}
+		}
+
+		// Check for configuration errors
+		if (
+			lowerMessage.includes("configuration") ||
+			lowerMessage.includes("invalid url") ||
+			lowerMessage.includes("missing")
+		) {
+			return {
+				category: "configuration",
+				retrySuggestion: "Review your settings",
+			}
+		}
+
+		// Default to unknown
+		return {
+			category: "unknown",
+			retrySuggestion: "Check logs for details and retry",
 		}
 	}
 
@@ -319,16 +418,30 @@ export class CodeIndexStateManager {
 	 * @param status Neo4j indexing status
 	 * @param message Optional status message
 	 * @param error Optional error information
+	 * @param errorCategory Optional error category
+	 * @param retrySuggestion Optional retry suggestion
 	 */
-	public setNeo4jStatus(status: Neo4jStatus, message?: string, error?: string): void {
+	public setNeo4jStatus(
+		status: Neo4jStatus,
+		message?: string,
+		error?: string,
+		errorCategory?: ErrorCategory,
+		retrySuggestion?: string,
+	): void {
 		if (status !== this._neo4jStatus || (message !== undefined && message !== this._neo4jMessage)) {
 			this._neo4jStatus = status
 			if (message !== undefined) this._neo4jMessage = message
 			if (error !== undefined) {
 				this._neo4jLastError = error
 				this._neo4jConsecutiveFailures++
+				this._neo4jErrorCategory = errorCategory
+				this._neo4jErrorTimestamp = Date.now()
+				this._neo4jRetrySuggestion = retrySuggestion
 			} else if (["indexed", "idle"].includes(status)) {
 				this._neo4jConsecutiveFailures = 0
+				this._neo4jErrorCategory = undefined
+				this._neo4jErrorTimestamp = undefined
+				this._neo4jRetrySuggestion = undefined
 			}
 
 			// Update system state based on Neo4j status if critical
@@ -348,11 +461,39 @@ export class CodeIndexStateManager {
 	 * Set vector indexing status independently
 	 * @param status Vector indexing status
 	 * @param message Optional status message
+	 * @param errorCategory Optional error category
+	 * @param errorMessage Optional error message. If provided and status is 'error', this will be used as the vector message if 'message' is not provided.
+	 * @param retrySuggestion Optional retry suggestion
 	 */
-	public setVectorStatus(status: VectorStatus, message?: string): void {
-		if (status !== this._vectorStatus || (message !== undefined && message !== this._vectorMessage)) {
+	public setVectorStatus(
+		status: VectorStatus,
+		message?: string,
+		errorCategory?: ErrorCategory,
+		errorMessage?: string,
+		retrySuggestion?: string,
+	): void {
+		let finalMessage = message
+
+		// If status is error and no message provided but errorMessage is, use errorMessage
+		if (status === "error" && !finalMessage && errorMessage) {
+			finalMessage = errorMessage
+		}
+
+		if (status !== this._vectorStatus || (finalMessage !== undefined && finalMessage !== this._vectorMessage)) {
 			this._vectorStatus = status
-			if (message !== undefined) this._vectorMessage = message
+			if (finalMessage !== undefined) this._vectorMessage = finalMessage
+
+			// Set error details when status is error
+			if (status === "error") {
+				this._vectorErrorCategory = errorCategory
+				this._vectorErrorTimestamp = Date.now()
+				this._vectorRetrySuggestion = retrySuggestion
+			} else if (status === "indexed" || status === "idle") {
+				// Clear error details on success
+				this._vectorErrorCategory = undefined
+				this._vectorErrorTimestamp = undefined
+				this._vectorRetrySuggestion = undefined
+			}
 
 			this._updateSystemHealth()
 			this._progressEmitter.fire(this.getCurrentStatus())

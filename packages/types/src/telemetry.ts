@@ -72,6 +72,14 @@ export enum TelemetryEventName {
 	CONSECUTIVE_MISTAKE_ERROR = "Consecutive Mistake Error",
 	CODE_INDEX_ERROR = "Code Index Error",
 	TELEMETRY_SETTINGS_CHANGED = "Telemetry Settings Changed",
+
+	// Graph Indexing Events
+	GRAPH_INDEXING_STARTED = "Graph Indexing Started",
+	GRAPH_INDEXING_COMPLETED = "Graph Indexing Completed",
+	GRAPH_NODES_CREATED = "Graph Nodes Created",
+	GRAPH_RELATIONSHIPS_CREATED = "Graph Relationships Created",
+	GRAPH_INDEXING_ERROR = "Graph Indexing Error",
+	GRAPH_FILE_INDEXED = "Graph File Indexed",
 }
 
 /**
@@ -196,6 +204,12 @@ export const rooCodeTelemetryEventSchema = z.discriminatedUnion("type", [
 			TelemetryEventName.SHELL_INTEGRATION_ERROR,
 			TelemetryEventName.CONSECUTIVE_MISTAKE_ERROR,
 			TelemetryEventName.CODE_INDEX_ERROR,
+			TelemetryEventName.GRAPH_INDEXING_STARTED,
+			TelemetryEventName.GRAPH_INDEXING_COMPLETED,
+			TelemetryEventName.GRAPH_NODES_CREATED,
+			TelemetryEventName.GRAPH_RELATIONSHIPS_CREATED,
+			TelemetryEventName.GRAPH_INDEXING_ERROR,
+			TelemetryEventName.GRAPH_FILE_INDEXED,
 			TelemetryEventName.CONTEXT_CONDENSED,
 			TelemetryEventName.SLIDING_WINDOW_TRUNCATION,
 			TelemetryEventName.TAB_SHOWN,

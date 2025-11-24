@@ -54,6 +54,9 @@ export const commandIds = [
 	"acceptInput",
 	"focusPanel",
 	"toggleAutoApprove",
+	"testQdrantConnection",
+	"testNeo4jConnection",
+	"testEmbeddingProvider",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

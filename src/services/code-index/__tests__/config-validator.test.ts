@@ -246,7 +246,7 @@ describe("ConfigValidator", () => {
 
 				const result = ConfigValidator.validateUrl(url, allowedProtocols, "testField")
 				expect(result.valid).toBe(true)
-				expect(result.error).toBeUndefined()
+				expect(result.errors).toHaveLength(0)
 			})
 		})
 
@@ -265,18 +265,18 @@ describe("ConfigValidator", () => {
 			invalidUrls.forEach(({ url, expectedCodes }) => {
 				const result = ConfigValidator.validateUrl(url, ["http", "https"], "testField")
 				expect(result.valid).toBe(false)
-				expect(result.error).toBeDefined()
+				expect(result.errors.length).toBeGreaterThan(0)
 				// Check that the error code is one of the expected codes
-				expect(expectedCodes).toContain(result.error?.code || "")
+				expect(expectedCodes).toContain(result.errors[0]?.code || "")
 			})
 		})
 
 		it("should reject disallowed protocols", () => {
 			const result = ConfigValidator.validateUrl("ftp://example.com", ["http", "https"], "testField")
 			expect(result.valid).toBe(false)
-			expect(result.error).toBeDefined()
-			expect(result.error?.code).toBe("INVALID_PROTOCOL")
-			expect(result.error?.message).toContain('protocol "ftp" is not allowed')
+			expect(result.errors.length).toBeGreaterThan(0)
+			expect(result.errors[0]?.code).toBe("INVALID_PROTOCOL")
+			expect(result.errors[0]?.message).toContain('protocol "ftp" is not allowed')
 		})
 
 		it("should handle IPv4 and IPv6 addresses", () => {
@@ -314,12 +314,12 @@ describe("ConfigValidator", () => {
 			const tooShortUrl = "a://b"
 			const result1 = ConfigValidator.validateUrl(tooShortUrl, ["http", "https"], "testField")
 			expect(result1.valid).toBe(false)
-			expect(result1.error?.code).toBe("INVALID_LENGTH")
+			expect(result1.errors[0]?.code).toBe("INVALID_LENGTH")
 
 			const tooLongUrl = "https://" + "a".repeat(3000) + ".com"
 			const result2 = ConfigValidator.validateUrl(tooLongUrl, ["http", "https"], "testField")
 			expect(result2.valid).toBe(false)
-			expect(result2.error?.code).toBe("INVALID_LENGTH")
+			expect(result2.errors[0]?.code).toBe("INVALID_LENGTH")
 		})
 	})
 
@@ -762,11 +762,8 @@ describe("ConfigValidator", () => {
 			}
 
 			const options: ConfigValidationOptions = {
-				strict: true,
-				validateBounds: true,
+				strictMode: true,
 				checkProduction: false, // Disable production checks
-				allowTestSecrets: true, // Allow test secrets
-				clampValues: false,
 			}
 
 			const result = ConfigValidator.validateConfig(config as CodeIndexConfig, options)
@@ -822,8 +819,7 @@ describe("ConfigValidator", () => {
 				embedderProvider: "openai",
 				openAiOptions: { openAiNativeApiKey: "sk-1234567890abcdef1234567890abcdef12345678" },
 				lspBatchSize: 50,
-				lspTimeout: 10000,
-				lspCacheEnabled: true,
+				lspTimeout: 30000,
 				lspCacheSize: 1000,
 				lspCacheTtl: 300000,
 				lspConcurrencyLimit: 5,

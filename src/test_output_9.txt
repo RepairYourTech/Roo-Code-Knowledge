@@ -1,0 +1,51 @@
+
+ RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
+
+······xx·
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle boundary values for search settings
+AssertionError: expected undefined to be 1 // Object.is equality
+
+[32m- Expected:[39m 
+1
+
+[31m+ Received:[39m 
+undefined
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:92:49
+     90| 
+     91|   expect(result.currentConfig.searchMinScore).toBe(0)
+     92|   expect(result.currentConfig.searchMaxResults).toBe(1)
+       |                                                 ^
+     93|  })
+     94| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle extreme boundary values for search settings
+AssertionError: expected undefined to be 1000 // Object.is equality
+
+[32m- Expected:[39m 
+1000
+
+[31m+ Received:[39m 
+undefined
+
+ ❯ services/code-index/__tests__/config-edge-cases.test.ts:112:49
+    110| 
+    111|   expect(result.currentConfig.searchMinScore).toBe(1.0)
+    112|   expect(result.currentConfig.searchMaxResults).toBe(1000)
+       |                                                 ^
+    113|  })
+    114| 
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  1 failed | 1 passed (2)
+      Tests  2 failed | 7 passed (9)
+   Start at  18:55:14
+   Duration  638ms (transform 292ms, setup 60ms, collect 700ms, tests 35ms, environment 0ms, prepare 135ms)
+

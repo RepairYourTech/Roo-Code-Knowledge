@@ -158,6 +158,110 @@ export class TelemetryService {
 	}
 
 	/**
+	 * Captures when graph indexing starts
+	 * @param filePath The file being indexed
+	 * @param blockCount Number of code blocks to index
+	 */
+	public captureGraphIndexingStarted(filePath: string, blockCount: number): void {
+		this.captureEvent(TelemetryEventName.GRAPH_INDEXING_STARTED, { filePath, blockCount })
+	}
+
+	/**
+	 * Captures when graph indexing completes
+	 * @param filePath The file that was indexed
+	 * @param nodesCreated Number of nodes created
+	 * @param relationshipsCreated Number of relationships created
+	 * @param durationMs Duration of indexing in milliseconds
+	 */
+	public captureGraphIndexingCompleted(
+		filePath: string,
+		nodesCreated: number,
+		relationshipsCreated: number,
+		durationMs: number,
+	): void {
+		this.captureEvent(TelemetryEventName.GRAPH_INDEXING_COMPLETED, {
+			filePath,
+			nodesCreated,
+			relationshipsCreated,
+			durationMs,
+		})
+	}
+
+	/**
+	 * Captures when graph nodes are created
+	 * @param filePath The file where nodes were created
+	 * @param nodeCount Number of nodes created
+	 * @param nodeTypes Types of nodes created
+	 */
+	public captureGraphNodesCreated(filePath: string, nodeCount: number, nodeTypes: string[]): void {
+		this.captureEvent(TelemetryEventName.GRAPH_NODES_CREATED, {
+			filePath,
+			nodeCount,
+			nodeTypes,
+		})
+	}
+
+	/**
+	 * Captures when graph relationships are created
+	 * @param filePath The file where relationships were created
+	 * @param relationshipCount Number of relationships created
+	 * @param relationshipTypes Types of relationships created
+	 */
+	public captureGraphRelationshipsCreated(
+		filePath: string,
+		relationshipCount: number,
+		relationshipTypes: string[],
+	): void {
+		this.captureEvent(TelemetryEventName.GRAPH_RELATIONSHIPS_CREATED, {
+			filePath,
+			relationshipCount,
+			relationshipTypes,
+		})
+	}
+
+	/**
+	 * Captures when a graph indexing error occurs
+	 * @param filePath The file being indexed
+	 * @param error The error message
+	 * @param operation The operation that failed
+	 * @param context Additional context about the error
+	 */
+	public captureGraphIndexingError(
+		filePath: string,
+		error: string,
+		operation: string,
+		context?: Record<string, unknown>,
+	): void {
+		this.captureEvent(TelemetryEventName.GRAPH_INDEXING_ERROR, {
+			filePath,
+			error,
+			operation,
+			...(context && { context }),
+		})
+	}
+
+	/**
+	 * Captures when a file is indexed
+	 * @param filePath The file that was indexed
+	 * @param nodesCreated Number of nodes created for the file
+	 * @param relationshipsCreated Number of relationships created for the file
+	 * @param language The programming language of the file
+	 */
+	public captureGraphFileIndexed(
+		filePath: string,
+		nodesCreated: number,
+		relationshipsCreated: number,
+		language: string,
+	): void {
+		this.captureEvent(TelemetryEventName.GRAPH_FILE_INDEXED, {
+			filePath,
+			nodesCreated,
+			relationshipsCreated,
+			language,
+		})
+	}
+
+	/**
 	 * Captures when a tab is shown due to user action
 	 * @param tab The tab that was shown
 	 */

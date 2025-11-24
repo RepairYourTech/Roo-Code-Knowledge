@@ -11,6 +11,8 @@ import {
 	SignatureInfo,
 	SymbolInfo,
 	LSPQueryResult,
+	WorkspaceSymbolInfo,
+	TypeHierarchyItem,
 } from "../interfaces/lsp-service"
 
 /**
@@ -357,5 +359,416 @@ export class LSPService implements ILSPService {
 		}
 
 		return undefined
+	}
+
+	/**
+	 * Search for symbols across the entire workspace
+	 */
+	async searchWorkspaceSymbols(query: string): Promise<WorkspaceSymbolInfo[]> {
+		try {
+			const symbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+				"vscode.executeWorkspaceSymbolProvider",
+				query,
+			)
+
+			if (!symbols || symbols.length === 0) {
+				return []
+			}
+
+			// Convert to WorkspaceSymbolInfo and enrich with type information
+			const results: WorkspaceSymbolInfo[] = []
+
+			for (const symbol of symbols) {
+				// Get language from file extension
+				const language = this.getLanguageFromPath(symbol.location.uri.fsPath)
+
+				// Try to get type information for the symbol
+				let typeInfo: TypeInfo | undefined
+				let signatureInfo: SignatureInfo | undefined
+
+				try {
+					const document = await vscode.workspace.openTextDocument(symbol.location.uri)
+					const position = symbol.location.range.start
+
+					// Only get type info if LSP is available for this document
+					if (await this.isAvailable(document)) {
+						typeInfo = await this.getTypeInfo(document, position)
+						signatureInfo = await this.getSignatureInfo(document, position)
+					}
+				} catch (error) {
+					// Ignore errors for individual symbols, continue processing
+				}
+
+				results.push({
+					name: symbol.name,
+					kind: symbol.kind,
+					location: symbol.location,
+					containerName: symbol.containerName,
+					typeInfo,
+					signatureInfo,
+					score: this.calculateSymbolRelevance(symbol.name, query),
+					language,
+				})
+			}
+
+			// Sort by relevance score
+			return results.sort((a, b) => (b.score || 0) - (a.score || 0))
+		} catch (error) {
+			console.error("[LSPService] Error searching workspace symbols:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Find all references to a symbol at a specific position
+	 */
+	async findReferences(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+		includeDeclaration = true,
+	): Promise<vscode.Location[]> {
+		try {
+			const references = await vscode.commands.executeCommand<vscode.Location[]>(
+				"vscode.executeReferenceProvider",
+				document.uri,
+				position,
+				{ includeDeclaration },
+			)
+
+			return references || []
+		} catch (error) {
+			console.error("[LSPService] Error finding references:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Find definitions of a symbol at a specific position
+	 */
+	async findDefinitions(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location[]> {
+		try {
+			const definitions = await vscode.commands.executeCommand<vscode.Location[]>(
+				"vscode.executeDefinitionProvider",
+				document.uri,
+				position,
+			)
+
+			return definitions || []
+		} catch (error) {
+			console.error("[LSPService] Error finding definitions:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Find implementations of a symbol at a specific position
+	 */
+	async findImplementations(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location[]> {
+		try {
+			const implementations = await vscode.commands.executeCommand<vscode.Location[]>(
+				"vscode.executeImplementationProvider",
+				document.uri,
+				position,
+			)
+
+			return implementations || []
+		} catch (error) {
+			console.error("[LSPService] Error finding implementations:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Search for symbols by type across the workspace
+	 */
+	async searchByType(typeQuery: string, symbolKind?: vscode.SymbolKind): Promise<WorkspaceSymbolInfo[]> {
+		try {
+			// First, get all workspace symbols
+			const allSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
+				"vscode.executeWorkspaceSymbolProvider",
+				"", // Empty query to get all symbols
+			)
+
+			if (!allSymbols || allSymbols.length === 0) {
+				return []
+			}
+
+			const results: WorkspaceSymbolInfo[] = []
+
+			for (const symbol of allSymbols) {
+				// Filter by symbol kind if specified
+				if (symbolKind && symbol.kind !== symbolKind) {
+					continue
+				}
+
+				// Try to get type information for the symbol
+				let typeInfo: TypeInfo | undefined
+				let signatureInfo: SignatureInfo | undefined
+
+				try {
+					const document = await vscode.workspace.openTextDocument(symbol.location.uri)
+					const position = symbol.location.range.start
+
+					if (await this.isAvailable(document)) {
+						typeInfo = await this.getTypeInfo(document, position)
+						signatureInfo = await this.getSignatureInfo(document, position)
+					}
+				} catch (error) {
+					// Ignore errors for individual symbols
+				}
+
+				// Check if the type matches the query
+				if (this.typeMatchesQuery(typeInfo, signatureInfo, typeQuery)) {
+					const language = this.getLanguageFromPath(symbol.location.uri.fsPath)
+
+					results.push({
+						name: symbol.name,
+						kind: symbol.kind,
+						location: symbol.location,
+						containerName: symbol.containerName,
+						typeInfo,
+						signatureInfo,
+						score: this.calculateTypeMatchScore(typeInfo, signatureInfo, typeQuery),
+						language,
+					})
+				}
+			}
+
+			// Sort by match score
+			return results.sort((a, b) => (b.score || 0) - (a.score || 0))
+		} catch (error) {
+			console.error("[LSPService] Error searching by type:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Get type hierarchy for a symbol at a specific position
+	 */
+	async getTypeHierarchy(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+		direction: "supertypes" | "subtypes",
+	): Promise<TypeHierarchyItem[]> {
+		try {
+			// Try to get type hierarchy if the language server supports it
+			// Note: Not all language servers implement this
+			const hierarchy = await vscode.commands.executeCommand<any[]>(
+				"vscode.executeTypeHierarchyProvider",
+				document.uri,
+				position,
+				direction,
+			)
+
+			if (!hierarchy || hierarchy.length === 0) {
+				return []
+			}
+
+			return hierarchy.map((item) => ({
+				name: item.name,
+				kind: item.kind,
+				location: item.location,
+				typeInfo: item.typeInfo,
+				parents: item.parents || [],
+				children: item.children || [],
+			}))
+		} catch (error) {
+			console.error("[LSPService] Error getting type hierarchy:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Check if a language server is available for a given language
+	 */
+	async isLanguageServerAvailable(language: string): Promise<boolean> {
+		try {
+			// Try to find a file with the given language
+			const files = await vscode.workspace.findFiles(`**/*.${this.getFileExtension(language)}`)
+
+			if (files.length === 0) {
+				return false
+			}
+
+			// Check if LSP is available for the first file found
+			const document = await vscode.workspace.openTextDocument(files[0])
+			return await this.isAvailable(document)
+		} catch (error) {
+			console.error(`[LSPService] Error checking language server availability for ${language}:`, error)
+			return false
+		}
+	}
+
+	/**
+	 * Helper: Get programming language from file path
+	 */
+	private getLanguageFromPath(filePath: string): string | undefined {
+		const extension = filePath.split(".").pop()?.toLowerCase()
+
+		const extensionMap: Record<string, string> = {
+			ts: "typescript",
+			tsx: "typescript",
+			js: "javascript",
+			jsx: "javascript",
+			py: "python",
+			java: "java",
+			cpp: "cpp",
+			c: "c",
+			cs: "csharp",
+			go: "go",
+			rs: "rust",
+			php: "php",
+			rb: "ruby",
+			swift: "swift",
+			kt: "kotlin",
+			scala: "scala",
+			vue: "vue",
+			svelte: "svelte",
+		}
+
+		return extensionMap[extension || ""] || extension
+	}
+
+	/**
+	 * Helper: Get file extension from language
+	 */
+	private getFileExtension(language: string): string {
+		const languageMap: Record<string, string> = {
+			typescript: "ts",
+			javascript: "js",
+			python: "py",
+			java: "java",
+			cpp: "cpp",
+			c: "c",
+			csharp: "cs",
+			go: "go",
+			rust: "rs",
+			php: "php",
+			ruby: "rb",
+			swift: "swift",
+			kotlin: "kt",
+			scala: "scala",
+			vue: "vue",
+			svelte: "svelte",
+		}
+
+		return languageMap[language.toLowerCase()] || language
+	}
+
+	/**
+	 * Helper: Calculate relevance score for symbol search
+	 */
+	private calculateSymbolRelevance(symbolName: string, query: string): number {
+		const lowerSymbol = symbolName.toLowerCase()
+		const lowerQuery = query.toLowerCase()
+
+		// Exact match gets highest score
+		if (lowerSymbol === lowerQuery) {
+			return 1.0
+		}
+
+		// Prefix match gets high score
+		if (lowerSymbol.startsWith(lowerQuery)) {
+			return 0.8
+		}
+
+		// Contains match gets medium score
+		if (lowerSymbol.includes(lowerQuery)) {
+			return 0.6
+		}
+
+		// CamelCase matching
+		if (this.camelCaseMatch(lowerSymbol, lowerQuery)) {
+			return 0.7
+		}
+
+		// Default score
+		return 0.3
+	}
+
+	/**
+	 * Helper: Check if symbol matches query using CamelCase pattern
+	 */
+	private camelCaseMatch(symbol: string, query: string): boolean {
+		const symbolParts = symbol.split(/(?=[A-Z])/).map((p) => p.toLowerCase())
+		const queryParts = query.split(/(?=[A-Z])/).map((p) => p.toLowerCase())
+
+		if (queryParts.length > symbolParts.length) {
+			return false
+		}
+
+		return queryParts.every((part, index) => symbolParts[index]?.startsWith(part))
+	}
+
+	/**
+	 * Helper: Check if type matches the query
+	 */
+	private typeMatchesQuery(
+		typeInfo: TypeInfo | undefined,
+		signatureInfo: SignatureInfo | undefined,
+		query: string,
+	): boolean {
+		const lowerQuery = query.toLowerCase()
+
+		// Check type info
+		if (typeInfo && typeInfo.type.toLowerCase().includes(lowerQuery)) {
+			return true
+		}
+
+		// Check return type in signature info
+		if (signatureInfo && signatureInfo.returnType.toLowerCase().includes(lowerQuery)) {
+			return true
+		}
+
+		// Check parameter types in signature info
+		if (signatureInfo) {
+			return signatureInfo.parameters.some((param) => param.type.toLowerCase().includes(lowerQuery))
+		}
+
+		return false
+	}
+
+	/**
+	 * Helper: Calculate type match score
+	 */
+	private calculateTypeMatchScore(
+		typeInfo: TypeInfo | undefined,
+		signatureInfo: SignatureInfo | undefined,
+		query: string,
+	): number {
+		const lowerQuery = query.toLowerCase()
+		let score = 0
+
+		// Score for type info match
+		if (typeInfo) {
+			const typeLower = typeInfo.type.toLowerCase()
+			if (typeLower === lowerQuery) {
+				score += 1.0
+			} else if (typeLower.includes(lowerQuery)) {
+				score += 0.7
+			}
+		}
+
+		// Score for return type match
+		if (signatureInfo) {
+			const returnLower = signatureInfo.returnType.toLowerCase()
+			if (returnLower === lowerQuery) {
+				score += 0.9
+			} else if (returnLower.includes(lowerQuery)) {
+				score += 0.6
+			}
+
+			// Score for parameter type matches
+			for (const param of signatureInfo.parameters) {
+				const paramLower = param.type.toLowerCase()
+				if (paramLower === lowerQuery) {
+					score += 0.5
+				} else if (paramLower.includes(lowerQuery)) {
+					score += 0.3
+				}
+			}
+		}
+
+		return Math.min(score, 1.0) // Cap at 1.0
 	}
 }

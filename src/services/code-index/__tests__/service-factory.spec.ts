@@ -1,10 +1,18 @@
 import type { MockedClass, MockedFunction } from "vitest"
+import * as vscode from "vscode"
 import { CodeIndexServiceFactory } from "../service-factory"
 import { OpenAiEmbedder } from "../embedders/openai"
 import { CodeIndexOllamaEmbedder } from "../embedders/ollama"
 import { OpenAICompatibleEmbedder } from "../embedders/openai-compatible"
 import { GeminiEmbedder } from "../embedders/gemini"
 import { QdrantVectorStore } from "../vector-store/qdrant-client"
+
+// Mock vscode
+vitest.mock("vscode", () => ({
+	window: {
+		createOutputChannel: vitest.fn(),
+	},
+}))
 
 // Mock the embedders and vector store
 vitest.mock("../embedders/openai")
@@ -43,6 +51,7 @@ describe("CodeIndexServiceFactory", () => {
 	let factory: CodeIndexServiceFactory
 	let mockConfigManager: any
 	let mockCacheManager: any
+	let mockOutputChannel: vscode.OutputChannel
 
 	beforeEach(() => {
 		vitest.clearAllMocks()
@@ -53,7 +62,21 @@ describe("CodeIndexServiceFactory", () => {
 
 		mockCacheManager = {}
 
-		factory = new CodeIndexServiceFactory(mockConfigManager, "/test/workspace", mockCacheManager)
+		// Create a mock output channel
+		mockOutputChannel = {
+			name: "Test Output Channel",
+			append: vitest.fn(),
+			appendLine: vitest.fn(),
+			clear: vitest.fn(),
+			show: vitest.fn(),
+			hide: vitest.fn(),
+			dispose: vitest.fn(),
+		} as any
+
+		// Mock vscode.window.createOutputChannel to return our mock
+		;(vscode.window.createOutputChannel as any).mockReturnValue(mockOutputChannel)
+
+		factory = new CodeIndexServiceFactory(mockConfigManager, "/test/workspace", mockCacheManager, mockOutputChannel)
 	})
 
 	describe("createEmbedder", () => {
@@ -194,6 +217,9 @@ describe("CodeIndexServiceFactory", () => {
 				"https://api.example.com/v1",
 				"test-api-key",
 				testModelId,
+				undefined, // maxItemTokens
+				undefined, // maxBatchItems
+				mockOutputChannel,
 			)
 		})
 
@@ -217,6 +243,9 @@ describe("CodeIndexServiceFactory", () => {
 				"https://api.example.com/v1",
 				"test-api-key",
 				undefined,
+				undefined, // maxItemTokens
+				undefined, // maxBatchItems
+				mockOutputChannel,
 			)
 		})
 
@@ -279,7 +308,7 @@ describe("CodeIndexServiceFactory", () => {
 			factory.createEmbedder()
 
 			// Assert
-			expect(MockedGeminiEmbedder).toHaveBeenCalledWith("test-gemini-api-key", undefined)
+			expect(MockedGeminiEmbedder).toHaveBeenCalledWith("test-gemini-api-key", undefined, mockOutputChannel)
 		})
 
 		it("should create GeminiEmbedder with specified modelId", () => {
@@ -297,7 +326,11 @@ describe("CodeIndexServiceFactory", () => {
 			factory.createEmbedder()
 
 			// Assert
-			expect(MockedGeminiEmbedder).toHaveBeenCalledWith("test-gemini-api-key", "text-embedding-004")
+			expect(MockedGeminiEmbedder).toHaveBeenCalledWith(
+				"test-gemini-api-key",
+				"text-embedding-004",
+				mockOutputChannel,
+			)
 		})
 
 		it("should throw error when Gemini API key is missing", () => {
@@ -367,6 +400,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				3072,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -392,6 +426,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				768,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -417,6 +452,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				3072,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -449,6 +485,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				modelDimension, // Should use model's built-in dimension, not manual
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -480,6 +517,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				manualDimension, // Should use manual dimension as fallback
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -509,6 +547,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				768,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -578,6 +617,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				3072,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -603,6 +643,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				3072,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 
@@ -627,6 +668,7 @@ describe("CodeIndexServiceFactory", () => {
 				"http://localhost:6333",
 				1536,
 				"test-key",
+				mockOutputChannel,
 			)
 		})
 

@@ -315,3 +315,84 @@ export const ALLOW_METADATA_TRUNCATION = true
 // ====================
 
 export * from "./constants/index"
+
+// ====================
+// Configuration Validation Constants
+// ====================
+
+// API Key Validation
+export const MIN_API_KEY_LENGTH = 8
+export const MAX_API_KEY_LENGTH = 256
+export const MIN_OPENAI_KEY_LENGTH = 20
+export const MIN_GEMINI_KEY_LENGTH = 20
+export const MIN_OPENROUTER_KEY_LENGTH = 20
+export const MIN_QDRANT_KEY_LENGTH = 8
+export const MAX_QDRANT_KEY_LENGTH = 128
+export const MIN_OPENAI_COMPATIBLE_KEY_LENGTH = 1
+export const MIN_MISTRAL_KEY_LENGTH = 20
+export const MIN_VERCEL_AI_GATEWAY_KEY_LENGTH = 20
+export const MAX_NEO4J_PASSWORD_LENGTH = 128
+
+// URL Validation
+export const MIN_URL_LENGTH = 8
+export const MAX_URL_LENGTH = 2048
+export const ALLOWED_NEO4J_PROTOCOLS = ["bolt", "neo4j", "bolt+s", "neo4j+s", "bolt+ssc", "neo4j+ssc"]
+
+// Model Dimension Validation
+export const MIN_MODEL_DIMENSION = 1
+export const MAX_MODEL_DIMENSION = 16384
+
+// Search Validation
+export const MIN_SEARCH_RESULTS = 1
+export const MAX_SEARCH_RESULTS_LIMIT = 1000
+
+// Test Secret Patterns
+export const TEST_SECRET_PATTERNS = ["test", "example", "dummy", "placeholder", "changeme", "password"]
+export const SUSPICIOUS_SECRET_PATTERNS = [
+	/^sk-test-/i, // OpenAI test keys
+	/^test_/i, // Generic test prefix
+]
+export const SECRET_MASK_STRING = "********"
+export const SECRET_VISIBLE_CHARS = 4
+
+// Validation Mode Flags
+export const STRICT_VALIDATION_MODE = false
+
+// Batch Size Validation
+export const MIN_BATCH_SIZE = 1
+export const MAX_BATCH_SIZE = 10000
+export const PRODUCTION_MIN_BATCH_SIZE = 10
+export const PRODUCTION_MAX_BATCH_SIZE = 1000
+
+// Pool Size Validation
+export const MIN_POOL_SIZE = 1
+export const MAX_POOL_SIZE = 100
+export const MIN_NEO4J_CONNECTION_POOL_SIZE = 1
+export const MAX_NEO4J_CONNECTION_POOL_SIZE = 100
+export const PRODUCTION_MIN_NEO4J_POOL_SIZE = 5
+
+// Timeout Validation
+export const MIN_TIMEOUT_MS = 100
+export const MAX_TIMEOUT_MS = 600000 // 10 minutes
+
+// Retry Validation
+export const MIN_RETRY_ATTEMPTS = 0
+export const MAX_RETRY_ATTEMPTS = 10
+
+// Cache Size Validation
+export const MIN_CACHE_SIZE = 10
+export const MAX_CACHE_SIZE = 100000
+export const MIN_LSP_CACHE_SIZE = 10
+export const MAX_LSP_CACHE_SIZE = 10000
+
+// Production Safety Flags
+export const WARN_ON_DISABLED_CIRCUIT_BREAKERS = true
+export const WARN_ON_TEST_SECRETS_IN_PRODUCTION = true
+export const WARN_ON_EXTREME_BATCH_SIZES = true
+export const WARN_ON_LOW_POOL_SIZES = true
+
+// Bounds Checking
+export const STRICT_BOUNDS_CHECKING = false
+export const CLAMP_OUT_OF_BOUNDS_VALUES = true
+export const VALIDATE_ON_LOAD = true
+export const LOG_VALIDATION_FAILURES = true

@@ -5,6 +5,8 @@ import { EmbedderProvider } from "./interfaces/manager"
 import { CodeIndexConfig, PreviousConfigSnapshot } from "./interfaces/config"
 import { DEFAULT_SEARCH_MIN_SCORE, DEFAULT_MAX_SEARCH_RESULTS } from "./constants"
 import { getDefaultModelId, getModelDimension, getModelScoreThreshold } from "../../shared/embeddingModels"
+import { ConfigValidator } from "./config-validator"
+import { ConfigMigrator } from "./config-migrator"
 
 /**
  * Manages configuration state and validation for the code indexing feature.
@@ -34,8 +36,30 @@ export class CodeIndexConfigManager {
 	private neo4jDatabase?: string = "neo4j"
 
 	constructor(private readonly contextProxy: ContextProxy) {
-		// Initialize with current configuration to avoid false restart triggers
-		this._loadAndSetConfiguration()
+		// Initialize with current configuration
+		// We skip strict validation on startup to avoid blocking initialization,
+		// but we log any issues found.
+		const config = this._readConfigurationFromStorage()
+		console.error("DEBUG: Constructor read config:", JSON.stringify(config, null, 2))
+		const validation = ConfigValidator.validateConfig(config)
+		console.error("DEBUG: Constructor validation:", validation.valid, validation.errors)
+
+		if (!validation.valid) {
+			console.error("Invalid initial configuration:", validation.errors)
+			// ... (rest of the block)
+			console.error("DEBUG: Applying default config due to invalid initial config")
+			this._applyConfiguration({
+				isConfigured: false,
+				embedderProvider: "openai",
+				qdrantUrl: "http://localhost:6333",
+				qdrantApiKey: "",
+				neo4jEnabled: false,
+				// ... other defaults
+			} as any)
+			return
+		}
+
+		this._applyConfiguration(config)
 	}
 
 	/**
@@ -46,24 +70,29 @@ export class CodeIndexConfigManager {
 	}
 
 	/**
-	 * Private method that handles loading configuration from storage and updating instance variables.
-	 * This eliminates code duplication between initializeWithCurrentConfig() and loadConfiguration().
+	 * Reads configuration from storage and constructs a CodeIndexConfig object.
+	 * Does NOT modify instance state.
 	 */
-	private _loadAndSetConfiguration(): void {
+	private _readConfigurationFromStorage(): CodeIndexConfig {
 		// Load configuration from storage
-		const codebaseIndexConfig = this.contextProxy?.getGlobalState("codebaseIndexConfig") ?? {
+		const rawGlobalState = this.contextProxy?.getGlobalState("codebaseIndexConfig")
+		console.error("DEBUG: rawGlobalState:", JSON.stringify(rawGlobalState, null, 2))
+		const codebaseIndexConfig = (rawGlobalState as any) ?? {
 			codebaseIndexEnabled: true,
 			codebaseIndexQdrantUrl: "http://localhost:6333",
 			codebaseIndexEmbedderProvider: "openai",
 			codebaseIndexEmbedderBaseUrl: "",
 			codebaseIndexEmbedderModelId: "",
-			codebaseIndexSearchMinScore: undefined,
-			codebaseIndexSearchMaxResults: undefined,
+			codebaseIndexSearchMinScore: 0.4,
+			codebaseIndexSearchMaxResults: 50,
 			// Neo4j defaults (disabled by default, simplified naming)
 			neo4jEnabled: false,
 			neo4jUri: "bolt://localhost:7687",
 			neo4jUsername: "neo4j",
+			neo4jPassword: "",
+			neo4jDatabase: "neo4j",
 		}
+		// console.log("DEBUG: _readConfigurationFromStorage raw config:", JSON.stringify(codebaseIndexConfig, null, 2))
 
 		const {
 			codebaseIndexEnabled,
@@ -76,11 +105,11 @@ export class CodeIndexConfigManager {
 			neo4jEnabled,
 			neo4jUri,
 			neo4jUsername,
+			configSchemaVersion,
 		} = codebaseIndexConfig
 
 		const openAiKey = this.contextProxy?.getSecret("codeIndexOpenAiKey") ?? ""
 		const qdrantApiKey = this.contextProxy?.getSecret("codeIndexQdrantApiKey") ?? ""
-		// Fix: Read OpenAI Compatible settings from the correct location within codebaseIndexConfig
 		const openAiCompatibleBaseUrl = codebaseIndexConfig.codebaseIndexOpenAiCompatibleBaseUrl ?? ""
 		const openAiCompatibleApiKey = this.contextProxy?.getSecret("codebaseIndexOpenAiCompatibleApiKey") ?? ""
 		const geminiApiKey = this.contextProxy?.getSecret("codebaseIndexGeminiApiKey") ?? ""
@@ -92,72 +121,142 @@ export class CodeIndexConfigManager {
 		// Read codebaseIndexEnabled from VSCode settings (persists across reinstalls)
 		// Fall back to globalState value, then default to true
 		const vscodeSettingEnabled = vscode.workspace.getConfiguration("roo-cline").get<boolean>("codeIndex.enabled")
-		this.codebaseIndexEnabled = vscodeSettingEnabled ?? codebaseIndexEnabled ?? true
-		this.qdrantUrl = codebaseIndexQdrantUrl
-		this.qdrantApiKey = qdrantApiKey ?? ""
-		this.searchMinScore = codebaseIndexSearchMinScore
-		this.searchMaxResults = codebaseIndexSearchMaxResults
-
-		// Update Neo4j configuration (disabled by default)
-		this.neo4jEnabled = neo4jEnabled ?? false
-		this.neo4jUri = neo4jUri ?? "bolt://localhost:7687"
-		this.neo4jUsername = neo4jUsername ?? "neo4j"
-		this.neo4jPassword = neo4jPassword ?? ""
-		this.neo4jDatabase = "neo4j" // Keep database name fixed for now
+		const finalEnabled = vscodeSettingEnabled ?? codebaseIndexEnabled ?? true
 
 		// Validate and set model dimension
+		let modelDimension: number | undefined
 		const rawDimension = codebaseIndexConfig.codebaseIndexEmbedderModelDimension
 		if (rawDimension !== undefined && rawDimension !== null) {
 			const dimension = Number(rawDimension)
 			if (!isNaN(dimension) && dimension > 0) {
-				this.modelDimension = dimension
+				modelDimension = dimension
 			} else {
 				console.warn(
 					`Invalid codebaseIndexEmbedderModelDimension value: ${rawDimension}. Must be a positive number.`,
 				)
-				this.modelDimension = undefined
 			}
-		} else {
-			this.modelDimension = undefined
 		}
 
-		this.openAiOptions = { openAiNativeApiKey: openAiKey }
-
-		// Set embedder provider with support for openai-compatible
+		// Determine embedder provider
+		let embedderProvider: EmbedderProvider = "openai"
 		if (codebaseIndexEmbedderProvider === "ollama") {
-			this.embedderProvider = "ollama"
+			embedderProvider = "ollama"
 		} else if (codebaseIndexEmbedderProvider === "openai-compatible") {
-			this.embedderProvider = "openai-compatible"
+			embedderProvider = "openai-compatible"
 		} else if (codebaseIndexEmbedderProvider === "gemini") {
-			this.embedderProvider = "gemini"
+			embedderProvider = "gemini"
 		} else if (codebaseIndexEmbedderProvider === "mistral") {
-			this.embedderProvider = "mistral"
+			embedderProvider = "mistral"
 		} else if (codebaseIndexEmbedderProvider === "vercel-ai-gateway") {
-			this.embedderProvider = "vercel-ai-gateway"
+			embedderProvider = "vercel-ai-gateway"
 		} else if (codebaseIndexEmbedderProvider === "openrouter") {
-			this.embedderProvider = "openrouter"
-		} else {
-			this.embedderProvider = "openai"
+			embedderProvider = "openrouter"
 		}
 
-		this.modelId = codebaseIndexEmbedderModelId || undefined
-
-		this.ollamaOptions = {
-			ollamaBaseUrl: codebaseIndexEmbedderBaseUrl,
-		}
-
-		this.openAiCompatibleOptions =
+		// Construct options objects
+		const openAiOptions = { openAiNativeApiKey: openAiKey }
+		const ollamaOptions = { ollamaBaseUrl: codebaseIndexEmbedderBaseUrl }
+		const openAiCompatibleOptions =
 			openAiCompatibleBaseUrl && openAiCompatibleApiKey
-				? {
-						baseUrl: openAiCompatibleBaseUrl,
-						apiKey: openAiCompatibleApiKey,
-					}
+				? { baseUrl: openAiCompatibleBaseUrl, apiKey: openAiCompatibleApiKey }
 				: undefined
+		const geminiOptions = geminiApiKey ? { apiKey: geminiApiKey } : undefined
+		const mistralOptions = mistralApiKey ? { apiKey: mistralApiKey } : undefined
+		const vercelAiGatewayOptions = vercelAiGatewayApiKey ? { apiKey: vercelAiGatewayApiKey } : undefined
+		const openRouterOptions = openRouterApiKey ? { apiKey: openRouterApiKey } : undefined
 
-		this.geminiOptions = geminiApiKey ? { apiKey: geminiApiKey } : undefined
-		this.mistralOptions = mistralApiKey ? { apiKey: mistralApiKey } : undefined
-		this.vercelAiGatewayOptions = vercelAiGatewayApiKey ? { apiKey: vercelAiGatewayApiKey } : undefined
-		this.openRouterOptions = openRouterApiKey ? { apiKey: openRouterApiKey } : undefined
+		// Construct and return the config object
+		return {
+			embedderProvider,
+			modelId: codebaseIndexEmbedderModelId || undefined,
+			modelDimension,
+			openAiOptions,
+			ollamaOptions,
+			openAiCompatibleOptions,
+			geminiOptions,
+			mistralOptions,
+			vercelAiGatewayOptions,
+			openRouterOptions,
+			qdrantUrl: codebaseIndexQdrantUrl ?? "http://localhost:6333",
+			qdrantApiKey: qdrantApiKey ?? "",
+			searchMinScore: codebaseIndexSearchMinScore,
+			searchMaxResults: codebaseIndexSearchMaxResults,
+			neo4jEnabled: neo4jEnabled ?? false,
+			neo4jUrl: neo4jUri ?? "bolt://localhost:7687",
+			neo4jUsername: neo4jUsername ?? "neo4j",
+			neo4jPassword: neo4jPassword ?? "",
+			neo4jDatabase: "neo4j",
+			configSchemaVersion,
+			// We need to calculate isConfigured for the object to be complete according to interface
+			isConfigured: this._calculateIsConfigured(embedderProvider, {
+				openAiOptions,
+				ollamaOptions,
+				openAiCompatibleOptions,
+				geminiOptions,
+				mistralOptions,
+				vercelAiGatewayOptions,
+				openRouterOptions,
+				qdrantUrl: codebaseIndexQdrantUrl ?? "http://localhost:6333",
+				qdrantApiKey: qdrantApiKey ?? "",
+			}),
+		}
+	}
+
+	/**
+	 * Helper to calculate isConfigured state for the config object
+	 */
+	private _calculateIsConfigured(provider: EmbedderProvider, options: any): boolean {
+		const qdrantUrl = options.qdrantUrl
+		if (!qdrantUrl) return false
+
+		switch (provider) {
+			case "openai":
+				return !!options.openAiOptions?.openAiNativeApiKey
+			case "ollama":
+				return !!options.ollamaOptions?.ollamaBaseUrl
+			case "openai-compatible":
+				return !!(options.openAiCompatibleOptions?.baseUrl && options.openAiCompatibleOptions?.apiKey)
+			case "gemini":
+				return !!options.geminiOptions?.apiKey
+			case "mistral":
+				return !!options.mistralOptions?.apiKey
+			case "vercel-ai-gateway":
+				return !!options.vercelAiGatewayOptions?.apiKey
+			case "openrouter":
+				return !!options.openRouterOptions?.apiKey
+			default:
+				return false
+		}
+	}
+
+	/**
+	 * Applies a configuration object to the instance state.
+	 */
+	private _applyConfiguration(config: CodeIndexConfig): void {
+		// Read codebaseIndexEnabled from VSCode settings again to be sure (or trust the config object if we passed it)
+		const codebaseIndexConfig = this.contextProxy?.getGlobalState("codebaseIndexConfig") ?? {}
+		const vscodeSettingEnabled = vscode.workspace.getConfiguration("roo-cline").get<boolean>("codeIndex.enabled")
+		this.codebaseIndexEnabled = vscodeSettingEnabled ?? codebaseIndexConfig.codebaseIndexEnabled ?? true
+
+		this.embedderProvider = config.embedderProvider
+		this.modelId = config.modelId
+		this.modelDimension = config.modelDimension
+		this.openAiOptions = config.openAiOptions
+		this.ollamaOptions = config.ollamaOptions
+		this.openAiCompatibleOptions = config.openAiCompatibleOptions
+		this.geminiOptions = config.geminiOptions
+		this.mistralOptions = config.mistralOptions
+		this.vercelAiGatewayOptions = config.vercelAiGatewayOptions
+		this.openRouterOptions = config.openRouterOptions
+		this.qdrantUrl = config.qdrantUrl
+		this.qdrantApiKey = config.qdrantApiKey
+		this.searchMinScore = config.searchMinScore
+		this.searchMaxResults = config.searchMaxResults
+		this.neo4jEnabled = config.neo4jEnabled ?? false
+		this.neo4jUri = config.neo4jUrl
+		this.neo4jUsername = config.neo4jUsername
+		this.neo4jPassword = config.neo4jPassword
+		this.neo4jDatabase = config.neo4jDatabase
 	}
 
 	/**
@@ -180,6 +279,12 @@ export class CodeIndexConfigManager {
 			qdrantUrl?: string
 			qdrantApiKey?: string
 			searchMinScore?: number
+			searchMaxResults?: number
+			neo4jEnabled: boolean
+			neo4jUrl?: string
+			neo4jUsername?: string
+			neo4jPassword?: string
+			neo4jDatabase?: string
 		}
 		requiresRestart: boolean
 	}> {
@@ -211,8 +316,103 @@ export class CodeIndexConfigManager {
 		// Refresh secrets from VSCode storage to ensure we have the latest values
 		await this.contextProxy.refreshSecrets()
 
-		// Load new configuration from storage and update instance variables
-		this._loadAndSetConfiguration()
+		// Read new configuration candidate
+		let newConfig = this._readConfigurationFromStorage()
+
+		// Check for migration
+		const migrator = new ConfigMigrator(this.contextProxy)
+		if (migrator.needsMigration(newConfig)) {
+			try {
+				newConfig = await migrator.migrateConfig(newConfig)
+
+				// Update global state with the new version to prevent re-migration
+				// We only update the version and any fields that might have been added/changed in globalState structure
+				// For now, we just update the version to mark it as migrated.
+				const currentGlobalState = this.contextProxy?.getGlobalState("codebaseIndexConfig") ?? {}
+				await this.contextProxy.updateGlobalState("codebaseIndexConfig", {
+					...currentGlobalState,
+					configSchemaVersion: newConfig.configSchemaVersion,
+				} as any)
+			} catch (error) {
+				console.error("Configuration migration failed:", error)
+				vscode.window.showErrorMessage(`Configuration Migration Failed: ${error}`)
+				// Return without applying changes
+				return {
+					configSnapshot: previousConfigSnapshot,
+					currentConfig: {
+						isConfigured: this.isConfigured(),
+						embedderProvider: this.embedderProvider,
+						modelId: this.modelId,
+						modelDimension: this.modelDimension,
+						openAiOptions: this.openAiOptions,
+						ollamaOptions: this.ollamaOptions,
+						openAiCompatibleOptions: this.openAiCompatibleOptions,
+						geminiOptions: this.geminiOptions,
+						mistralOptions: this.mistralOptions,
+						vercelAiGatewayOptions: this.vercelAiGatewayOptions,
+						openRouterOptions: this.openRouterOptions,
+						qdrantUrl: this.qdrantUrl,
+						qdrantApiKey: this.qdrantApiKey,
+						searchMinScore: this.currentSearchMinScore,
+						searchMaxResults: this.searchMaxResults,
+						neo4jEnabled: this.neo4jEnabled,
+						neo4jUrl: this.neo4jUri,
+						neo4jUsername: this.neo4jUsername,
+						neo4jPassword: this.neo4jPassword,
+						neo4jDatabase: this.neo4jDatabase,
+					},
+					requiresRestart: false,
+				}
+			}
+		}
+
+		// Validate configuration
+		const validationResult = ConfigValidator.validateConfig(newConfig)
+
+		if (!validationResult.valid) {
+			// Log errors
+			console.error("Configuration validation failed:", validationResult.errors)
+
+			// Show notification to user
+			vscode.window.showErrorMessage(`Code Index Configuration Error: ${validationResult.errors[0].message}`)
+
+			// Do NOT apply configuration. Keep existing state.
+			// We return the existing state as if nothing changed, but with requiresRestart = false
+			return {
+				configSnapshot: previousConfigSnapshot,
+				currentConfig: {
+					isConfigured: this.isConfigured(),
+					embedderProvider: this.embedderProvider,
+					modelId: this.modelId,
+					modelDimension: this.modelDimension,
+					openAiOptions: this.openAiOptions,
+					ollamaOptions: this.ollamaOptions,
+					openAiCompatibleOptions: this.openAiCompatibleOptions,
+					geminiOptions: this.geminiOptions,
+					mistralOptions: this.mistralOptions,
+					vercelAiGatewayOptions: this.vercelAiGatewayOptions,
+					openRouterOptions: this.openRouterOptions,
+					qdrantUrl: this.qdrantUrl,
+					qdrantApiKey: this.qdrantApiKey,
+					searchMinScore: this.currentSearchMinScore,
+					searchMaxResults: this.searchMaxResults,
+					neo4jEnabled: this.neo4jEnabled,
+					neo4jUrl: this.neo4jUri,
+					neo4jUsername: this.neo4jUsername,
+					neo4jPassword: this.neo4jPassword,
+					neo4jDatabase: this.neo4jDatabase,
+				},
+				requiresRestart: false,
+			}
+		}
+
+		// Log warnings if any
+		if (validationResult.warnings.length > 0) {
+			console.warn("Configuration validation warnings:", validationResult.warnings)
+		}
+
+		// Apply valid configuration
+		this._applyConfiguration(newConfig)
 
 		const requiresRestart = this.doesConfigChangeRequireRestart(previousConfigSnapshot)
 
@@ -233,6 +433,12 @@ export class CodeIndexConfigManager {
 				qdrantUrl: this.qdrantUrl,
 				qdrantApiKey: this.qdrantApiKey,
 				searchMinScore: this.currentSearchMinScore,
+				searchMaxResults: this.searchMaxResults,
+				neo4jEnabled: this.neo4jEnabled,
+				neo4jUrl: this.neo4jUri,
+				neo4jUsername: this.neo4jUsername,
+				neo4jPassword: this.neo4jPassword,
+				neo4jDatabase: this.neo4jDatabase,
 			},
 			requiresRestart,
 		}

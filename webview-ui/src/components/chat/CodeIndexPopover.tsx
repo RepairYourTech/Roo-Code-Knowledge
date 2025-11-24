@@ -652,6 +652,35 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		return models ? Object.keys(models) : []
 	}
 
+	// Error display helper functions
+	const formatErrorTimestamp = (timestamp?: number): string => {
+		if (!timestamp) return ""
+		const now = Date.now()
+		const diffMs = now - timestamp
+		const diffMins = Math.floor(diffMs / 60000)
+		const diffHours = Math.floor(diffMs / 3600000)
+
+		if (diffMins < 1) return "just now"
+		if (diffMins < 60) return `${diffMins} minute${diffMins > 1 ? "s" : ""} ago`
+		if (diffHours < 24) return `${diffHours} hour${diffHours > 1 ? "s" : ""} ago`
+		return new Date(timestamp).toLocaleString()
+	}
+
+	const getErrorCategoryIcon = (category?: string): string => {
+		switch (category) {
+			case "connection":
+				return "🔌"
+			case "authentication":
+				return "🔑"
+			case "rate-limit":
+				return "⏱️"
+			case "configuration":
+				return "⚙️"
+			default:
+				return "⚠️"
+		}
+	}
+
 	const portalContainer = useRooPortal("roo-portal")
 
 	return (
@@ -722,6 +751,104 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 								{t(`settings:codeIndex.indexingStatuses.${indexingStatus.systemStatus.toLowerCase()}`)}
 								{indexingStatus.message ? ` - ${indexingStatus.message}` : ""}
 							</div>
+
+							{/* Comprehensive Error Display */}
+							{(indexingStatus.systemStatus === "Error" ||
+								indexingStatus.systemHealth === "degraded" ||
+								indexingStatus.systemHealth === "failed") && (
+								<div className="mt-3 space-y-3">
+									{/* System Health Indicator */}
+									{indexingStatus.systemHealth && indexingStatus.systemHealth !== "healthy" && (
+										<div
+											className={cn("text-xs font-medium px-2 py-1 rounded", {
+												"bg-yellow-500/20 text-yellow-500":
+													indexingStatus.systemHealth === "degraded",
+												"bg-red-500/20 text-red-500": indexingStatus.systemHealth === "failed",
+											})}>
+											{indexingStatus.systemHealth === "degraded"
+												? "⚠️ System Degraded"
+												: "❌ System Failed"}
+										</div>
+									)}
+
+									{/* Vector Error Display */}
+									{indexingStatus.vectorStatus === "error" && (
+										<div className="bg-vscode-inputValidation-errorBackground border border-vscode-inputValidation-errorBorder rounded p-3 space-y-2">
+											<div className="flex items-center gap-2">
+												<span className="text-base">
+													{getErrorCategoryIcon(indexingStatus.vectorErrorCategory)}
+												</span>
+												<span className="text-sm font-medium text-vscode-errorForeground">
+													{indexingStatus.vectorErrorCategory
+														? `${indexingStatus.vectorErrorCategory.charAt(0).toUpperCase()}${indexingStatus.vectorErrorCategory.slice(1)} Error`
+														: "Vector Indexing Error"}
+												</span>
+											</div>
+											<div className="text-xs text-vscode-foreground">
+												{indexingStatus.vectorMessage || "Vector indexing failed"}
+											</div>
+											{indexingStatus.vectorErrorTimestamp && (
+												<div className="text-xs text-vscode-descriptionForeground">
+													{formatErrorTimestamp(indexingStatus.vectorErrorTimestamp)}
+												</div>
+											)}
+											{indexingStatus.vectorRetrySuggestion && (
+												<div className="text-xs bg-vscode-editor-background border border-vscode-panel-border rounded px-2 py-1 mt-2">
+													💡 {indexingStatus.vectorRetrySuggestion}
+												</div>
+											)}
+											<button
+												onClick={() => vscode.postMessage({ type: "showOutput" })}
+												className="text-xs text-vscode-textLink-foreground hover:underline mt-2">
+												Show Output
+											</button>
+										</div>
+									)}
+
+									{/* Neo4j Error Display */}
+									{(indexingStatus.neo4jStatus === "error" ||
+										indexingStatus.neo4jStatus === "connection-failed") && (
+										<div className="bg-vscode-inputValidation-errorBackground border border-vscode-inputValidation-errorBorder rounded p-3 space-y-2">
+											<div className="flex items-center gap-2">
+												<span className="text-base">
+													{getErrorCategoryIcon(indexingStatus.neo4jErrorCategory)}
+												</span>
+												<span className="text-sm font-medium text-vscode-errorForeground">
+													{indexingStatus.neo4jErrorCategory
+														? `${indexingStatus.neo4jErrorCategory.charAt(0).toUpperCase()}${indexingStatus.neo4jErrorCategory.slice(1)} Error`
+														: "Neo4j Error"}
+												</span>
+											</div>
+											<div className="text-xs text-vscode-foreground">
+												{indexingStatus.neo4jMessage ||
+													indexingStatus.neo4jLastError ||
+													"Neo4j indexing failed"}
+											</div>
+											{indexingStatus.neo4jErrorTimestamp && (
+												<div className="text-xs text-vscode-descriptionForeground">
+													{formatErrorTimestamp(indexingStatus.neo4jErrorTimestamp)}
+												</div>
+											)}
+											{indexingStatus.neo4jConsecutiveFailures &&
+												indexingStatus.neo4jConsecutiveFailures > 0 && (
+													<div className="text-xs text-vscode-descriptionForeground">
+														Failed {indexingStatus.neo4jConsecutiveFailures} times in a row
+													</div>
+												)}
+											{indexingStatus.neo4jRetrySuggestion && (
+												<div className="text-xs bg-vscode-editor-background border border-vscode-panel-border rounded px-2 py-1 mt-2">
+													💡 {indexingStatus.neo4jRetrySuggestion}
+												</div>
+											)}
+											<button
+												onClick={() => vscode.postMessage({ type: "showOutput" })}
+												className="text-xs text-vscode-textLink-foreground hover:underline mt-2">
+												Show Output
+											</button>
+										</div>
+									)}
+								</div>
+							)}
 
 							{/* Vector Index Progress (Qdrant) */}
 							{indexingStatus.systemStatus === "Indexing" && (

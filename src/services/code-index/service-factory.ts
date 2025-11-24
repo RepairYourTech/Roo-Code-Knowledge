@@ -34,6 +34,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { Package } from "../../shared/package"
 import { BATCH_SEGMENT_THRESHOLD } from "./constants"
+import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -43,7 +44,16 @@ export class CodeIndexServiceFactory {
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
-	) {}
+		private readonly outputChannel: vscode.OutputChannel,
+	) {
+		this.log = createOutputChannelLogger(outputChannel)
+	}
+
+	private readonly log: LogFunction
+
+	public get config(): CodeIndexConfigManager {
+		return this.configManager
+	}
 
 	/**
 	 * Creates an embedder instance based on the current configuration.
@@ -79,12 +89,15 @@ export class CodeIndexServiceFactory {
 				config.openAiCompatibleOptions.baseUrl,
 				config.openAiCompatibleOptions.apiKey,
 				config.modelId,
+				undefined, // maxItemTokens
+				undefined, // maxBatchItems
+				this.outputChannel,
 			)
 		} else if (provider === "gemini") {
 			if (!config.geminiOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.geminiConfigMissing"))
 			}
-			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId)
+			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId, this.outputChannel)
 		} else if (provider === "mistral") {
 			if (!config.mistralOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.mistralConfigMissing"))
@@ -166,8 +179,14 @@ export class CodeIndexServiceFactory {
 			throw new Error(t("embeddings:serviceFactory.qdrantUrlMissing"))
 		}
 
-		// Assuming constructor is updated: new QdrantVectorStore(workspacePath, url, vectorSize, apiKey?)
-		return new QdrantVectorStore(this.workspacePath, config.qdrantUrl, vectorSize, config.qdrantApiKey)
+		// Assuming constructor is updated: new QdrantVectorStore(workspacePath, url, vectorSize, apiKey?, outputChannel?)
+		return new QdrantVectorStore(
+			this.workspacePath,
+			config.qdrantUrl,
+			vectorSize,
+			config.qdrantApiKey,
+			this.outputChannel,
+		)
 	}
 
 	/**
@@ -210,7 +229,7 @@ export class CodeIndexServiceFactory {
 			database: config.database || "neo4j",
 		}
 
-		return new Neo4jService(neo4jConfig)
+		return new Neo4jService(neo4jConfig, undefined, this.outputChannel)
 	}
 
 	/**
@@ -224,7 +243,7 @@ export class CodeIndexServiceFactory {
 		context?: vscode.ExtensionContext,
 	): IGraphIndexer | undefined {
 		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
-			console.log("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
+			this.log("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
 			return undefined
 		}
 
@@ -232,12 +251,12 @@ export class CodeIndexServiceFactory {
 		const errorLogger = context ? new CodebaseIndexErrorLogger(context) : undefined
 
 		if (!errorLogger) {
-			console.warn("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")
+			this.log("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")
 		} else {
-			console.log("[ServiceFactory] GraphIndexer created WITH error logger")
+			this.log("[ServiceFactory] GraphIndexer created WITH error logger")
 		}
 
-		return new GraphIndexer(neo4jService, errorLogger)
+		return new GraphIndexer(neo4jService, errorLogger, this.outputChannel)
 	}
 
 	/**
@@ -272,6 +291,7 @@ export class CodeIndexServiceFactory {
 			batchSize,
 			graphIndexer,
 			stateManager,
+			this.outputChannel,
 		)
 	}
 
@@ -311,6 +331,7 @@ export class CodeIndexServiceFactory {
 			batchSize,
 			graphIndexer,
 			stateManager,
+			this.outputChannel,
 		)
 	}
 

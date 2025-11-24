@@ -3,6 +3,7 @@
  * Routes queries to appropriate search backends based on query analysis
  */
 
+import * as vscode from "vscode"
 import { QueryAnalyzer, QueryAnalysis, SearchBackend } from "./query-analyzer"
 import { HybridSearchService, HybridSearchResult, HybridSearchConfig } from "../hybrid-search-service"
 import {
@@ -19,6 +20,16 @@ import { ContextEnrichmentService } from "../context/context-enrichment-service"
 import { EnrichedSearchResult, ContextEnrichmentOptions } from "../interfaces/context-enrichment"
 import { QualityMetricsService } from "../quality/quality-metrics-service"
 import { QualityMetricsOptions, QualityEnrichedResult } from "../interfaces/quality-metrics"
+import {
+	convertWorkspaceSymbolsToHybridResults,
+	convertLocationsToHybridResults,
+	filterLSPResultsByPattern,
+	rankLSPResults,
+	mergeLSPResults,
+	extractTypeFromQuery,
+	isTypeBasedQuery,
+	lspCache,
+} from "../lsp/lsp-search-utils"
 
 /**
  * Options for search orchestration
@@ -298,11 +309,222 @@ export class SearchOrchestrator {
 			return []
 		}
 
-		// LSP search is primarily for type-based queries
-		// This is a placeholder - actual implementation would require
-		// workspace-wide LSP queries which are not directly supported
-		// Instead, we rely on LSP type info already embedded in vector store payloads
-		return []
+		try {
+			let results: HybridSearchResult[] = []
+
+			// Create cache key for the query
+			const cacheKey = `lsp-search-${JSON.stringify({ query, intent: analysis.intent, symbolName: analysis.symbolName })}`
+
+			// Check cache first
+			const cachedResults = lspCache.get<HybridSearchResult[]>(cacheKey)
+			if (cachedResults) {
+				return filterLSPResultsByPattern(cachedResults, options?.directoryPrefix)
+			}
+
+			// Route to appropriate LSP search based on query intent
+			switch (analysis.intent) {
+				case "find_by_type":
+					results = await this.performTypeBasedSearch(query, analysis, options)
+					break
+
+				case "find_usages":
+					results = await this.performReferenceSearch(query, analysis, options)
+					break
+
+				case "find_implementation":
+					results = await this.performDefinitionSearch(query, analysis, options)
+					break
+
+				case "find_callers":
+					results = await this.performCallerSearch(query, analysis, options)
+					break
+
+				case "find_callees":
+					results = await this.performCalleeSearch(query, analysis, options)
+					break
+
+				default:
+					// For general queries, perform workspace symbol search
+					results = await this.performWorkspaceSymbolSearch(query, analysis, options)
+					break
+			}
+
+			// Cache the results
+			lspCache.set(cacheKey, results)
+
+			// Apply filtering and ranking
+			results = filterLSPResultsByPattern(results, options?.directoryPrefix)
+			results = rankLSPResults(results, options?.maxResults)
+
+			return results
+		} catch (error) {
+			console.error("[SearchOrchestrator] Error in LSP search:", error)
+			return []
+		}
+	}
+
+	/**
+	 * Performs type-based search using LSP
+	 */
+	private async performTypeBasedSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		const typeQuery = extractTypeFromQuery(query)
+		if (!typeQuery) {
+			return []
+		}
+
+		// Search for symbols by type
+		const symbols = await this.lspService!.searchByType(typeQuery)
+		return convertWorkspaceSymbolsToHybridResults(symbols, 0.9)
+	}
+
+	/**
+	 * Performs reference search using LSP
+	 */
+	private async performReferenceSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		if (!analysis.symbolName) {
+			return []
+		}
+
+		// First, find the symbol definition
+		const symbols = await this.lspService!.searchWorkspaceSymbols(analysis.symbolName)
+		if (symbols.length === 0) {
+			return []
+		}
+
+		const results: HybridSearchResult[] = []
+
+		// For each symbol found, get its references
+		for (const symbol of symbols.slice(0, 5)) {
+			// Limit to avoid too many requests
+			try {
+				const document = await vscode.workspace.openTextDocument(symbol.location.uri)
+				const references = await this.lspService!.findReferences(document, symbol.location.range.start, true)
+
+				const referenceResults = convertLocationsToHybridResults(
+					references,
+					analysis.symbolName,
+					"Reference",
+					0.8,
+				)
+
+				results.push(...referenceResults)
+			} catch (error) {
+				// Continue with other symbols if one fails
+				console.warn(`[SearchOrchestrator] Failed to get references for ${symbol.name}:`, error)
+			}
+		}
+
+		return results
+	}
+
+	/**
+	 * Performs definition search using LSP
+	 */
+	private async performDefinitionSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		if (!analysis.symbolName) {
+			return []
+		}
+
+		// Search for the symbol
+		const symbols = await this.lspService!.searchWorkspaceSymbols(analysis.symbolName)
+		return convertWorkspaceSymbolsToHybridResults(symbols, 0.85)
+	}
+
+	/**
+	 * Performs caller search using LSP
+	 */
+	private async performCallerSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		if (!analysis.symbolName) {
+			return []
+		}
+
+		// Find the symbol first
+		const symbols = await this.lspService!.searchWorkspaceSymbols(analysis.symbolName)
+		if (symbols.length === 0) {
+			return []
+		}
+
+		const results: HybridSearchResult[] = []
+
+		// For each symbol, find references that call it
+		for (const symbol of symbols.slice(0, 3)) {
+			// Limit to avoid too many requests
+			try {
+				const document = await vscode.workspace.openTextDocument(symbol.location.uri)
+				const references = await this.lspService!.findReferences(
+					document,
+					symbol.location.range.start,
+					false, // Exclude declaration
+				)
+
+				// Filter to likely function calls (heuristic)
+				const callerResults = references.filter((ref) => {
+					// This is a simple heuristic - in practice, you'd want more sophisticated filtering
+					return (
+						ref.uri.fsPath !== symbol.location.uri.fsPath ||
+						ref.range.start.line !== symbol.location.range.start.line
+					)
+				})
+
+				results.push(...convertLocationsToHybridResults(callerResults, analysis.symbolName, "Caller", 0.8))
+			} catch (error) {
+				console.warn(`[SearchOrchestrator] Failed to get callers for ${symbol.name}:`, error)
+			}
+		}
+
+		return results
+	}
+
+	/**
+	 * Performs callee search using LSP
+	 */
+	private async performCalleeSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		if (!analysis.symbolName) {
+			return []
+		}
+
+		// Find the symbol first
+		const symbols = await this.lspService!.searchWorkspaceSymbols(analysis.symbolName)
+		if (symbols.length === 0) {
+			return []
+		}
+
+		// For functions/methods, we could try to analyze the function body
+		// This is complex and would require additional parsing capabilities
+		// For now, return the function definition as a starting point
+		return convertWorkspaceSymbolsToHybridResults(symbols, 0.7)
+	}
+
+	/**
+	 * Performs workspace symbol search using LSP
+	 */
+	private async performWorkspaceSymbolSearch(
+		query: string,
+		analysis: QueryAnalysis,
+		options?: SearchOrchestrationOptions,
+	): Promise<HybridSearchResult[]> {
+		const symbols = await this.lspService!.searchWorkspaceSymbols(query)
+		return convertWorkspaceSymbolsToHybridResults(symbols, 0.7)
 	}
 
 	/**

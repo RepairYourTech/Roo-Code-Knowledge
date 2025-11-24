@@ -18,7 +18,7 @@ import {
 	isValidCodeNode,
 	ImportMetadata,
 	CallMetadata,
-	TestMetadata,
+	TestRelationshipMetadata,
 	TypeMetadata,
 	ExtendsMetadata,
 	ImplementsMetadata,
@@ -40,6 +40,8 @@ import {
 } from "../constants"
 import { Mutex } from "async-mutex"
 import * as path from "path"
+import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
+import * as vscode from "vscode"
 
 /**
  * Valid relationship types for validation (prevents Cypher injection)
@@ -437,7 +439,9 @@ export class Neo4jService implements INeo4jService {
 	private metadataValidator?: MetadataValidator
 	private skipValidation: boolean = false
 
-	constructor(config: Neo4jConfig, errorLogger?: CodebaseIndexErrorLogger) {
+	constructor(config: Neo4jConfig, errorLogger?: CodebaseIndexErrorLogger, outputChannel?: vscode.OutputChannel) {
+		this.outputChannel = outputChannel
+		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
 		this.config = this.validateAndEnhanceConfig(config)
 		this.errorLogger = errorLogger
 		this.metrics.uptime = Date.now()
@@ -457,8 +461,11 @@ export class Neo4jService implements INeo4jService {
 			this.errorLogger,
 		)
 
-		console.log(`[Neo4jService] Configured to use database: ${this.config.database}`)
+		this.log(`[Neo4jService] Configured to use database: ${this.config.database}`)
 	}
+
+	private readonly outputChannel?: vscode.OutputChannel
+	private readonly log: LogFunction
 
 	/**
 	 * Validate and enhance configuration with defaults
@@ -533,7 +540,7 @@ export class Neo4jService implements INeo4jService {
 			!config.url.startsWith("bolt+s://") &&
 			!config.url.startsWith("neo4j+s://")
 		) {
-			console.warn(
+			this.log(
 				`[Neo4jService] Warning: Encryption is enabled but URL scheme is non-secure (${config.url}). This may cause connection issues.`,
 			)
 		}
@@ -546,15 +553,15 @@ export class Neo4jService implements INeo4jService {
 	 */
 	public async initialize(): Promise<void> {
 		if (!this.config.enabled) {
-			console.log("[Neo4jService] Neo4j is disabled, skipping initialization")
+			this.log("[Neo4jService] Neo4j is disabled, skipping initialization")
 			return
 		}
 
 		try {
-			console.log(
+			this.log(
 				`[Neo4jService] Initializing Neo4j connection to: ${this.config.url.replace(/\/\/.*@/, "//***:***")}`,
 			)
-			console.log(`[Neo4jService] Target database: ${this.config.database}`)
+			this.log(`[Neo4jService] Target database: ${this.config.database}`)
 
 			// Create driver with enhanced connection settings
 			this.driver = neo4j.driver(this.config.url, neo4j.auth.basic(this.config.username, this.config.password), {
@@ -569,11 +576,11 @@ export class Neo4jService implements INeo4jService {
 			})
 
 			// Verify connectivity with detailed logging
-			console.log("[Neo4jService] Verifying Neo4j connectivity...")
+			this.log("[Neo4jService] Verifying Neo4j connectivity...")
 			await this.executeWithRetry("verifyConnectivity", async () => await this.driver!.verifyConnectivity(), {
 				isConnectionTest: true,
 			})
-			console.log("[Neo4jService] Neo4j connectivity verified successfully")
+			this.log("[Neo4jService] Neo4j connectivity verified successfully")
 
 			// Test database access
 			await this.executeWithRetry(
@@ -588,19 +595,19 @@ export class Neo4jService implements INeo4jService {
 				},
 				{ isConnectionTest: true },
 			)
-			console.log(`[Neo4jService] Database access verified for: ${this.config.database}`)
+			this.log(`[Neo4jService] Database access verified for: ${this.config.database}`)
 
 			// Create indexes for better performance
-			console.log("[Neo4jService] Creating database indexes...")
+			this.log("[Neo4jService] Creating database indexes...")
 			await this.createIndexes()
-			console.log("[Neo4jService] Database indexes created successfully")
+			this.log("[Neo4jService] Database indexes created successfully")
 
 			// Start health monitoring
 			this.startHealthMonitoring()
 
 			this.connected = true
 			this.isHealthy = true
-			console.log(`[Neo4jService] Successfully connected to Neo4j database: ${this.config.database}`)
+			this.log(`[Neo4jService] Successfully connected to Neo4j database: ${this.config.database}`)
 
 			// Log successful initialization
 			if (this.errorLogger) {
@@ -620,7 +627,7 @@ export class Neo4jService implements INeo4jService {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const errorStack = error instanceof Error ? error.stack : undefined
 
-			console.error("[Neo4jService] Failed to initialize Neo4j:", {
+			this.log("[Neo4jService] Failed to initialize Neo4j:", {
 				error: errorMessage,
 				stack: errorStack,
 				config: {
@@ -647,8 +654,15 @@ export class Neo4jService implements INeo4jService {
 			// Trip circuit breaker on initialization failure
 			await this.tripCircuitBreaker("initialization_failure")
 
-			// Provide more specific error messages for common issues
+			// Provide more specific error messages for common issues with user notifications
 			if (errorMessage.includes("authentication") || errorMessage.includes("auth")) {
+				const action = await vscode.window.showErrorMessage(
+					"Neo4j authentication failed. Please verify your username and password in settings.",
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					this.outputChannel?.show()
+				}
 				throw new Error(
 					`Neo4j authentication failed. Please check your username and password. Original error: ${errorMessage}`,
 				)
@@ -657,14 +671,35 @@ export class Neo4jService implements INeo4jService {
 				errorMessage.includes("network") ||
 				errorMessage.includes("ECONNREFUSED")
 			) {
+				const action = await vscode.window.showErrorMessage(
+					`Failed to connect to Neo4j at ${this.config.url}. Please verify Neo4j is running and accessible. Check if the URL uses the correct protocol (bolt:// or neo4j://).`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					this.outputChannel?.show()
+				}
 				throw new Error(
 					`Neo4j connection failed. Please check if Neo4j is running and accessible at ${this.config.url}. Original error: ${errorMessage}`,
 				)
 			} else if (errorMessage.includes("database") && errorMessage.includes("does not exist")) {
+				const action = await vscode.window.showErrorMessage(
+					`Neo4j database '${this.config.database}' does not exist. Please create the database or verify the database name in settings.`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					this.outputChannel?.show()
+				}
 				throw new Error(
 					`Neo4j database '${this.config.database}' does not exist. Please create database or check database name. Original error: ${errorMessage}`,
 				)
 			} else {
+				const action = await vscode.window.showErrorMessage(
+					`Neo4j initialization failed: ${errorMessage}. Check the Output panel for details.`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					this.outputChannel?.show()
+				}
 				throw new Error(`Failed to initialize Neo4j: ${errorMessage}`)
 			}
 		}
@@ -758,7 +793,7 @@ export class Neo4jService implements INeo4jService {
 		} catch (error) {
 			// Increment failures if session creation fails
 			this.poolAcquisitionFailures++
-			console.log("[Neo4jService] Session creation failed, incrementing poolAcquisitionFailures:", error)
+			this.log("[Neo4jService] Session creation failed, incrementing poolAcquisitionFailures:", error)
 			throw error
 		}
 	}
@@ -813,7 +848,7 @@ export class Neo4jService implements INeo4jService {
 				const threshold = this.config.slowQueryThreshold ?? 1000
 				if (duration > threshold) {
 					this.metrics.slowQueryCount++
-					console.warn(`[Neo4jService] Slow query detected: ${operation} took ${duration}ms`)
+					this.log(`[Neo4jService] Slow query detected: ${operation} took ${duration}ms`)
 
 					if (this.errorLogger) {
 						await this.errorLogger.logError({
@@ -844,13 +879,13 @@ export class Neo4jService implements INeo4jService {
 					this.metrics.connectionErrors++
 					// Track connection errors as acquisition failures
 					this.poolAcquisitionFailures++
-					console.log(
+					this.log(
 						"[Neo4jService] Connection error detected, incrementing poolAcquisitionFailures:",
 						errorMessage,
 					)
 				} else if (isDeadlock) {
 					this.metrics.deadlockCount++
-					console.warn(`[Neo4jService] Deadlock detected: ${errorMessage}`)
+					this.log(`[Neo4jService] Deadlock detected: ${errorMessage}`)
 
 					// Log deadlock
 					if (this.errorLogger) {
@@ -915,7 +950,7 @@ export class Neo4jService implements INeo4jService {
 
 				this.metrics.retryAttempts++
 
-				console.warn(
+				this.log(
 					`[Neo4jService] ${operation} failed (attempt ${attempt + 1}/${maxRetries}), retrying in ${Math.round(delayMs)}ms:`,
 					errorMessage,
 				)
@@ -1019,7 +1054,7 @@ export class Neo4jService implements INeo4jService {
 				this.circuitBreakerLastFailureTime = Date.now()
 				this.metrics.circuitBreakerTrips++
 
-				console.error(`[Neo4jService] Circuit breaker tripped: ${reason}`)
+				this.log(`[Neo4jService] Circuit breaker tripped: ${reason}`)
 
 				if (this.errorLogger) {
 					await this.errorLogger.logError({
@@ -1032,6 +1067,15 @@ export class Neo4jService implements INeo4jService {
 							tripCount: this.metrics.circuitBreakerTrips,
 						},
 					})
+				}
+
+				// Show user notification about circuit breaker trip
+				const action = await vscode.window.showErrorMessage(
+					"Neo4j graph indexing temporarily disabled due to repeated connection failures. It will retry automatically.",
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					this.outputChannel?.show()
 				}
 
 				// Schedule circuit breaker to half-open after timeout
@@ -1053,7 +1097,7 @@ export class Neo4jService implements INeo4jService {
 
 			this.circuitBreakerState = CircuitBreakerState.CLOSED
 			this.circuitBreakerFailures = 0
-			console.log("[Neo4jService] Circuit breaker reset to closed")
+			this.log("[Neo4jService] Circuit breaker reset to closed")
 		} finally {
 			release()
 		}
@@ -1067,7 +1111,7 @@ export class Neo4jService implements INeo4jService {
 			}
 
 			this.circuitBreakerState = CircuitBreakerState.HALF_OPEN
-			console.log("[Neo4jService] Circuit breaker half-open - testing with single request")
+			this.log("[Neo4jService] Circuit breaker half-open - testing with single request")
 
 			// Test with a single request
 			try {
@@ -1135,7 +1179,7 @@ export class Neo4jService implements INeo4jService {
 			this.isHealthy = false
 			const errorMessage = error instanceof Error ? error.message : String(error)
 
-			console.warn(`[Neo4jService] Health check failed:`, errorMessage)
+			this.log(`[Neo4jService] Health check failed:`, errorMessage)
 
 			if (this.errorLogger) {
 				await this.errorLogger.logError({
@@ -1447,7 +1491,7 @@ export class Neo4jService implements INeo4jService {
 			// Begin write transaction
 			const transaction = session.beginTransaction()
 
-			console.log(`[Neo4jService] Transaction ${transactionId} started`)
+			this.log(`[Neo4jService] Transaction ${transactionId} started`)
 
 			// Update metrics
 			this.metrics.totalTransactions++
@@ -1471,7 +1515,7 @@ export class Neo4jService implements INeo4jService {
 				this.activeTransactions = Math.max(0, this.activeTransactions - 1)
 
 				if (this.activeTransactions < 0) {
-					console.warn(
+					this.log(
 						`[Neo4jService] activeTransactions went negative: ${this.activeTransactions}. Resetting to 0.`,
 					)
 					this.activeTransactions = 0
@@ -1701,7 +1745,7 @@ export class Neo4jService implements INeo4jService {
 				const nodeCount = result.records[0]?.get("nodeCount")?.toNumber() || 0
 
 				if (nodeCount < 2) {
-					console.warn(
+					this.log(
 						`[Neo4jService] Skipping relationship creation: nodes not found (from: ${fromId}, to: ${toId})`,
 					)
 
@@ -1730,7 +1774,7 @@ export class Neo4jService implements INeo4jService {
 				await this.releaseSession(session)
 			}
 		} catch (error) {
-			console.error(
+			this.log(
 				`[Neo4jService] Error validating relationship: ${error instanceof Error ? error.message : String(error)}`,
 			)
 
@@ -1772,9 +1816,7 @@ export class Neo4jService implements INeo4jService {
 		if (this.shouldValidateRelationships()) {
 			const isValid = await this.validateRelationshipExists(relationship.fromId, relationship.toId)
 			if (!isValid) {
-				console.warn(
-					`[Neo4jService] Skipping invalid relationship: ${relationship.fromId} -> ${relationship.toId}`,
-				)
+				this.log(`[Neo4jService] Skipping invalid relationship: ${relationship.fromId} -> ${relationship.toId}`)
 				return
 			}
 		}
@@ -1841,7 +1883,7 @@ export class Neo4jService implements INeo4jService {
 
 					// Only proceed if we have valid relationships
 					if (validRels.length === 0) {
-						console.log(`[Neo4jService] No valid relationships to create for type ${type}`)
+						this.log(`[Neo4jService] No valid relationships to create for type ${type}`)
 						return
 					}
 
@@ -1869,7 +1911,7 @@ export class Neo4jService implements INeo4jService {
 						},
 					)
 
-					console.log(`[Neo4jService] Created ${rels.length} relationships of type ${type}`)
+					this.log(`[Neo4jService] Created ${rels.length} relationships of type ${type}`)
 				} finally {
 					await this.releaseSession(session)
 				}
@@ -1952,7 +1994,7 @@ export class Neo4jService implements INeo4jService {
 
 				// Only proceed if we have valid relationships
 				if (validRels.length === 0) {
-					console.log(`[Neo4jService] No valid relationships to create for type ${type} in transaction`)
+					this.log(`[Neo4jService] No valid relationships to create for type ${type} in transaction`)
 					continue
 				}
 
@@ -2314,7 +2356,7 @@ export class Neo4jService implements INeo4jService {
 			return
 		}
 
-		console.log(`[Neo4jService] Clearing all data from database ${this.config.database}...`)
+		this.log(`[Neo4jService] Clearing all data from database ${this.config.database}...`)
 
 		await this.executeWithRetry("clearAll", async () => {
 			const session = await this.getSession()
@@ -2338,7 +2380,7 @@ export class Neo4jService implements INeo4jService {
 					totalDeleted += deleted
 
 					if (deleted > 0) {
-						console.log(`[Neo4jService] Deleted ${deleted} nodes (${totalDeleted} total)`)
+						this.log(`[Neo4jService] Deleted ${deleted} nodes (${totalDeleted} total)`)
 					}
 
 					// If we deleted fewer than batch size, we're done
@@ -2347,7 +2389,7 @@ export class Neo4jService implements INeo4jService {
 					}
 				}
 
-				console.log(`[Neo4jService] Database cleared successfully - deleted ${totalDeleted} total nodes`)
+				this.log(`[Neo4jService] Database cleared successfully - deleted ${totalDeleted} total nodes`)
 			} finally {
 				await this.releaseSession(session)
 			}
@@ -2388,6 +2430,23 @@ export class Neo4jService implements INeo4jService {
 				await this.releaseSession(session)
 			}
 		})
+	}
+
+	public getConnectionInfo(): {
+		url: string
+		database: string
+		username: string
+		isConnected: boolean
+	} {
+		// Sanitize URL to hide password if present in connection string
+		const sanitizedUrl = this.config.url.replace(/\/\/.*:.*@/, "//***:***@")
+
+		return {
+			url: sanitizedUrl,
+			database: this.config.database,
+			username: this.config.username,
+			isConnected: this.isConnected(),
+		}
 	}
 
 	/**
@@ -2881,7 +2940,7 @@ export class Neo4jService implements INeo4jService {
 			})
 		}
 
-		console.warn(`[Neo4jService] ${operation} skipped - service not connected:`, context)
+		this.log(`[Neo4jService] ${operation} skipped - service not connected:`, context)
 	}
 
 	/**
@@ -2895,11 +2954,11 @@ export class Neo4jService implements INeo4jService {
 			}
 
 			this.isShuttingDown = true
-			console.log("[Neo4jService] Starting graceful shutdown...")
+			this.log("[Neo4jService] Starting graceful shutdown...")
 
 			// Wait for active transactions to complete (with timeout)
 			if (this.activeTransactions > 0) {
-				console.warn(`[Neo4jService] Waiting for ${this.activeTransactions} active transactions to complete...`)
+				this.log(`[Neo4jService] Waiting for ${this.activeTransactions} active transactions to complete...`)
 
 				const transactionTimeout = 30000 // 30 seconds
 				const startTime = Date.now()
@@ -2911,7 +2970,7 @@ export class Neo4jService implements INeo4jService {
 
 				// Check if transactions are still active after timeout
 				if (this.activeTransactions > 0) {
-					console.warn(
+					this.log(
 						`[Neo4jService] Timeout waiting for ${this.activeTransactions} transactions to complete - proceeding with shutdown`,
 					)
 
@@ -2929,7 +2988,7 @@ export class Neo4jService implements INeo4jService {
 						})
 					}
 				} else {
-					console.log("[Neo4jService] All active transactions completed")
+					this.log("[Neo4jService] All active transactions completed")
 				}
 			}
 
@@ -2954,7 +3013,7 @@ export class Neo4jService implements INeo4jService {
 				try {
 					await this.driver.close()
 				} catch (error) {
-					console.error("[Neo4jService] Error closing driver:", error)
+					this.log("[Neo4jService] Error closing driver:", error)
 				}
 				this.driver = null
 			}
@@ -2962,11 +3021,11 @@ export class Neo4jService implements INeo4jService {
 			this.connected = false
 			this.isHealthy = false
 
-			console.log("[Neo4jService] Graceful shutdown completed")
-			console.log(
+			this.log("[Neo4jService] Graceful shutdown completed")
+			this.log(
 				`[Neo4jService] Final session metrics - Total created: ${this.totalSessionsCreated}, Closed: ${this.closedSessions}, Remaining in pool: ${this.sessionPool.length}`,
 			)
-			console.log(
+			this.log(
 				`[Neo4jService] Final transaction metrics - Total: ${this.metrics.totalTransactions}, Successful: ${this.metrics.successfulTransactions}, Failed: ${this.metrics.failedTransactions}, Deadlocks: ${this.metrics.deadlockCount}`,
 			)
 
@@ -3110,7 +3169,7 @@ export class Neo4jService implements INeo4jService {
 
 		// Validate metadata structure if present
 		if (relationship.metadata) {
-			this.validateRelationshipMetadata(relationship.type, relationship.metadata as Record<string, unknown>)
+			this.validateRelationshipMetadata(relationship.type, relationship.metadata as RelationshipMetadata)
 		}
 	}
 
@@ -3119,13 +3178,13 @@ export class Neo4jService implements INeo4jService {
 	 */
 	private validateImportsMetadata(metadata: Record<string, unknown>): void {
 		if (typeof metadata.source !== "string") {
-			console.warn("[Neo4jService] IMPORTS relationship missing or invalid source property")
+			this.log("[Neo4jService] IMPORTS relationship missing or invalid source property")
 		}
 		if (!Array.isArray(metadata.symbols)) {
-			console.warn("[Neo4jService] IMPORTS relationship missing or invalid symbols array")
+			this.log("[Neo4jService] IMPORTS relationship missing or invalid symbols array")
 		}
 		if (typeof metadata.isDefault !== "boolean") {
-			console.warn("[Neo4jService] IMPORTS relationship missing or invalid isDefault property")
+			this.log("[Neo4jService] IMPORTS relationship missing or invalid isDefault property")
 		}
 	}
 
@@ -3134,13 +3193,13 @@ export class Neo4jService implements INeo4jService {
 	 */
 	private validateCallsMetadata(metadata: Record<string, unknown>): void {
 		if (typeof metadata.callType !== "string") {
-			console.warn("[Neo4jService] CALLS relationship missing or invalid callType property")
+			this.log("[Neo4jService] CALLS relationship missing or invalid callType property")
 		}
 		if (typeof metadata.line !== "number" || metadata.line < 0) {
-			console.warn("[Neo4jService] CALLS relationship missing or invalid line property")
+			this.log("[Neo4jService] CALLS relationship missing or invalid line property")
 		}
 		if (typeof metadata.column !== "number" || metadata.column < 0) {
-			console.warn("[Neo4jService] CALLS relationship missing or invalid column property")
+			this.log("[Neo4jService] CALLS relationship missing or invalid column property")
 		}
 	}
 
@@ -3149,10 +3208,10 @@ export class Neo4jService implements INeo4jService {
 	 */
 	private validateTestsMetadata(metadata: Record<string, unknown>): void {
 		if (typeof metadata.confidence !== "number" || metadata.confidence < 0 || metadata.confidence > 1) {
-			console.warn("[Neo4jService] TESTS relationship missing or invalid confidence property")
+			this.log("[Neo4jService] TESTS relationship missing or invalid confidence property")
 		}
 		if (typeof metadata.detectionMethod !== "string") {
-			console.warn("[Neo4jService] TESTS relationship missing or invalid detectionMethod property")
+			this.log("[Neo4jService] TESTS relationship missing or invalid detectionMethod property")
 		}
 	}
 
@@ -3161,7 +3220,7 @@ export class Neo4jService implements INeo4jService {
 	 */
 	private validateTypeMetadata(metadata: Record<string, unknown>): void {
 		if (typeof metadata.typeString !== "string") {
-			console.warn("[Neo4jService] Type relationship missing or invalid typeString property")
+			this.log("[Neo4jService] Type relationship missing or invalid typeString property")
 		}
 	}
 
@@ -3190,7 +3249,7 @@ export class Neo4jService implements INeo4jService {
 
 				// Log warnings from validation result using existing error logger
 				for (const warning of result.warnings) {
-					console.warn(`[Neo4jService] Metadata validation warning: ${warning}`)
+					this.log(`[Neo4jService] Metadata validation warning: ${warning}`)
 				}
 
 				return result.sanitized
@@ -3198,11 +3257,11 @@ export class Neo4jService implements INeo4jService {
 				if (error && typeof error === "object" && "field" in error && "expectedType" in error) {
 					// Handle specific validation errors
 					if (error.operation === "circular_reference_detection") {
-						console.error("[Neo4jService] Circular reference detected in metadata, returning empty object")
+						this.log("[Neo4jService] Circular reference detected in metadata, returning empty object")
 						return {}
 					} else if (error.operation === "size_validation") {
 						if (this.config.allowMetadataTruncation) {
-							console.warn(
+							this.log(
 								"[Neo4jService] Metadata size limit exceeded, truncation would be applied by validator",
 							)
 							// Let validator handle truncation
@@ -3215,17 +3274,17 @@ export class Neo4jService implements INeo4jService {
 								return {}
 							}
 						} else {
-							console.error(
+							this.log(
 								"[Neo4jService] Metadata size limit exceeded and truncation disabled, returning empty object",
 							)
 							return {}
 						}
 					} else {
-						console.error(`[Neo4jService] Metadata validation error: ${error.message}`)
+						this.log(`[Neo4jService] Metadata validation error: ${error.message}`)
 						return {}
 					}
 				} else {
-					console.error(`[Neo4jService] Unexpected error during metadata validation: ${error}`)
+					this.log(`[Neo4jService] Unexpected error during metadata validation: ${error}`)
 					return {}
 				}
 			}
@@ -3539,18 +3598,18 @@ export class Neo4jService implements INeo4jService {
 				if (!this.isTestMetadata(metadata)) {
 					errors.push({
 						field: "metadata",
-						expectedType: "TestMetadata",
+						expectedType: "TestRelationshipMetadata",
 						actualType: typeof metadata,
-						message: "TESTS relationship requires TestMetadata structure",
+						message: "TESTS relationship requires TestRelationshipMetadata structure",
 					})
 				} else {
-					const testMeta = metadata as TestMetadata
+					const testMeta = metadata as TestRelationshipMetadata
 					if (typeof testMeta.confidence !== "number" || testMeta.confidence < 0 || testMeta.confidence > 1) {
 						errors.push({
 							field: "confidence",
 							expectedType: "number (0-1)",
 							actualType: typeof testMeta.confidence,
-							message: "TestMetadata.confidence must be a number between 0 and 1",
+							message: "TestRelationshipMetadata.confidence must be a number between 0 and 1",
 						})
 					}
 					if (typeof testMeta.detectionMethod !== "string") {
@@ -3558,7 +3617,7 @@ export class Neo4jService implements INeo4jService {
 							field: "detectionMethod",
 							expectedType: "string",
 							actualType: typeof testMeta.detectionMethod,
-							message: "TestMetadata.detectionMethod must be a string",
+							message: "TestRelationshipMetadata.detectionMethod must be a string",
 						})
 					}
 				}
@@ -3655,7 +3714,7 @@ export class Neo4jService implements INeo4jService {
 	/**
 	 * Type guard for TestMetadata
 	 */
-	private isTestMetadata(metadata: RelationshipMetadata): metadata is TestMetadata {
+	private isTestMetadata(metadata: RelationshipMetadata): metadata is TestRelationshipMetadata {
 		return typeof metadata === "object" && "confidence" in metadata && "detectionMethod" in metadata
 	}
 

@@ -129,4 +129,108 @@ export interface ILSPService {
 	 * @returns LSP query result
 	 */
 	queryCodeBlock(filePath: string, startLine: number, endLine: number): Promise<LSPQueryResult>
+
+	/**
+	 * Search for symbols across the entire workspace
+	 * @param query The search query for symbols
+	 * @returns Array of workspace symbols matching the query
+	 */
+	searchWorkspaceSymbols(query: string): Promise<WorkspaceSymbolInfo[]>
+
+	/**
+	 * Find all references to a symbol at a specific position
+	 * @param document The document containing the symbol
+	 * @param position The position of the symbol
+	 * @param includeDeclaration Whether to include the declaration in results
+	 * @returns Array of locations where the symbol is referenced
+	 */
+	findReferences(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+		includeDeclaration?: boolean,
+	): Promise<vscode.Location[]>
+
+	/**
+	 * Find definitions of a symbol at a specific position
+	 * @param document The document containing the symbol
+	 * @param position The position of the symbol
+	 * @returns Array of locations where the symbol is defined
+	 */
+	findDefinitions(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location[]>
+
+	/**
+	 * Find implementations of a symbol at a specific position
+	 * @param document The document containing the symbol
+	 * @param position The position of the symbol
+	 * @returns Array of locations where the symbol is implemented
+	 */
+	findImplementations(document: vscode.TextDocument, position: vscode.Position): Promise<vscode.Location[]>
+
+	/**
+	 * Search for symbols by type across the workspace
+	 * @param typeQuery The type to search for (e.g., "Promise<User>", "string[]")
+	 * @param symbolKind Optional filter for symbol kind (function, class, etc.)
+	 * @returns Array of symbols with the specified type
+	 */
+	searchByType(typeQuery: string, symbolKind?: vscode.SymbolKind): Promise<WorkspaceSymbolInfo[]>
+
+	/**
+	 * Get type hierarchy for a symbol at a specific position
+	 * @param document The document containing the symbol
+	 * @param position The position of the symbol
+	 * @param direction Direction of hierarchy (supertypes or subtypes)
+	 * @returns Type hierarchy information
+	 */
+	getTypeHierarchy(
+		document: vscode.TextDocument,
+		position: vscode.Position,
+		direction: "supertypes" | "subtypes",
+	): Promise<TypeHierarchyItem[]>
+
+	/**
+	 * Check if a language server is available for a given language
+	 * @param language The programming language to check
+	 * @returns True if a language server is available
+	 */
+	isLanguageServerAvailable(language: string): Promise<boolean>
+}
+
+/**
+ * Extended symbol information for workspace-wide search results
+ */
+export interface WorkspaceSymbolInfo {
+	/** Symbol name */
+	name: string
+	/** Symbol kind (function, class, variable, etc.) */
+	kind: vscode.SymbolKind
+	/** Location of the symbol */
+	location: vscode.Location
+	/** Container name (e.g., class name for a method) */
+	containerName?: string
+	/** Type information if available */
+	typeInfo?: TypeInfo
+	/** Signature information for functions/methods */
+	signatureInfo?: SignatureInfo
+	/** Relevance score for the search result */
+	score?: number
+	/** Language of the file containing the symbol */
+	language?: string
+}
+
+/**
+ * Type hierarchy item for type relationship navigation
+ */
+export interface TypeHierarchyItem {
+	/** Name of the type */
+	name: string
+	/** Kind of the type (class, interface, etc.) */
+	kind: vscode.SymbolKind
+	/** Location where the type is defined */
+	location: vscode.Location
+	/** Type information */
+	typeInfo?: TypeInfo
+	/** Parent types in hierarchy */
+	parents?: TypeHierarchyItem[]
+	/** Child types in hierarchy */
+	children?: TypeHierarchyItem[]
 }

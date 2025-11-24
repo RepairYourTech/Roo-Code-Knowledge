@@ -5,7 +5,7 @@ import {
 	INeo4jService,
 	ImportMetadata,
 	CallMetadata,
-	TestMetadata as TestMetadataType,
+	TestRelationshipMetadata as TestMetadataType,
 	TypeMetadata,
 	ExtendsMetadata,
 	ImplementsMetadata,
@@ -16,6 +16,9 @@ import { CodebaseIndexErrorLogger } from "./error-logger"
 import { MetadataValidator } from "./metadata-validator"
 import { MAX_METADATA_ARRAY_LENGTH } from "../constants"
 import * as path from "path"
+import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
+import * as vscode from "vscode"
+import { TelemetryService } from "@roo-code/telemetry"
 
 /**
  * Graph indexer implementation
@@ -23,11 +26,17 @@ import * as path from "path"
  */
 export class GraphIndexer implements IGraphIndexer {
 	private readonly metadataValidator: MetadataValidator
+	private readonly telemetryEnabled: boolean
 
 	constructor(
 		private neo4jService: INeo4jService,
 		private errorLogger?: CodebaseIndexErrorLogger,
+		outputChannel?: vscode.OutputChannel,
+		telemetryEnabled: boolean = true,
 	) {
+		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
+		this.telemetryEnabled = telemetryEnabled && TelemetryService.hasInstance()
+
 		// Initialize metadata validator with appropriate configuration
 		this.metadataValidator = new MetadataValidator(
 			{
@@ -38,6 +47,62 @@ export class GraphIndexer implements IGraphIndexer {
 			},
 			errorLogger,
 		)
+	}
+
+	private readonly log: LogFunction
+
+	/**
+	 * Safely capture telemetry events with error handling
+	 * Ensures telemetry failures don't impact indexing performance
+	 * @param eventName The telemetry event name
+	 * @param properties The event properties
+	 */
+	private captureTelemetry(eventName: string, properties?: Record<string, unknown>): void {
+		if (!this.telemetryEnabled) {
+			return
+		}
+
+		try {
+			// Use dynamic import to avoid telemetry service initialization issues
+			const { TelemetryService } = require("@roo-code/telemetry")
+			const { TelemetryEventName } = require("@roo-code/types")
+
+			if (TelemetryService.hasInstance()) {
+				TelemetryService.instance.captureEvent(eventName as any, properties)
+			}
+		} catch (error) {
+			// Silently fail to avoid impacting indexing performance
+			// Log to debug channel if available
+			this.log(`[GraphIndexer] Telemetry capture failed:`, error)
+		}
+	}
+
+	/**
+	 * Get performance timing for telemetry
+	 * @returns Current timestamp in milliseconds
+	 */
+	private getTimestamp(): number {
+		return Date.now()
+	}
+
+	/**
+	 * Extract unique types from nodes for telemetry
+	 * @param nodes Array of code nodes
+	 * @returns Array of unique node types
+	 */
+	private extractNodeTypes(nodes: CodeNode[]): string[] {
+		const types = new Set(nodes.map((node) => node.type))
+		return Array.from(types)
+	}
+
+	/**
+	 * Extract unique types from relationships for telemetry
+	 * @param relationships Array of code relationships
+	 * @returns Array of unique relationship types
+	 */
+	private extractRelationshipTypes(relationships: CodeRelationship[]): string[] {
+		const types = new Set(relationships.map((rel) => rel.type))
+		return Array.from(types)
 	}
 
 	/**
@@ -56,7 +121,6 @@ export class GraphIndexer implements IGraphIndexer {
 				nodesCreated: 0,
 				relationshipsCreated: 0,
 				filePath: "",
-				errors: [],
 			}
 		}
 
@@ -64,6 +128,13 @@ export class GraphIndexer implements IGraphIndexer {
 		const errors: string[] = []
 		let nodesCreated = 0
 		let relationshipsCreated = 0
+		const startTime = this.getTimestamp()
+
+		// Capture telemetry for indexing start
+		this.captureTelemetry("GRAPH_INDEXING_STARTED", {
+			filePath,
+			blockCount: blocks.length,
+		})
 
 		try {
 			// Extract all nodes from all blocks
@@ -77,6 +148,13 @@ export class GraphIndexer implements IGraphIndexer {
 			if (allNodes.length > 0) {
 				await this.neo4jService.upsertNodes(allNodes)
 				nodesCreated = allNodes.length
+
+				// Capture telemetry for node creation
+				this.captureTelemetry("GRAPH_NODES_CREATED", {
+					filePath,
+					nodeCount: nodesCreated,
+					nodeTypes: this.extractNodeTypes(allNodes),
+				})
 			}
 
 			// Extract all relationships from all blocks
@@ -90,18 +168,44 @@ export class GraphIndexer implements IGraphIndexer {
 			if (allRelationships.length > 0) {
 				await this.neo4jService.createRelationships(allRelationships)
 				relationshipsCreated = allRelationships.length
+
+				// Capture telemetry for relationship creation
+				this.captureTelemetry("GRAPH_RELATIONSHIPS_CREATED", {
+					filePath,
+					relationshipCount: relationshipsCreated,
+					relationshipTypes: this.extractRelationshipTypes(allRelationships),
+				})
 			}
 
-			// TODO: Add telemetry events when they are defined in @roo-code/types
-			// TelemetryService.instance?.captureEvent(TelemetryEventName.CodeIndexGraphIndexed, {
-			// 	filePath,
-			// 	nodesCreated,
-			// 	relationshipsCreated,
-			// })
+			//Capture telemetry for successful indexing completion
+			const duration = this.getTimestamp() - startTime
+			this.captureTelemetry("GRAPH_INDEXING_COMPLETED", {
+				filePath,
+				nodesCreated,
+				relationshipsCreated,
+				durationMs: duration,
+			})
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			const errorStack = error instanceof Error ? error.stack : undefined
-			errors.push(errorMessage)
+
+			// Log partial success information if nodes were created
+			if (nodesCreated > 0) {
+				this.log(`[GraphIndexer] Partial success: Created ${nodesCreated} nodes before failure in ${filePath}`)
+			}
+
+			// Capture telemetry for indexing error with context
+			this.captureTelemetry("GRAPH_INDEXING_ERROR", {
+				filePath,
+				error: errorMessage,
+				operation: "indexBlocks",
+				context: {
+					blockCount: blocks.length,
+					nodesCreated,
+					relationshipsCreated,
+					durationMs: this.getTimestamp() - startTime,
+				},
+			})
 
 			// Log to persistent error logger
 			if (this.errorLogger) {
@@ -115,25 +219,33 @@ export class GraphIndexer implements IGraphIndexer {
 						blockCount: blocks.length,
 						nodesCreated,
 						relationshipsCreated,
+						partialSuccess: nodesCreated > 0,
 					},
 				})
 			}
 
-			// Also log to console for immediate visibility
-			console.error(`[GraphIndexer] Error indexing blocks for ${filePath}:`, error)
+			// Log to output channel with full context
+			this.log(`[GraphIndexer] Failed to index blocks for ${filePath}:`, {
+				error: errorMessage,
+				stack: errorStack,
+				blockCount: blocks.length,
+				nodesCreated,
+				relationshipsCreated,
+			})
 
-			// TODO: Add telemetry events when they are defined in @roo-code/types
-			// TelemetryService.instance?.captureEvent(TelemetryEventName.CodeIndexGraphIndexError, {
-			// 	filePath,
-			// 	error: errorMessage,
-			// })
+			// Throw error with enhanced context instead of returning in result.errors
+			// This makes error handling consistent with indexFile method
+			const contextualError = new Error(
+				`Failed to index blocks for ${filePath}: ${nodesCreated} nodes created, ${relationshipsCreated} relationships created before failure: ${errorMessage}`,
+				{ cause: error },
+			)
+			throw contextualError
 		}
 
 		return {
 			nodesCreated,
 			relationshipsCreated,
 			filePath,
-			errors: errors.length > 0 ? errors : undefined,
 		}
 	}
 
@@ -141,39 +253,73 @@ export class GraphIndexer implements IGraphIndexer {
 	 * Index an entire file into the graph database
 	 */
 	async indexFile(filePath: string, blocks: CodeBlock[]): Promise<GraphIndexResult> {
-		// First, remove any existing data for this file
-		await this.removeFile(filePath)
+		const startTime = this.getTimestamp()
+		const language = this.detectLanguage(filePath)
 
-		// Create a file node
-		const fileNode: CodeNode = {
-			id: `file:${filePath}`,
-			type: "file",
-			name: filePath.split("/").pop() || filePath,
-			filePath,
-			startLine: 1,
-			endLine: blocks.length > 0 ? Math.max(...blocks.map((b) => b.end_line)) : 1,
-		}
+		try {
+			// First, remove any existing data for this file
+			await this.removeFile(filePath)
 
-		await this.neo4jService.upsertNode(fileNode)
+			// Create a file node
+			const fileNode: CodeNode = {
+				id: `file:${filePath}`,
+				type: "file",
+				name: filePath.split("/").pop() || filePath,
+				filePath,
+				startLine: 1,
+				endLine: blocks.length > 0 ? Math.max(...blocks.map((b) => b.end_line)) : 1,
+			}
 
-		// Index all blocks
-		const result = await this.indexBlocks(blocks)
+			await this.neo4jService.upsertNode(fileNode)
 
-		// Create CONTAINS relationships from file to all top-level nodes
-		const containsRelationships: CodeRelationship[] = blocks.map((block) => ({
-			fromId: fileNode.id,
-			toId: this.generateNodeId(block),
-			type: "CONTAINS",
-		}))
+			// Index all blocks
+			const result = await this.indexBlocks(blocks)
 
-		if (containsRelationships.length > 0) {
-			await this.neo4jService.createRelationships(containsRelationships)
-		}
+			// Create CONTAINS relationships from file to all top-level nodes
+			const containsRelationships: CodeRelationship[] = blocks.map((block) => ({
+				fromId: fileNode.id,
+				toId: this.generateNodeId(block),
+				type: "CONTAINS",
+			}))
 
-		return {
-			...result,
-			nodesCreated: result.nodesCreated + 1, // +1 for file node
-			relationshipsCreated: result.relationshipsCreated + containsRelationships.length,
+			if (containsRelationships.length > 0) {
+				await this.neo4jService.createRelationships(containsRelationships)
+			}
+
+			// Capture telemetry for file indexing completion
+			const totalNodesCreated = result.nodesCreated + 1 // +1 for file node
+			const totalRelationshipsCreated = result.relationshipsCreated + containsRelationships.length
+			const duration = this.getTimestamp() - startTime
+
+			this.captureTelemetry("GRAPH_FILE_INDEXED", {
+				filePath,
+				nodesCreated: totalNodesCreated,
+				relationshipsCreated: totalRelationshipsCreated,
+				language,
+				durationMs: duration,
+			})
+
+			return {
+				...result,
+				nodesCreated: totalNodesCreated,
+				relationshipsCreated: totalRelationshipsCreated,
+			}
+		} catch (error) {
+			// Capture telemetry for file indexing error
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			this.captureTelemetry("GRAPH_INDEXING_ERROR", {
+				filePath,
+				error: errorMessage,
+				operation: "indexFile",
+				context: {
+					blockCount: blocks.length,
+					language,
+					durationMs: this.getTimestamp() - startTime,
+				},
+			})
+
+			// Re-throw the error to maintain existing behavior
+			throw error
 		}
 	}
 
@@ -181,7 +327,25 @@ export class GraphIndexer implements IGraphIndexer {
 	 * Remove all nodes and relationships for a file
 	 */
 	async removeFile(filePath: string): Promise<void> {
-		await this.neo4jService.deleteNodesByFilePath(filePath)
+		try {
+			await this.neo4jService.deleteNodesByFilePath(filePath)
+		} catch (error) {
+			// Capture telemetry for file removal error
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			const errorStack = error instanceof Error ? error.stack : undefined
+
+			this.captureTelemetry("GRAPH_INDEXING_ERROR", {
+				filePath,
+				error: errorMessage,
+				operation: "removeFile",
+			})
+
+			// Log with file path in message for easier debugging
+			this.log(`[GraphIndexer] Failed to remove file from graph: ${filePath}`, error)
+
+			// Throw error with enhanced context
+			throw new Error(`Failed to remove file ${filePath} from graph: ${errorMessage}`, { cause: error })
+		}
 	}
 
 	/**
@@ -193,30 +357,26 @@ export class GraphIndexer implements IGraphIndexer {
 		// Phase 2: Validate node properties before creation
 		// Check identifier is non-empty
 		if (!block.identifier || block.identifier.trim() === "") {
-			console.warn(`[GraphIndexer] Skipping node with empty identifier in ${block.file_path}:${block.start_line}`)
+			this.log(`[GraphIndexer] Skipping node with empty identifier in ${block.file_path}:${block.start_line}`)
 			return nodes
 		}
 
 		// Determine node type from block type
 		const nodeType = this.mapBlockTypeToNodeType(block.type)
 		if (!nodeType) {
-			console.warn(
-				`[GraphIndexer] Unrecognized block type "${block.type}" in ${block.file_path}:${block.start_line}`,
-			)
+			this.log(`[GraphIndexer] Unrecognized block type "${block.type}" in ${block.file_path}:${block.start_line}`)
 			return nodes
 		}
 
 		// Validate line numbers
 		if (block.start_line > block.end_line) {
-			console.warn(
-				`[GraphIndexer] Invalid line range ${block.start_line}-${block.end_line} in ${block.file_path}`,
-			)
+			this.log(`[GraphIndexer] Invalid line range ${block.start_line}-${block.end_line} in ${block.file_path}`)
 			return nodes
 		}
 
 		// Validate file path is non-empty
 		if (!block.file_path || block.file_path.trim() === "") {
-			console.warn(`[GraphIndexer] Skipping node with empty file path`)
+			this.log(`[GraphIndexer] Skipping node with empty file path`)
 			return nodes
 		}
 
@@ -1527,7 +1687,28 @@ export class GraphIndexer implements IGraphIndexer {
 	 * Clear all graph data
 	 */
 	async clearAll(): Promise<void> {
-		await this.neo4jService.clearAll()
+		try {
+			await this.neo4jService.clearAll()
+
+			// Capture telemetry for successful clear operation
+			this.captureTelemetry("GRAPH_INDEXING_COMPLETED", {
+				filePath: "CLEAR_ALL",
+				nodesCreated: 0,
+				relationshipsCreated: 0,
+				durationMs: 0,
+			})
+		} catch (error) {
+			// Capture telemetry for clear operation error
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			this.captureTelemetry("GRAPH_INDEXING_ERROR", {
+				filePath: "CLEAR_ALL",
+				error: errorMessage,
+				operation: "clearAll",
+			})
+
+			// Re-throw error to maintain existing behavior
+			throw error
+		}
 	}
 
 	/**
@@ -1914,7 +2095,7 @@ export class GraphIndexer implements IGraphIndexer {
 							source: "lsp",
 						},
 						"HAS_TYPE",
-						block.identifier,
+						block.identifier || undefined,
 					),
 				})
 			}
@@ -1976,7 +2157,7 @@ export class GraphIndexer implements IGraphIndexer {
 			if (relationshipType === "IMPORTS" && metadata.symbols && Array.isArray(metadata.symbols)) {
 				const symbols = metadata.symbols as string[]
 				if (symbols.length > MAX_METADATA_ARRAY_LENGTH) {
-					console.warn(
+					this.log(
 						`[GraphIndexer] IMPORTS symbols array (${symbols.length} items) exceeds limit (${MAX_METADATA_ARRAY_LENGTH}), truncating`,
 					)
 					metadata.symbols = symbols.slice(0, MAX_METADATA_ARRAY_LENGTH)
@@ -1996,7 +2177,7 @@ export class GraphIndexer implements IGraphIndexer {
 			// Validate testMetadata structure
 			if (relationshipType === "TESTS" && metadata.testFramework) {
 				if (typeof metadata.testFramework !== "string") {
-					console.warn(`[GraphIndexer] Invalid testFramework type in TESTS metadata for ${blockIdentifier}`)
+					this.log(`[GraphIndexer] Invalid testFramework type in TESTS metadata for ${blockIdentifier}`)
 					metadata.testFramework = String(metadata.testFramework)
 				}
 			}
@@ -2005,7 +2186,7 @@ export class GraphIndexer implements IGraphIndexer {
 			if (metadata.source === "lsp") {
 				// Basic structure validation for LSP-derived metadata
 				if (metadata.typeString && typeof metadata.typeString !== "string") {
-					console.warn(`[GraphIndexer] Invalid typeString in LSP metadata for ${blockIdentifier}`)
+					this.log(`[GraphIndexer] Invalid typeString in LSP metadata for ${blockIdentifier}`)
 					metadata.typeString = String(metadata.typeString)
 				}
 			}
@@ -2015,7 +2196,7 @@ export class GraphIndexer implements IGraphIndexer {
 
 			// Log any warnings from validation
 			if (validationResult.warnings.length > 0) {
-				console.warn(
+				this.log(
 					`[GraphIndexer] Metadata validation warnings for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
 					validationResult.warnings,
 				)
@@ -2023,7 +2204,7 @@ export class GraphIndexer implements IGraphIndexer {
 
 			// Log if truncation occurred
 			if (validationResult.wasTruncated) {
-				console.warn(
+				this.log(
 					`[GraphIndexer] Metadata was truncated for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}`,
 				)
 			}
@@ -2034,7 +2215,7 @@ export class GraphIndexer implements IGraphIndexer {
 		} catch (error) {
 			// Phase 4: Add error handling for metadata creation
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			console.error(
+			this.log(
 				`[GraphIndexer] Error validating metadata for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
 				errorMessage,
 			)

@@ -5,17 +5,15 @@ import { CodeNode, CodeRelationship } from "./neo4j-service"
  * Result of indexing a file into the graph database
  */
 export interface GraphIndexResult {
-	/** Number of nodes created */
+	/** Number of nodes created during indexing */
 	nodesCreated: number
 
-	/** Number of relationships created */
+	/** Number of relationships created during indexing */
 	relationshipsCreated: number
 
 	/** File path that was indexed */
 	filePath: string
-
-	/** Any errors encountered during indexing */
-	errors?: string[]
+	// Note: errors are now thrown via exceptions instead of being returned in this result object
 }
 
 /**

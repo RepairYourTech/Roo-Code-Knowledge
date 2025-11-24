@@ -26,6 +26,21 @@ export interface CodeIndexConfig {
 	neo4jUsername?: string
 	neo4jPassword?: string
 	neo4jDatabase?: string
+	// Neo4j advanced configuration
+	neo4jCircuitBreakerThreshold?: number
+	neo4jMaxConnectionPoolSize?: number
+	neo4jMaxRetries?: number
+	neo4jQueryTimeout?: number
+	neo4jConnectionAcquisitionTimeout?: number
+	neo4jCircuitBreakerTimeout?: number
+	// LSP configuration
+	lspBatchSize?: number
+	lspTimeout?: number
+	lspCacheSize?: number
+	lspCacheTtl?: number
+	lspConcurrencyLimit?: number
+	// Configuration schema version for migration
+	configSchemaVersion?: string
 }
 
 /**
@@ -53,4 +68,55 @@ export type PreviousConfigSnapshot = {
 	neo4jUsername?: string
 	neo4jPassword?: string
 	neo4jDatabase?: string
+}
+
+/**
+ * Represents a validation error in the configuration
+ */
+export interface ConfigurationValidationError {
+	field: string
+	message: string
+	severity: "error" | "warning"
+	suggestion?: string
+	code?: string
+}
+
+/**
+ * Result of a configuration validation operation
+ */
+export interface ConfigurationValidationResult {
+	valid: boolean
+	errors: ConfigurationValidationError[]
+	warnings: ConfigurationValidationError[]
+	timestamp: Date
+	metadata?: {
+		duration: number
+		version: string
+		reachabilityChecked: boolean
+	}
+}
+
+/**
+ * Details about a configuration value that violates bounds
+ */
+export interface ConfigBoundsViolation {
+	field: string
+	value: any
+	min?: number
+	max?: number
+	recommended?: {
+		min?: number
+		max?: number
+	}
+	action: "rejected" | "clamped" | "accepted"
+	severity?: "error" | "warning"
+}
+
+/**
+ * Options for configuration validation
+ */
+export interface ConfigValidationOptions {
+	checkReachability?: boolean
+	checkProduction?: boolean
+	strictMode?: boolean
 }

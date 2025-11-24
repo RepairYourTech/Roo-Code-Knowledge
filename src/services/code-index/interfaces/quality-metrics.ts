@@ -15,6 +15,8 @@ export interface ComplexityMetrics {
 	functionLength: number
 	/** Number of parameters */
 	parameterCount: number
+	/** Number of duplicate code instances detected */
+	duplicateCodeCount?: number
 }
 
 /**

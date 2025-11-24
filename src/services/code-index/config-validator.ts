@@ -141,6 +141,14 @@ export class ConfigValidator {
 		// Validate required fields
 		ConfigValidator.validateRequiredFields(config, errors)
 
+		// Validate Qdrant URL
+		if (config.qdrantUrl) {
+			const urlValidation = ConfigValidator.validateUrl(config.qdrantUrl, ["http", "https"], "qdrantUrl")
+			if (!urlValidation.valid) {
+				errors.push(...urlValidation.errors)
+			}
+		}
+
 		// Validate provider-specific configuration
 		ConfigValidator.validateProviderConfig(config, errors, warnings, options)
 
@@ -286,49 +294,45 @@ export class ConfigValidator {
 	 * @returns Validation result
 	 */
 	static validateUrl(
-		url: string | undefined,
-		allowedProtocols: string[],
+		url: string,
+		protocols: string[],
 		field: string,
-	): { valid: boolean; error?: ConfigurationValidationError } {
-		if (url === undefined || url === null) {
-			return { valid: true } // Optional field
-		}
-
-		const lengthValidation = ConfigValidator.validateStringLength(url, MIN_URL_LENGTH, MAX_URL_LENGTH, field)
-		if (!lengthValidation.valid) {
-			return lengthValidation
-		}
-
+	): { valid: boolean; errors: ConfigurationValidationError[]; warnings: ConfigurationValidationError[] } {
+		// console.log(`Validating URL: ${url} with protocols ${protocols}`)
 		try {
-			const parsedUrl = new URL(url)
-			const protocol = parsedUrl.protocol.replace(":", "")
-
-			if (!allowedProtocols.includes(protocol)) {
+			const parsed = new URL(url)
+			if (!protocols.some((p) => parsed.protocol === `${p}:`)) {
 				return {
 					valid: false,
-					error: {
-						field,
-						message: `${field} protocol "${protocol}" is not allowed`,
-						severity: "error",
-						suggestion: `Use one of the allowed protocols: ${allowedProtocols.join(", ")}`,
-						code: "INVALID_PROTOCOL",
-					},
+					errors: [
+						{
+							field,
+							message: `URL protocol must be one of: ${protocols.join(", ")}`,
+							severity: "error",
+							suggestion: `Use a URL starting with ${protocols.join(" or ")}`,
+							code: "INVALID_PROTOCOL",
+						},
+					],
+					warnings: [],
 				}
 			}
+			return { valid: true, errors: [], warnings: [] }
 		} catch (error) {
+			// console.log(`URL validation failed for ${url}:`, error)
 			return {
 				valid: false,
-				error: {
-					field,
-					message: `${field} is not a valid URL`,
-					severity: "error",
-					suggestion: `Ensure ${field} is a properly formatted URL`,
-					code: "INVALID_URL",
-				},
+				errors: [
+					{
+						field,
+						message: `Invalid URL format: ${url}`,
+						severity: "error",
+						suggestion: "Enter a valid URL",
+						code: "INVALID_FORMAT",
+					},
+				],
+				warnings: [],
 			}
 		}
-
-		return { valid: true }
 	}
 
 	/**
@@ -978,7 +982,7 @@ export class ConfigValidator {
 		)
 
 		if (!urlValidation.valid) {
-			errors.push(urlValidation.error!)
+			errors.push(...urlValidation.errors)
 		}
 	}
 
@@ -1009,7 +1013,7 @@ export class ConfigValidator {
 		)
 
 		if (!urlValidation.valid) {
-			errors.push(urlValidation.error!)
+			errors.push(...urlValidation.errors)
 		}
 
 		if (config.openAiCompatibleOptions.apiKey) {
@@ -1178,7 +1182,7 @@ export class ConfigValidator {
 			const urlValidation = ConfigValidator.validateUrl(config.neo4jUrl, ALLOWED_NEO4J_PROTOCOLS, "neo4jUrl")
 
 			if (!urlValidation.valid) {
-				errors.push(urlValidation.error!)
+				errors.push(...urlValidation.errors)
 			}
 		}
 

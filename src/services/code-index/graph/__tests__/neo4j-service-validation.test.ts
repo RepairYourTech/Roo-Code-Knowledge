@@ -8,12 +8,13 @@
 
 import { describe, test, expect, vi, beforeEach, afterEach } from "vitest"
 import { Neo4jService } from "../neo4j-service"
+import neo4j from "neo4j-driver"
 import type {
 	CodeNode,
 	CodeRelationship,
 	ImportMetadata,
 	CallMetadata,
-	TestMetadata,
+	TestRelationshipMetadata,
 	TypeMetadata,
 	ExtendsMetadata,
 	ImplementsMetadata,
@@ -22,6 +23,8 @@ import type {
 } from "../../interfaces/neo4j-service"
 import { CodebaseIndexErrorLogger } from "../error-logger"
 import { MetadataValidator } from "../metadata-validator"
+
+vi.mock("neo4j-driver")
 
 // Mock Neo4j driver
 const mockDriver = {
@@ -69,8 +72,8 @@ describe("Neo4jService - Validation", () => {
 		)
 
 		// Mock of driver and session
-		vi.mocked("neo4j").mockImplementation(() => mockDriver)
-		vi.mocked(mockDriver.session).mockReturnValue(mockSession)
+		vi.mocked(neo4j).driver.mockReturnValue(mockDriver as any)
+		vi.mocked(mockDriver.session).mockReturnValue(mockSession as any)
 	})
 
 	afterEach(() => {
@@ -420,7 +423,7 @@ describe("Neo4jService - Validation", () => {
 		})
 
 		test("validateRelationship should validate TESTS metadata", async () => {
-			const validTestMetadata: TestMetadata = {
+			const validTestMetadata: TestRelationshipMetadata = {
 				confidence: 0.85,
 				detectionMethod: "pattern-matching",
 				testFramework: "jest",

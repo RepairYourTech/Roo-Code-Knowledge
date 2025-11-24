@@ -83,7 +83,7 @@ export interface CallMetadata {
  * Test relationship metadata
  * Used for TESTS/TESTED_BY relationships to track test coverage information
  */
-export interface TestMetadata {
+export interface TestRelationshipMetadata {
 	/** Confidence level of test detection (0-1) */
 	confidence: number
 	/** Method used to detect the test relationship */
@@ -132,7 +132,7 @@ export interface ImplementsMetadata {
 export type RelationshipMetadata =
 	| ImportMetadata
 	| CallMetadata
-	| TestMetadata
+	| TestRelationshipMetadata
 	| TypeMetadata
 	| ExtendsMetadata
 	| ImplementsMetadata

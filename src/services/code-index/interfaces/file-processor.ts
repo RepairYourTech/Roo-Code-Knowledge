@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import { PointStruct } from "./vector-store"
 import { SymbolMetadata, ImportInfo, ExportInfo } from "../types/metadata"
 import { TypeInfo, SignatureInfo } from "./lsp-service"
+import { ReactComponentMetadata, ReactHookMetadata, ReactJSXMetadata } from "../processors/metadata-extractor"
 
 /**
  * Interface for code file parser
@@ -204,4 +205,8 @@ export interface CodeBlock {
 	calls?: CallInfo[]
 	// Phase 10, Task 2: Test metadata (optional for backward compatibility)
 	testMetadata?: TestMetadata
+	// React-specific metadata (optional for backward compatibility)
+	reactComponentMetadata?: ReactComponentMetadata
+	reactHookMetadata?: ReactHookMetadata
+	jsxMetadata?: ReactJSXMetadata
 }

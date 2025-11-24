@@ -233,6 +233,298 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			action: "toggleAutoApprove",
 		})
 	},
+	testQdrantConnection: async () => {
+		try {
+			const manager = CodeIndexManager.getInstance(context)
+
+			if (!manager || !manager.outputChannel) {
+				vscode.window.showErrorMessage(
+					"Diagnostics require an open workspace and initialized code index manager.",
+				)
+				return
+			}
+
+			const outputCh = manager.outputChannel
+
+			if (!manager.isFeatureConfigured) {
+				vscode.window.showErrorMessage(
+					"Code indexing is not configured. Please configure Qdrant settings first.",
+				)
+				return
+			}
+
+			outputCh.appendLine("[Diagnostic] Testing Qdrant connection...")
+
+			// Get ServiceFactory from manager to create vector store
+			const serviceFactory = manager.serviceFactory
+			if (!serviceFactory) {
+				vscode.window.showErrorMessage(
+					"Code indexing is not initialized. Please initialize code indexing first.",
+				)
+				return
+			}
+
+			const startTime = Date.now()
+
+			try {
+				const vectorStore = serviceFactory.createVectorStore()
+				await vectorStore.initialize()
+
+				const latency = Date.now() - startTime
+				// getConnectionInfo is a diagnostic method on QdrantVectorStore, not in IVectorStore
+				const connInfo = (vectorStore as any).getConnectionInfo()
+
+				outputCh.appendLine(`[Diagnostic] Qdrant connection successful!`)
+				outputCh.appendLine(`  URL: ${connInfo.url}`)
+				outputCh.appendLine(`  Collection: ${connInfo.collectionName}`)
+				outputCh.appendLine(`  Vector Size: ${connInfo.vectorSize}`)
+				outputCh.appendLine(`  Workspace: ${connInfo.workspacePath}`)
+				outputCh.appendLine(`  Latency: ${latency}ms`)
+
+				const action = await vscode.window.showInformationMessage(
+					`Qdrant connection successful! Latency: ${latency}ms`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					outputCh.show()
+				}
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				outputCh.appendLine(`[Diagnostic] Qdrant connection failed: ${errorMsg}`)
+				if (error instanceof Error && error.stack) {
+					outputCh.appendLine(`Stack trace: ${error.stack}`)
+				}
+
+				const action = await vscode.window.showErrorMessage(
+					`Qdrant connection failed: ${errorMsg}`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					outputCh.show()
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error)
+			vscode.window.showErrorMessage(`Failed to run Qdrant diagnostic: ${errorMsg}`)
+		}
+	},
+	testNeo4jConnection: async () => {
+		try {
+			const manager = CodeIndexManager.getInstance(context)
+
+			if (!manager || !manager.outputChannel) {
+				vscode.window.showErrorMessage(
+					"Diagnostics require an open workspace and initialized code index manager.",
+				)
+				return
+			}
+
+			const outputCh = manager.outputChannel
+
+			if (!manager.isFeatureConfigured) {
+				vscode.window.showErrorMessage("Code indexing is not configured. Please configure settings first.")
+				return
+			}
+
+			// Get ServiceFactory from manager
+			const serviceFactory = manager.serviceFactory
+			if (!serviceFactory) {
+				vscode.window.showErrorMessage(
+					"Code indexing is not initialized. Please initialize code indexing first.",
+				)
+				return
+			}
+
+			const configMgr = serviceFactory.config
+			if (!configMgr.isNeo4jEnabled) {
+				vscode.window.showInformationMessage(
+					"Neo4j graph indexing is disabled. Enable it in settings to use this diagnostic.",
+				)
+				return
+			}
+
+			outputCh.appendLine("[Diagnostic] Testing Neo4j connection...")
+
+			const startTime = Date.now()
+			let neo4jService: any = null
+
+			try {
+				neo4jService = serviceFactory.createNeo4jService()
+				if (!neo4jService) {
+					outputCh.appendLine(
+						"[Diagnostic] Neo4j service could not be created. Neo4j is disabled or misconfigured.",
+					)
+					vscode.window
+						.showErrorMessage(
+							"Neo4j service could not be created. Please check Neo4j settings and ensure it's enabled.",
+							"Show Output",
+						)
+						.then((action) => {
+							if (action === "Show Output") {
+								outputCh.show()
+							}
+						})
+					return
+				}
+
+				await neo4jService.initialize()
+				const isConnected = neo4jService.isConnected()
+
+				if (!isConnected) {
+					throw new Error("Neo4j service initialized but connection verification failed")
+				}
+
+				const latency = Date.now() - startTime
+				const connInfo = neo4jService.getConnectionInfo()
+				const stats = await neo4jService.getStats()
+
+				outputCh.appendLine(`[Diagnostic] Neo4j connection successful!`)
+				outputCh.appendLine(`  URL: ${connInfo.url}`)
+				outputCh.appendLine(`  Database: ${connInfo.database}`)
+				outputCh.appendLine(`  Username: ${connInfo.username}`)
+				outputCh.appendLine(`  Connected: ${connInfo.isConnected}`)
+				outputCh.appendLine(`  Latency: ${latency}ms`)
+				outputCh.appendLine(`  Nodes: ${stats.nodeCount}`)
+				outputCh.appendLine(`  Relationships: ${stats.relationshipCount}`)
+				outputCh.appendLine(`  Files: ${stats.fileCount}`)
+
+				const action = await vscode.window.showInformationMessage(
+					`Neo4j connection successful! Latency: ${latency}ms, Nodes: ${stats.nodeCount}`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					outputCh.show()
+				}
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				outputCh.appendLine(`[Diagnostic] Neo4j connection failed: ${errorMsg}`)
+				if (error instanceof Error && error.stack) {
+					outputCh.appendLine(`Stack trace: ${error.stack}`)
+				}
+
+				const action = await vscode.window.showErrorMessage(
+					`Neo4j connection failed: ${errorMsg}`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					outputCh.show()
+				}
+			} finally {
+				// Clean up Neo4j connection
+				if (neo4jService) {
+					try {
+						await neo4jService.close()
+					} catch (closeError) {
+						outputCh.appendLine(`[Diagnostic] Error closing Neo4j connection: ${closeError}`)
+					}
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error)
+			vscode.window.showErrorMessage(`Failed to run Neo4j diagnostic: ${errorMsg}`)
+		}
+	},
+	testEmbeddingProvider: async () => {
+		try {
+			const manager = CodeIndexManager.getInstance(context)
+
+			if (!manager || !manager.outputChannel) {
+				vscode.window.showErrorMessage(
+					"Diagnostics require an open workspace and initialized code index manager.",
+				)
+				return
+			}
+
+			const outputCh = manager.outputChannel
+
+			if (!manager.isFeatureConfigured) {
+				vscode.window.showErrorMessage(
+					"Code indexing is not configured. Please configure embedding provider settings first.",
+				)
+				return
+			}
+
+			outputCh.appendLine("[Diagnostic] Testing embedding provider connection...")
+
+			// Get ServiceFactory from manager
+			const serviceFactory = manager.serviceFactory
+			if (!serviceFactory) {
+				vscode.window.showErrorMessage(
+					"Code indexing is not initialized. Please initialize code indexing first.",
+				)
+				return
+			}
+
+			const startTime = Date.now()
+
+			try {
+				const embedder = serviceFactory.createEmbedder()
+
+				// Get provider info if available
+				let providerInfo: any = {}
+				if (typeof (embedder as any).getProviderInfo === "function") {
+					providerInfo = (embedder as any).getProviderInfo()
+				}
+
+				const validationResult = await embedder.validateConfiguration()
+				const latency = Date.now() - startTime
+
+				if (validationResult.valid) {
+					outputCh.appendLine(`[Diagnostic] Embedding provider validation successful!`)
+					outputCh.appendLine(`  Provider: ${providerInfo.provider || "unknown"}`)
+					outputCh.appendLine(`  Model: ${providerInfo.modelId || "unknown"}`)
+					if (providerInfo.baseUrl) {
+						outputCh.appendLine(`  Base URL: ${providerInfo.baseUrl}`)
+					}
+					if (providerInfo.maxItemTokens) {
+						outputCh.appendLine(`  Max Item Tokens: ${providerInfo.maxItemTokens}`)
+					}
+					if (providerInfo.maxBatchItems) {
+						outputCh.appendLine(`  Max Batch Items: ${providerInfo.maxBatchItems}`)
+					}
+					outputCh.appendLine(`  Latency: ${latency}ms`)
+
+					const action = await vscode.window.showInformationMessage(
+						`Embedding provider (${providerInfo.provider || "unknown"}) connection successful! Latency: ${latency}ms`,
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						outputCh.show()
+					}
+				} else {
+					const errorMsg = validationResult.error || "Validation failed"
+					outputCh.appendLine(`[Diagnostic] Embedding provider validation failed: ${errorMsg}`)
+
+					const action = await vscode.window.showErrorMessage(
+						`Embedding provider validation failed: ${errorMsg}`,
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						outputCh.show()
+					}
+				}
+			} catch (error) {
+				const errorMsg = error instanceof Error ? error.message : String(error)
+				outputCh.appendLine(`[Diagnostic] Embedding provider test failed: ${errorMsg}`)
+				if (error instanceof Error && error.stack) {
+					outputCh.appendLine(`Stack trace: ${error.stack}`)
+				}
+
+				// Simplified error handling - rely on validateConfiguration and provider implementations
+				// for specific auth/network hints
+				const action = await vscode.window.showErrorMessage(
+					`Embedding provider test failed: ${errorMsg}`,
+					"Show Output",
+				)
+				if (action === "Show Output") {
+					outputCh.show()
+				}
+			}
+		} catch (error) {
+			const errorMsg = error instanceof Error ? error.message : String(error)
+			vscode.window.showErrorMessage(`Failed to run embedding provider diagnostic: ${errorMsg}`)
+		}
+	},
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
