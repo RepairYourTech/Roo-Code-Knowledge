@@ -74,7 +74,8 @@ import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
 
 // Additional constants needed for scanner functionality
-const QDRANT_CODE_BLOCK_NAMESPACE = "code-blocks"
+const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+const QDRANT_CODE_BLOCK_NAMESPACE = uuidv5("code-blocks", DNS_NAMESPACE)
 const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 10 // 10MB
 const MAX_LIST_FILES_LIMIT_CODE_INDEX = 10000
 const BATCH_SEGMENT_THRESHOLD = 100

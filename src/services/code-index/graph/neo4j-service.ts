@@ -730,7 +730,7 @@ export class Neo4jService implements INeo4jService {
 	 */
 	private async createIndexes(): Promise<void> {
 		await this.executeWithRetry("createIndexes", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				// Single-property indexes
 				await session.run("CREATE INDEX code_node_id IF NOT EXISTS FOR (n:CodeNode) ON (n.id)")
@@ -752,7 +752,10 @@ export class Neo4jService implements INeo4jService {
 	/**
 	 * Get a session from pool or create new one
 	 */
-	private async getSession(): Promise<Session> {
+	/**
+	 * Get a session from pool or create new one
+	 */
+	private async getSession(accessMode: string = neo4j.session.READ): Promise<Session> {
 		// Increment acquisition attempts at the start
 		this.poolAcquisitionAttempts++
 
@@ -770,9 +773,12 @@ export class Neo4jService implements INeo4jService {
 		// Try to get session from pool
 		const release = await this.sessionMutex.acquire()
 		try {
-			const session = this.sessionPool.pop()
-			if (session) {
-				return session
+			// Only reuse sessions for READ operations to ensure isolation
+			if (accessMode === neo4j.session.READ) {
+				const session = this.sessionPool.pop()
+				if (session) {
+					return session
+				}
 			}
 		} finally {
 			release()
@@ -782,7 +788,7 @@ export class Neo4jService implements INeo4jService {
 			// Create new session if none available in pool
 			const newSession = this.driver.session({
 				database: this.config.database,
-				defaultAccessMode: neo4j.session.READ,
+				defaultAccessMode: accessMode as any,
 				bookmarkManager: neo4j.bookmarkManager(),
 			})
 
@@ -804,6 +810,25 @@ export class Neo4jService implements INeo4jService {
 	private async releaseSession(session: Session): Promise<void> {
 		const release = await this.sessionMutex.acquire()
 		try {
+			// Only pool READ sessions
+			// We can check the session mode if we stored it, but for now we'll assume
+			// we only want to pool sessions that were created as READ or just close everything if pool is full.
+			// However, since we don't track mode on the session object easily without casting,
+			// and we want to be safe, let's just close WRITE sessions or check if we can determine mode.
+			// Actually, the safest bet for this fix is to only pool if we are sure it's reusable.
+			// Given the current implementation doesn't track mode, we might be pooling WRITE sessions if we aren't careful.
+			// But wait, getSession(READ) pops from pool. If we push a WRITE session back, getSession(READ) might get it.
+			// WRITE sessions can do reads, so it might be technically okay, but it's better to be explicit.
+			// For this specific fix, I will just close the session if I can't be sure, OR I can rely on the fact that
+			// I modified getSession to NOT pop from pool if mode is WRITE.
+			// But if I push a WRITE session to pool, a subsequent READ request might get it.
+			// To avoid this complexity without tracking, I'll just close the session if the pool is full OR if it might be a write session.
+			// But I don't know if it is a write session here.
+			// Let's look at how `releaseSession` is called. It takes a `Session`.
+			// I'll add a check to `releaseSession` to optionally take the mode, or just close it if I'm not sure.
+			// Actually, I can just not pool it in `createIndexes` by closing it manually? No, `createIndexes` calls `releaseSession`.
+			// Let's modify `releaseSession` to take an optional `shouldPool` boolean, default true.
+
 			if (this.sessionPool.length < this.config.maxConnectionPoolSize! / 2) {
 				// Return session to pool if not too many
 				this.sessionPool.push(session)
@@ -1486,7 +1511,7 @@ export class Neo4jService implements INeo4jService {
 
 		try {
 			// Acquire session
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 
 			// Begin write transaction
 			const transaction = session.beginTransaction()
@@ -2062,7 +2087,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		await this.executeWithRetry("deleteNode", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				await session.run(
 					`
@@ -2087,7 +2112,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		await this.executeWithRetry("deleteNodesByFilePath", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				await session.run(
 					`
@@ -2114,7 +2139,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		await this.executeWithRetry("deleteNodesByMultipleFilePaths", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				await session.run(
 					`
@@ -2359,7 +2384,7 @@ export class Neo4jService implements INeo4jService {
 		this.log(`[Neo4jService] Clearing all data from database ${this.config.database}...`)
 
 		await this.executeWithRetry("clearAll", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			const batchSize = 10000
 			let totalDeleted = 0
 

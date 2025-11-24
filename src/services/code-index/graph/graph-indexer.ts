@@ -349,17 +349,26 @@ export class GraphIndexer implements IGraphIndexer {
 	}
 
 	/**
+	 * Generate a synthetic identifier for nodes without explicit names
+	 * Uses node type and location to create a unique, deterministic identifier
+	 */
+	private generateSyntheticIdentifier(block: CodeBlock): string {
+		// Extract filename from path for readability
+		const fileName = block.file_path.split("/").pop() || block.file_path
+
+		// Create synthetic identifier: type_filename_L<start>-<end>
+		const syntheticId = `${block.type}_${fileName}_L${block.start_line}-${block.end_line}`
+
+		return syntheticId
+	}
+
+	/**
 	 * Extract code nodes from a code block
 	 */
 	extractNodes(block: CodeBlock): CodeNode[] {
 		const nodes: CodeNode[] = []
 
 		// Phase 2: Validate node properties before creation
-		// Check identifier is non-empty
-		if (!block.identifier || block.identifier.trim() === "") {
-			this.log(`[GraphIndexer] Skipping node with empty identifier in ${block.file_path}:${block.start_line}`)
-			return nodes
-		}
 
 		// Determine node type from block type
 		const nodeType = this.mapBlockTypeToNodeType(block.type)
@@ -380,11 +389,20 @@ export class GraphIndexer implements IGraphIndexer {
 			return nodes
 		}
 
+		// Generate synthetic identifier if none exists
+		let identifier = block.identifier
+		if (!identifier || identifier.trim() === "") {
+			identifier = this.generateSyntheticIdentifier(block)
+			this.log(
+				`[GraphIndexer] Generated synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
+			)
+		}
+
 		// Create primary node for this block
 		const node: CodeNode = {
 			id: this.generateNodeId(block),
 			type: nodeType,
-			name: block.identifier || "anonymous",
+			name: identifier,
 			filePath: block.file_path,
 			startLine: block.start_line,
 			endLine: block.end_line,
