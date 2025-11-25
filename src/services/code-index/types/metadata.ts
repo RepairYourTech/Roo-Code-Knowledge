@@ -309,6 +309,30 @@ export function validateSymbolMetadata(metadata: SymbolMetadata): boolean {
 }
 
 /**
+ * Converts an EnhancedCodeSegment to a CodeBlock for compatibility with buildEmbeddingContext
+ *
+ * This function maps the camelCase properties of EnhancedCodeSegment to the
+ * snake_case properties expected by CodeBlock interface.
+ */
+export function enhancedSegmentToCodeBlock(segment: EnhancedCodeSegment): CodeBlock {
+	return {
+		file_path: segment.filePath,
+		identifier: segment.identifier,
+		type: segment.type || "",
+		start_line: segment.startLine,
+		end_line: segment.endLine,
+		content: segment.content,
+		fileHash: segment.fileHash,
+		segmentHash: segment.segmentHash,
+		symbolMetadata: segment.symbolMetadata,
+		imports: segment.imports,
+		exports: segment.exports,
+		documentation: segment.documentation,
+		lspTypeInfo: segment.lspTypeInfo,
+	}
+}
+
+/**
  * Helper to build embedding context from enhanced metadata
  *
  * Enriches code content with metadata for better semantic understanding.

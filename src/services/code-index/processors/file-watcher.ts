@@ -27,7 +27,7 @@ import { codeParser } from "./parser"
 import { CacheManager } from "../cache-manager"
 import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../shared/get-relative-path"
 import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
-import { buildEmbeddingContext, EnhancedCodeSegment } from "../types/metadata"
+import { buildEmbeddingContext, EnhancedCodeSegment, enhancedSegmentToCodeBlock } from "../types/metadata"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
@@ -732,7 +732,7 @@ export class FileWatcher implements IFileWatcher {
 							documentation: block.documentation,
 							lspTypeInfo: block.lspTypeInfo,
 						}
-						return buildEmbeddingContext(segment)
+						return buildEmbeddingContext(enhancedSegmentToCodeBlock(segment))
 					}
 					// Fallback to plain content for blocks without metadata
 					return block.content
