@@ -397,7 +397,41 @@ export class CodeParser implements ICodeParser {
 				}
 			} else {
 				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
-				const loadPromise = loadRequiredLanguageParsers([filePath], getWasmDirectory(), this.metricsCollector)
+
+				// Get WASM directory with explicit error handling
+				let wasmDir: string
+				try {
+					logger.debug("Calling getWasmDirectory()...", "CodeParser")
+					wasmDir = getWasmDirectory()
+					logger.debug(`getWasmDirectory() returned: ${wasmDir}`, "CodeParser")
+
+					// Verify directory exists
+					try {
+						const fs = require("fs")
+						if (!fs.existsSync(wasmDir)) {
+							logger.error(`[CodeParser] WASM directory does not exist: ${wasmDir}`, "CodeParser")
+						} else {
+							const files = fs.readdirSync(wasmDir)
+							logger.debug(
+								`[CodeParser] WASM directory contents (${files.length} files): ${files.slice(0, 5).join(", ")}${files.length > 5 ? "..." : ""}`,
+								"CodeParser",
+							)
+							if (!files.includes("tree-sitter.wasm")) {
+								logger.error(`[CodeParser] tree-sitter.wasm missing from ${wasmDir}`, "CodeParser")
+							}
+						}
+					} catch (fsError) {
+						logger.warn(`[CodeParser] Failed to verify WASM directory: ${fsError}`, "CodeParser")
+					}
+				} catch (error) {
+					const errorMsg = `getWasmDirectory() failed: ${error instanceof Error ? error.message : String(error)}`
+					logger.error(errorMsg, "CodeParser")
+					logger.error(`Stack: ${error instanceof Error ? error.stack : "N/A"}`, "CodeParser")
+					// Return empty array - graceful degradation
+					return []
+				}
+
+				const loadPromise = loadRequiredLanguageParsers([filePath], wasmDir, this.metricsCollector)
 				this.pendingLoads.set(ext, loadPromise)
 				try {
 					const newParsers = await loadPromise
