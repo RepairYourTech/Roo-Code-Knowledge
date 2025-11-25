@@ -65,7 +65,11 @@ async function main() {
 		{
 			name: "copyWasms",
 			setup(build) {
-				build.onEnd(() => copyWasms(srcDir, distDir))
+				console.log("[copyWasms] Plugin registered")
+				build.onEnd(() => {
+					console.log("[copyWasms] Plugin executing - copying WASM files")
+					copyWasms(srcDir, distDir)
+				})
 			},
 		},
 		{
@@ -124,6 +128,20 @@ async function main() {
 	} else {
 		await Promise.all([extensionCtx.rebuild(), workerCtx.rebuild()])
 		await Promise.all([extensionCtx.dispose(), workerCtx.dispose()])
+		
+		// Verify WASM files were copied after build
+		const servicesDir = path.join(distDir, "services", "tree-sitter")
+		if (fs.existsSync(servicesDir)) {
+			const wasmFiles = fs.readdirSync(servicesDir).filter(file => file.endsWith('.wasm'))
+			console.log(`[build-verification] Found ${wasmFiles.length} WASM files in ${servicesDir}`)
+			wasmFiles.forEach(file => {
+				const filePath = path.join(servicesDir, file)
+				const stats = fs.statSync(filePath)
+				console.log(`[build-verification] ${file} (${stats.size} bytes)`)
+			})
+		} else {
+			console.warn(`[build-verification] WASM directory not found: ${servicesDir}`)
+		}
 	}
 }
 

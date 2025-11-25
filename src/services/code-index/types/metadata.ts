@@ -8,6 +8,8 @@
  * @see KNOWLEDGEAUDIT/METADATA_SCHEMA.md for detailed documentation
  */
 
+import { CodeBlock } from "../interfaces/file-processor"
+
 /**
  * Symbol type classification
  */
@@ -311,7 +313,7 @@ export function validateSymbolMetadata(metadata: SymbolMetadata): boolean {
  *
  * Enriches code content with metadata for better semantic understanding.
  */
-export function buildEmbeddingContext(segment: EnhancedCodeSegment): string {
+export function buildEmbeddingContext(segment: CodeBlock): string {
 	const parts: string[] = []
 
 	// Add symbol information
@@ -323,7 +325,9 @@ export function buildEmbeddingContext(segment: EnhancedCodeSegment): string {
 		}
 
 		if (segment.symbolMetadata.parameters && segment.symbolMetadata.parameters.length > 0) {
-			const params = segment.symbolMetadata.parameters.map((p) => `${p.name} (${p.type || "any"})`).join(", ")
+			const params = segment.symbolMetadata.parameters
+				.map((p: any) => `${p.name} (${p.type || "any"})`)
+				.join(", ")
 			parts.push(`Parameters: ${params}`)
 		}
 
@@ -340,14 +344,14 @@ export function buildEmbeddingContext(segment: EnhancedCodeSegment): string {
 
 		if (segment.lspTypeInfo.signatureInfo) {
 			const sig = segment.lspTypeInfo.signatureInfo
-			const params = sig.parameters.map((p) => `${p.name}: ${p.type}`).join(", ")
+			const params = sig.parameters.map((p: any) => `${p.name}: ${p.type}`).join(", ")
 			parts.push(`LSP Signature: ${sig.name}(${params}): ${sig.returnType}`)
 		}
 	}
 
 	// Add import context
 	if (segment.imports && segment.imports.length > 0) {
-		const importNames = segment.imports.map((i) => i.source).join(", ")
+		const importNames = segment.imports.map((i: any) => i.source).join(", ")
 		parts.push(`Imports: ${importNames}`)
 	}
 

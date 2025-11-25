@@ -194,7 +194,7 @@ End Namespace
 	})
 
 	it("should handle small VB.NET files below minimum chunk size", async () => {
-		const smallContent = "Imports System"
+		const smallContent = "Imp" // Only 3 characters, below MIN_BLOCK_CHARS (10)
 
 		const result = await parser.parseFile("small.vb", {
 			content: smallContent,

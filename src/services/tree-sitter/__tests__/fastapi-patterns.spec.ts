@@ -578,7 +578,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
 			expect(userModelMetadata?.className).toBe("User")
 			expect(userModelMetadata?.modelType).toBe("BaseModel")
 			expect(userModelMetadata?.config).toBeDefined()
-			expect(userModelMetadata?.config?.orm_mode).toBeDefined()
+			expect(userModelMetadata?.config?.orm_mode).toBe(true)
 
 			// Test route metadata
 			const createRouteNode = new MockNode(

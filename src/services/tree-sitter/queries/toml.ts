@@ -10,7 +10,7 @@ export const tomlQuery = `
 ; Cargo package configuration
 (pair
   key: (bare_key) @cargo.package.key
-  (#match? @cargo.package.key "^(name|version|description|license|authors|homepage|repository|documentation|readme|keywords|categories|edition|rust-version|resolver|publish|metadata|build|exclude|include|publish|links|autobins|autoexamples|autotests|autobenches)$")
+  (#match? @cargo.package.key "^(name|version|description|license|authors|homepage|repository|documentation|readme|keywords|categories|edition|rust-version|resolver|publish|metadata|build|exclude|include|links|autobins|autoexamples|autotests|autobenches)$")
   value: (_) @cargo.package.value) @definition.cargo_package
 
 ; Cargo dependencies
@@ -61,12 +61,15 @@ export const tomlQuery = `
   (#match? @go.table "^(module|go|require|replace|exclude|retract)$")) @definition.go_config
 
 ; Go module requirements
-(pair
-  key: (bare_key) @go.require.key
-  value: [
-    (string) @go.require.version
-    (inline_table) @go.require.details
-  ]) @definition.go_requirement
+(table
+  (bare_key) @go.table
+  (#eq? @go.table "require")
+  (pair
+    key: (bare_key) @go.require.key
+    value: [
+      (string) @go.require.version
+      (inline_table) @go.require.details
+    ])) @definition.go_requirement
 
 ; .NET/MSBuild configurations
 (table

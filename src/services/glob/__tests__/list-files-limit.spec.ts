@@ -89,7 +89,7 @@ describe("listFiles limit handling for large projects", () => {
 		mockSpawn.mockReturnValue(mockProcess as any)
 
 		// Call listFiles with a limit that would be used in code indexing
-		const limit = 50_000 // MAX_LIST_FILES_LIMIT_CODE_INDEX value
+		const limit = 50_000 // Test with a reasonable limit
 
 		// The key test: this should complete without throwing a stack overflow error
 		let error: Error | null = null

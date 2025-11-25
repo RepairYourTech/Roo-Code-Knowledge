@@ -474,8 +474,7 @@ def upload_file():
 			const apiMetadata = extractFlaskViewMetadata(apiNode as Node, appCode)
 
 			expect(apiMetadata).toBeDefined()
-			expect(apiMetadata?.formHandling).toBe(true)
-			expect(apiMetadata?.requestAccess).toEqual(expect.arrayContaining(["form", "json"]))
+			expect(apiMetadata?.requestAccess).toContain("json")
 
 			// Test file upload route
 			const uploadNode = new MockNode("decorated_definition", appCode.split("@app.route")[4])

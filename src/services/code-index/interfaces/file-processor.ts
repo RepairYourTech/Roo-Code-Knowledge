@@ -3,6 +3,7 @@ import { PointStruct } from "./vector-store"
 import { SymbolMetadata, ImportInfo, ExportInfo } from "../types/metadata"
 import { TypeInfo, SignatureInfo } from "./lsp-service"
 import { ReactComponentMetadata, ReactHookMetadata, ReactJSXMetadata } from "../processors/metadata-extractor"
+import { MetricsCollector } from "../utils/metrics-collector"
 
 /**
  * Interface for code file parser
@@ -25,6 +26,12 @@ export interface ICodeParser {
 			enrichWithLSP?: boolean
 		},
 	): Promise<CodeBlock[]>
+
+	/**
+	 * Sets the metrics collector for recording parser metrics
+	 * @param collector The metrics collector instance
+	 */
+	setMetricsCollector(collector: MetricsCollector): void
 }
 
 /**
@@ -48,6 +55,12 @@ export interface IDirectoryScanner {
 			skipped: number
 		}
 		totalBlockCount: number
+		filesDiscovered: number
+		filesAfterRooignore: number
+		filesAfterExtensionFilter: number
+		filesSkippedBySize: number
+		filesSkippedByCache: number
+		filesProcessed: number
 	}>
 }
 
@@ -130,8 +143,8 @@ export interface CallInfo {
 	/** Name of the function/method being called */
 	calleeName: string
 
-	/** Type of call: 'function', 'method', 'static_method', 'constructor' */
-	callType: "function" | "method" | "static_method" | "constructor"
+	/** Type of call: 'function', 'method', 'static_method', 'constructor', 'chained_method', 'optional_method' */
+	callType: "function" | "method" | "static_method" | "constructor" | "chained_method" | "optional_method"
 
 	/** Line number where the call occurs (1-based) */
 	line: number

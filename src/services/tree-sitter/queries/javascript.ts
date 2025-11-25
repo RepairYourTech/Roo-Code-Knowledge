@@ -521,7 +521,7 @@ export default `
 (assignment_expression
   left: (identifier) @webpack.config.name
   (#match? @webpack.config.name "^(webpackConfig|config)$")
-  right: (object) @webpack.config.object)) @definition.webpack_config_object
+  right: (object) @webpack.config.object) @definition.webpack_config_object
 
 ; Webpack configuration properties
 (object

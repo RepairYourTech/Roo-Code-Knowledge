@@ -425,6 +425,7 @@ export class MetadataValidator {
 
 	/**
 	 * Applies aggressive truncation to reduce metadata size
+	 * Enhanced to handle larger metadata limits and smarter truncation
 	 *
 	 * @param obj The object to truncate
 	 * @param warnings Array to collect warnings
@@ -438,14 +439,54 @@ export class MetadataValidator {
 		let currentSize = 0
 		const maxAllowedSize = this.options.maxMetadataSize * 0.8 // Leave some buffer
 
-		// Process properties in order of importance (you could customize this)
+		// Enhanced truncation with priority-based processing
 		const entries = Object.entries(obj)
-		for (const [key, value] of entries) {
+
+		// Prioritize important metadata fields for relationship extraction
+		const priorityFields = ["calls", "imports", "identifier", "type", "calleeName", "callType"]
+		const prioritizedEntries = entries.sort(([keyA], [keyB]) => {
+			const priorityA = priorityFields.includes(keyA) ? 0 : 1
+			const priorityB = priorityFields.includes(keyB) ? 0 : 1
+			return priorityA - priorityB
+		})
+
+		for (const [key, value] of prioritizedEntries) {
 			const serializedValue = JSON.stringify(value)
+
+			// For arrays, consider truncating individual items if the array is too large
+			if (Array.isArray(value) && value.length > this.options.maxArrayLength) {
+				const truncatedArray = value.slice(0, this.options.maxArrayLength)
+				const truncatedSerialized = JSON.stringify(truncatedArray)
+
+				if (currentSize + truncatedSerialized.length > maxAllowedSize) {
+					// Add truncated array with indicator
+					result[key] = [
+						...truncatedArray,
+						`... and ${value.length - this.options.maxArrayLength} more items (truncated due to size limit)`,
+					]
+					currentSize += JSON.stringify(result[key]).length
+					warnings.push(
+						`Array '${key}' truncated from ${value.length} to ${this.options.maxArrayLength} items`,
+					)
+					continue
+				} else {
+					result[key] = truncatedArray
+					currentSize += truncatedSerialized.length
+					if (value.length > this.options.maxArrayLength) {
+						warnings.push(
+							`Array '${key}' truncated from ${value.length} to ${this.options.maxArrayLength} items`,
+						)
+					}
+					continue
+				}
+			}
+
 			if (currentSize + serializedValue.length > maxAllowedSize) {
 				// Add a truncated indicator and stop
 				result.__truncated = true
 				result.__remainingProperties = entries.length - Object.keys(result).length
+				result.__truncatedSize = currentSize
+				result.__maxSize = this.options.maxMetadataSize
 				break
 			}
 

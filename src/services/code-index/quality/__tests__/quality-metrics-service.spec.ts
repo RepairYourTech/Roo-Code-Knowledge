@@ -210,14 +210,19 @@ describe("QualityMetricsService", () => {
 		})
 
 		it("should skip enrichment for large result sets", async () => {
-			const largeResults = Array(30).fill({
-				id: "result",
+			const largeResults = Array.from({ length: 30 }, (_, i) => ({
+				id: `result-${i}`,
 				score: 0.9,
 				hybridScore: 0.9,
 				vectorScore: 0.85,
 				bm25Score: 0.95,
-				payload: { filePath: "/test/file.ts" },
-			})
+				payload: {
+					filePath: "/test/file.ts",
+					codeChunk: "function test() {}",
+					startLine: 1,
+					endLine: 5,
+				},
+			}))
 
 			const result = await service.enrichWithQualityMetrics(largeResults, { maxResults: 20 })
 

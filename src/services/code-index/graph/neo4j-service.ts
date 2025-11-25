@@ -490,7 +490,7 @@ export class Neo4jService implements INeo4jService {
 		enhanced.maxRetries = enhanced.maxRetries || MAX_BATCH_RETRIES
 		enhanced.initialRetryDelay = enhanced.initialRetryDelay || INITIAL_RETRY_DELAY_MS
 		enhanced.maxRetryDelay = enhanced.maxRetryDelay || 30000 // 30 seconds
-		enhanced.circuitBreakerThreshold = enhanced.circuitBreakerThreshold || 5
+		enhanced.circuitBreakerThreshold = enhanced.circuitBreakerThreshold || 50
 		enhanced.circuitBreakerTimeout = enhanced.circuitBreakerTimeout || 60000 // 1 minute
 		enhanced.healthCheckInterval = enhanced.healthCheckInterval || 30000 // 30 seconds
 		enhanced.queryTimeout = enhanced.queryTimeout || 60000 // 1 minute

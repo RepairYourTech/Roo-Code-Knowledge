@@ -231,7 +231,7 @@ export default `
 ; Test data structures
 (struct_item
   name: (type_identifier) @rust.test_data_name
-  (#match! @rust.test_data_name ".*(TestData|TestCase|TestFixtures|TestScenario).*")) @definition.rust_test_data
+  (#match? @rust.test_data_name ".*(TestData|TestCase|TestFixtures|TestScenario).*")) @definition.rust_test_data
 
 ; Test constants
 (const_item

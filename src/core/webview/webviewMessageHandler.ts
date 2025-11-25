@@ -2360,7 +2360,7 @@ export const webviewMessageHandler = async (
 
 			const settings = message.codeIndexSettings
 
-			console.log("[WebviewMessageHandler] Received saveCodeIndexSettingsAtomic:", settings)
+			console.log("[WebviewMessageHandler] Received saveCodeIndexSettingsAtomic for codebase indexing")
 
 			try {
 				// Check if embedder provider has changed
@@ -2390,7 +2390,22 @@ export const webviewMessageHandler = async (
 					neo4jUsername: settings.neo4jUsername,
 				}
 
-				console.log("[WebviewMessageHandler] Saving globalStateConfig:", globalStateConfig)
+				// Create a sanitized version for logging to avoid exposing sensitive infrastructure details
+				const sanitizedConfigForSave = { ...globalStateConfig }
+				if (sanitizedConfigForSave.codebaseIndexQdrantUrl) {
+					sanitizedConfigForSave.codebaseIndexQdrantUrl = "[REDACTED]"
+				}
+				if (sanitizedConfigForSave.codebaseIndexEmbedderBaseUrl) {
+					sanitizedConfigForSave.codebaseIndexEmbedderBaseUrl = "[REDACTED]"
+				}
+				if (sanitizedConfigForSave.codebaseIndexOpenAiCompatibleBaseUrl) {
+					sanitizedConfigForSave.codebaseIndexOpenAiCompatibleBaseUrl = "[REDACTED]"
+				}
+				if (sanitizedConfigForSave.neo4jUri) {
+					sanitizedConfigForSave.neo4jUri = "[REDACTED]"
+				}
+
+				console.log("[WebviewMessageHandler] Saving globalStateConfig:", sanitizedConfigForSave)
 
 				// Save global state first
 				await updateGlobalState("codebaseIndexConfig", globalStateConfig)
@@ -2445,7 +2460,22 @@ export const webviewMessageHandler = async (
 				}
 
 				// Send success response first - settings are saved regardless of validation
-				console.log("[WebviewMessageHandler] Sending codeIndexSettingsSaved with:", globalStateConfig)
+				// Create a sanitized version for logging to avoid exposing sensitive infrastructure details
+				const sanitizedConfig = { ...globalStateConfig }
+				if (sanitizedConfig.codebaseIndexQdrantUrl) {
+					sanitizedConfig.codebaseIndexQdrantUrl = "[REDACTED]"
+				}
+				if (sanitizedConfig.codebaseIndexEmbedderBaseUrl) {
+					sanitizedConfig.codebaseIndexEmbedderBaseUrl = "[REDACTED]"
+				}
+				if (sanitizedConfig.codebaseIndexOpenAiCompatibleBaseUrl) {
+					sanitizedConfig.codebaseIndexOpenAiCompatibleBaseUrl = "[REDACTED]"
+				}
+				if (sanitizedConfig.neo4jUri) {
+					sanitizedConfig.neo4jUri = "[REDACTED]"
+				}
+
+				console.log("[WebviewMessageHandler] Sending codeIndexSettingsSaved with:", sanitizedConfig)
 				await provider.postMessageToWebview({
 					type: "codeIndexSettingsSaved",
 					success: true,
@@ -2693,8 +2723,12 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "showOutput": {
-			// Execute the focusPanel command to show the output panel
-			await vscode.commands.executeCommand(getCommand("focusPanel"))
+			// Show the extension's output channel
+			// Access the private outputChannel property through type assertion
+			const outputChannel = (provider as any).outputChannel as vscode.OutputChannel
+			if (outputChannel) {
+				outputChannel.show()
+			}
 			break
 		}
 		case "filterMarketplaceItems": {

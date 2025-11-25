@@ -376,6 +376,12 @@ importers:
 
   packages/build:
     dependencies:
+      glob:
+        specifier: '>=11.1.0'
+        version: 11.1.0
+      mkdirp:
+        specifier: ^3.0.1
+        version: 3.0.1
       zod:
         specifier: ^3.25.61
         version: 3.25.61

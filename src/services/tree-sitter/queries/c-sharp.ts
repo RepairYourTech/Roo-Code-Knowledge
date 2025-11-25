@@ -264,7 +264,12 @@ export default `
 (invocation_expression
   member: (member_access_expression
     name: (identifier) @nsubstitute.verify_method
-    (#match! @nsubstitute.verify_method "^(Received|ReceivedWithAnyArgs|DidNotReceive|DidNotReceiveWithAnyArgs|ReceivedCalls)$"))
+    (#match? @nsubstitute.verify_method "^(Received|ReceivedWithAnyArgs|DidNotReceive|DidNotReceiveWithAnyArgs|ReceivedCalls)$"))
+  arguments: (argument_list
+    (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
+    (#match? @nsubstitute.verify_method "^(Received|ReceivedWithAnyArgs|DidNotReceive|DidNotReceiveWithAnyArgs|ReceivedCalls)$"))
+  arguments: (argument_list
+    (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
   arguments: (argument_list
     (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
 
@@ -348,11 +353,15 @@ export default `
 ; Test async methods
 (method_declaration
   name: (identifier) @test.async_method_name
+  return_type: (identifier) @test.async_return
+  (#eq? @test.async_return "Task")) @definition.test_async_method
+
+(method_declaration
+  name: (identifier) @test.async_method_name
   return_type: (generic_name
     name: (identifier) @test.async_return
     (#eq? @test.async_return "Task")
-    type_arguments: (type_argument_list))) @definition.test_async_method
-
+    type_arguments: (type_argument_list))) @definition.test_async
 ; Test exception handling
 (try_statement) @definition.test_try_statement
 (catch_clause) @definition.test_catch_clause

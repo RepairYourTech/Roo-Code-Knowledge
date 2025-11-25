@@ -4,12 +4,14 @@ import * as path from "path"
 import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
+import { MetricsCollector } from "../utils/metrics-collector"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
 import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo, TestMetadata, TestTarget } from "../interfaces"
 import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
 import {
 	MAX_BLOCK_CHARS,
 	MIN_BLOCK_CHARS,
+	MIN_FALLBACK_CHUNK_CHARS,
 	MIN_CHUNK_REMAINDER_CHARS,
 	MAX_CHARS_TOLERANCE_FACTOR,
 	SEMANTIC_MAX_CHARS,
@@ -26,6 +28,7 @@ import {
 	extractJSXMetadata,
 } from "./metadata-extractor"
 import { ImportInfo } from "../types/metadata"
+import { logger } from "../../shared/logger"
 
 /**
  * Implementation of the code parser interface
@@ -34,11 +37,21 @@ export class CodeParser implements ICodeParser {
 	private loadedParsers: LanguageParser = {}
 	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
 	private lspService?: ILSPService
+	private metricsCollector?: MetricsCollector
 	// Markdown files are now supported using the custom markdown parser
 	// which extracts headers and sections for semantic indexing
 
-	constructor(lspService?: ILSPService) {
+	constructor(lspService?: ILSPService, metricsCollector?: MetricsCollector) {
 		this.lspService = lspService
+		this.metricsCollector = metricsCollector
+	}
+
+	/**
+	 * Sets the metrics collector for recording parser metrics
+	 * @param collector The metrics collector instance
+	 */
+	public setMetricsCollector(collector: MetricsCollector): void {
+		this.metricsCollector = collector
 	}
 
 	/**
@@ -75,7 +88,10 @@ export class CodeParser implements ICodeParser {
 				content = await readFile(filePath, "utf8")
 				fileHash = this.createFileHash(content)
 			} catch (error) {
-				console.error(`Error reading file ${filePath}:`, error)
+				logger.error(
+					`Error reading file ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+					"CodeParser",
+				)
 				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 					error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 					stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
@@ -349,13 +365,28 @@ export class CodeParser implements ICodeParser {
 		}
 
 		// Check if we already have the parser loaded
+		logger.debug(`Checking parser availability for extension: ${ext} (file: ${filePath})`, "CodeParser")
 		if (!this.loadedParsers[ext]) {
 			const pendingLoad = this.pendingLoads.get(ext)
 			if (pendingLoad) {
+				logger.debug(`Found pending load for ${ext}, waiting for completion...`, "CodeParser")
 				try {
 					await pendingLoad
+					logger.debug(`Pending load completed for ${ext}`, "CodeParser")
 				} catch (error) {
-					console.error(`Error in pending parser load for ${filePath}:`, error)
+					logger.error(
+						`Error in pending parser load for ${filePath} (extension: ${ext}): ${error instanceof Error ? error.message : String(error)}`,
+						"CodeParser",
+					)
+					logger.error(
+						`Error details: ${error instanceof Error ? error.message : String(error)}`,
+						"CodeParser",
+					)
+					logger.error(
+						`Stack trace: ${error instanceof Error ? error.stack || "No stack available" : "No stack available"}`,
+						"CodeParser",
+					)
+					logger.error(`This was a retry attempt for extension ${ext}`, "CodeParser")
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
@@ -364,15 +395,57 @@ export class CodeParser implements ICodeParser {
 					return []
 				}
 			} else {
-				const loadPromise = loadRequiredLanguageParsers([filePath])
+				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
+				const loadPromise = loadRequiredLanguageParsers([filePath], undefined, this.metricsCollector)
 				this.pendingLoads.set(ext, loadPromise)
 				try {
 					const newParsers = await loadPromise
 					if (newParsers) {
-						this.loadedParsers = { ...this.loadedParsers, ...newParsers }
+						const parserKeys = Object.keys(newParsers)
+						logger.debug(`Successfully loaded parsers for ${ext}: ${parserKeys.join(", ")}`, "CodeParser")
+
+						// Check if we got an empty parser map (graceful degradation case)
+						if (parserKeys.length === 0) {
+							logger.warn(
+								`Graceful degradation: No parsers available for ${ext} due to missing WASM files. Will attempt fallback chunking if needed.`,
+								"CodeParser",
+							)
+							// Don't add to loadedParsers since it's empty, but continue processing
+						} else {
+							// Log parser details for non-empty parsers
+							const parser = newParsers[ext]
+							if (parser) {
+								logger.debug(`Parser details for ${ext}:`, "CodeParser")
+								logger.debug(`  - Language name: ${parser.language?.name || "Unknown"}`, "CodeParser")
+								logger.debug(`  - Parser object exists: ${!!parser.parser}`, "CodeParser")
+								logger.debug(`  - Query object exists: ${!!parser.query}`, "CodeParser")
+								logger.debug(
+									`  - Query captures count: ${parser.query ? "Available" : "N/A"}`,
+									"CodeParser",
+								)
+							}
+							this.loadedParsers = { ...this.loadedParsers, ...newParsers }
+						}
+					} else {
+						logger.warn(
+							`loadRequiredLanguageParsers returned nothing for ${ext} (file: ${filePath})`,
+							"CodeParser",
+						)
 					}
 				} catch (error) {
-					console.error(`Error loading language parser for ${filePath}:`, error)
+					logger.error(
+						`Error loading language parser for ${filePath} (extension: ${ext}): ${error instanceof Error ? error.message : String(error)}`,
+						"CodeParser",
+					)
+					logger.error(
+						`Error details: ${error instanceof Error ? error.message : String(error)}`,
+						"CodeParser",
+					)
+					logger.error(
+						`Stack trace: ${error instanceof Error ? error.stack || "No stack available" : "No stack available"}`,
+						"CodeParser",
+					)
+					logger.error(`This was a first attempt for extension ${ext}`, "CodeParser")
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
@@ -387,26 +460,97 @@ export class CodeParser implements ICodeParser {
 
 		const language = this.loadedParsers[ext]
 		if (!language) {
-			console.warn(`No parser available for file extension: ${ext}`)
+			logger.warn(`No parser available for file extension: ${ext} (file: ${filePath})`, "CodeParser")
+			logger.debug(
+				`Available parsers in loadedParsers: ${Object.keys(this.loadedParsers).join(", ")}`,
+				"CodeParser",
+			)
+			logger.warn(`Suggestion: Check if WASM files are present for ${ext} extension`, "CodeParser")
 			return []
 		}
 
-		const tree = language.parser.parse(content)
+		logger.debug(`Attempting to parse ${filePath} with ${ext} parser`, "CodeParser")
+		this.metricsCollector?.recordParserMetric(ext, "parseAttempt")
+		let tree
+		try {
+			tree = language.parser.parse(content)
+			if (tree) {
+				logger.debug(`Successfully parsed ${filePath} with ${ext} parser`, "CodeParser")
+				logger.debug(`Tree details for ${filePath}:`, "CodeParser")
+				logger.debug(`  - Root node type: ${tree.rootNode?.type || "Unknown"}`, "CodeParser")
+				logger.debug(`  - Number of children: ${tree.rootNode?.children?.length || 0}`, "CodeParser")
+				logger.debug(`  - Tree is null: ${tree === null}`, "CodeParser")
+			} else {
+				logger.warn(`Parser returned null tree for ${filePath}`, "CodeParser")
+			}
+		} catch (e) {
+			logger.error(
+				`Error parsing ${filePath} with ${ext} parser: ${e instanceof Error ? e.message : String(e)}`,
+				"CodeParser",
+			)
+			logger.error(
+				`Full error stack trace: ${e instanceof Error ? e.stack || "No stack available" : "No stack available"}`,
+				"CodeParser",
+			)
+			this.metricsCollector?.recordParserMetric(ext, "parseFailed")
+			return []
+		}
 
 		// We don't need to get the query string from languageQueries since it's already loaded
 		// in the language object
+		logger.debug(`Executing query for ${ext} on ${filePath}`, "CodeParser")
 		const captures = tree ? language.query.captures(tree.rootNode) : []
+		logger.debug(`Query captures for ${filePath}: ${captures.length}`, "CodeParser")
+
+		// Log capture results details
+		if (captures.length > 0) {
+			logger.debug(`First few capture types for ${filePath}:`, "CodeParser")
+			const firstFewCaptures = captures.slice(0, 5)
+			firstFewCaptures.forEach((capture, index) => {
+				logger.debug(
+					`  - Capture ${index + 1}: ${capture.name} (node type: ${capture.node?.type || "Unknown"})`,
+					"CodeParser",
+				)
+			})
+			this.metricsCollector?.recordParserMetric(ext, "parseSuccess")
+			this.metricsCollector?.recordParserMetric(ext, "captures", captures.length)
+		} else {
+			this.metricsCollector?.recordParserMetric(ext, "parseFailed")
+		}
 
 		// Check if captures are empty
 		if (captures.length === 0) {
+			logger.debug(`No captures for ${filePath}, recording diagnostics`, "CodeParser")
+			logger.debug(`File details for ${filePath}:`, "CodeParser")
+			logger.debug(`  - File size: ${content.length} characters`, "CodeParser")
+			logger.debug(`  - Content length: ${content.length} characters`, "CodeParser")
+			logger.debug(`  - MIN_BLOCK_CHARS threshold: ${MIN_BLOCK_CHARS}`, "CodeParser")
+
+			// Record telemetry for empty captures to help refine fallback behavior
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: `No captures found for file: ${filePath} (extension: ${ext}, content length: ${content.length})`,
+				location: "parseContent:emptyCaptures",
+				filePath,
+				extension: ext,
+				contentLength: content.length,
+				minBlockChars: MIN_BLOCK_CHARS,
+				shouldUseFallback: shouldUseFallbackChunking(`.${ext}`),
+				contentLargeEnough: content.length >= MIN_BLOCK_CHARS,
+			})
+
+			// Trigger fallback chunking immediately for empty captures if content is sufficient
 			if (content.length >= MIN_BLOCK_CHARS) {
-				// Perform fallback chunking if content is large enough
-				const blocks = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
-				return blocks
-			} else {
-				// Return empty if content is too small for fallback
-				return []
+				logger.debug(
+					`Triggering fallback chunking for ${filePath} due to empty captures (content length: ${content.length}, threshold: ${MIN_BLOCK_CHARS})`,
+					"CodeParser",
+				)
+				this.metricsCollector?.recordParserMetric(ext, "fallback")
+				return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 			}
+
+			// Don't immediately return - let the method continue to handle empty captures
+			// in the later phase designed for fallback behavior
+			// This preserves the semantic contract of parseContent() for callers
 		}
 
 		const results: CodeBlock[] = []
@@ -419,6 +563,15 @@ export class CodeParser implements ICodeParser {
 
 		// Process captures if not empty
 		const queue: Node[] = Array.from(captures).map((capture) => capture.node)
+
+		// Handle empty captures case - record diagnostics but don't immediately return
+		// This allows later phases to handle fallback behavior as designed
+		if (queue.length === 0 && captures.length === 0) {
+			logger.debug(`Empty captures queue for ${filePath}`, "CodeParser")
+			// Continue processing - the empty queue will skip the while loop
+			// and the method will return an empty results array, preserving the
+			// semantic contract for callers expecting empty arrays when no structured blocks are found
+		}
 
 		while (queue.length > 0) {
 			const currentNode = queue.shift()!
@@ -457,7 +610,10 @@ export class CodeParser implements ICodeParser {
 								continue // Skip the "create a block" section
 							}
 						} catch (error) {
-							console.debug(`Failed to split at logical boundaries for ${filePath}:`, error)
+							logger.debug(
+								`Failed to split at logical boundaries for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+								"CodeParser",
+							)
 							// Fall back to processing children if logical splitting fails
 						}
 
@@ -545,7 +701,10 @@ export class CodeParser implements ICodeParser {
 								}
 							} catch (error) {
 								// Silently fail metadata extraction - don't break indexing
-								console.debug(`Failed to extract metadata for ${filePath}:${start_line}`, error)
+								logger.debug(
+									`Failed to extract metadata for ${filePath}:${start_line}: ${error instanceof Error ? error.message : String(error)}`,
+									"CodeParser",
+								)
 							}
 						}
 
@@ -555,8 +714,13 @@ export class CodeParser implements ICodeParser {
 							const extractedCalls = this.extractCalls(currentNode, filePath)
 							calls = extractedCalls.length > 0 ? extractedCalls : undefined
 						} catch (error) {
-							// Silently fail call extraction - don't break indexing
-							console.debug(`Failed to extract calls for ${filePath}:${start_line}`, error)
+							// Log call extraction failures instead of silently failing
+							// This helps identify parsing issues while continuing processing
+							logger.warn(
+								`Failed to extract calls for ${filePath}:${start_line}: ${error instanceof Error ? error.message : String(error)}`,
+								"CodeParser",
+							)
+							// Continue processing without calls - don't break indexing
 						}
 
 						results.push({
@@ -597,6 +761,7 @@ export class CodeParser implements ICodeParser {
 		chunkType: string,
 		seenSegmentHashes: Set<string>,
 		baseStartLine: number = 1, // 1-based start line of the *first* line in the `lines` array
+		minBlockChars: number = MIN_BLOCK_CHARS, // Allow overriding the minimum threshold
 	): CodeBlock[] {
 		const chunks: CodeBlock[] = []
 		let currentChunkLines: string[] = []
@@ -604,8 +769,12 @@ export class CodeParser implements ICodeParser {
 		let chunkStartLineIndex = 0 // 0-based index within the `lines` array
 		const effectiveMaxChars = MAX_BLOCK_CHARS * MAX_CHARS_TOLERANCE_FACTOR
 
+		// Track MIN_BLOCK_CHARS filtering for validation
+		let filteredChunksCount = 0
+		let smallestFilteredChunkSize = Infinity
+
 		const finalizeChunk = (endLineIndex: number) => {
-			if (currentChunkLength >= MIN_BLOCK_CHARS && currentChunkLines.length > 0) {
+			if (currentChunkLength >= minBlockChars && currentChunkLines.length > 0) {
 				const chunkContent = currentChunkLines.join("\n")
 				const startLine = baseStartLine + chunkStartLineIndex
 				const endLine = baseStartLine + endLineIndex
@@ -626,7 +795,23 @@ export class CodeParser implements ICodeParser {
 						segmentHash,
 						fileHash,
 					})
+					logger.debug(
+						`Created chunk: lines ${startLine}-${endLine}, length: ${chunkContent.length} chars`,
+						"CodeParser",
+					)
 				}
+			} else {
+				// Track filtered chunks for validation
+				if (currentChunkLines.length > 0) {
+					filteredChunksCount++
+					if (currentChunkLength < smallestFilteredChunkSize) {
+						smallestFilteredChunkSize = currentChunkLength
+					}
+				}
+				logger.debug(
+					`Skipping chunk: length ${currentChunkLength} chars below threshold ${minBlockChars}`,
+					"CodeParser",
+				)
 			}
 			currentChunkLines = []
 			currentChunkLength = 0
@@ -692,7 +877,7 @@ export class CodeParser implements ICodeParser {
 				}
 
 				if (
-					currentChunkLength >= MIN_BLOCK_CHARS &&
+					currentChunkLength >= minBlockChars &&
 					remainderLength < MIN_CHUNK_REMAINDER_CHARS &&
 					currentChunkLines.length > 1
 				) {
@@ -703,7 +888,7 @@ export class CodeParser implements ICodeParser {
 						const potentialNextChunkLength = potentialNextChunkLines.join("\n").length + 1
 
 						if (
-							potentialChunkLength >= MIN_BLOCK_CHARS &&
+							potentialChunkLength >= minBlockChars &&
 							potentialNextChunkLength >= MIN_CHUNK_REMAINDER_CHARS
 						) {
 							splitIndex = k
@@ -729,7 +914,37 @@ export class CodeParser implements ICodeParser {
 
 		// Process the last remaining chunk
 		if (currentChunkLines.length > 0) {
-			finalizeChunk(lines.length - 1)
+			// Only finalize if it meets minimum character requirements
+			if (currentChunkLength >= minBlockChars) {
+				logger.debug(
+					`Finalizing last chunk: length ${currentChunkLength} chars meets threshold ${minBlockChars}`,
+					"CodeParser",
+				)
+				finalizeChunk(lines.length - 1)
+			} else {
+				logger.debug(
+					`Skipping final chunk: length ${currentChunkLength} chars below threshold ${minBlockChars}`,
+					"CodeParser",
+				)
+			}
+		}
+
+		logger.debug(`Chunking summary: created ${chunks.length} chunks from ${lines.length} lines`, "CodeParser")
+
+		// Log MIN_BLOCK_CHARS filtering validation
+		if (filteredChunksCount > 0) {
+			const thresholdName =
+				minBlockChars === MIN_FALLBACK_CHUNK_CHARS ? "MIN_FALLBACK_CHUNK_CHARS" : "MIN_BLOCK_CHARS"
+			logger.warn(
+				`${thresholdName} filtering: ${filteredChunksCount} chunks filtered out (smallest: ${smallestFilteredChunkSize} chars, threshold: ${minBlockChars})`,
+				"CodeParser",
+			)
+			if (filteredChunksCount > 5) {
+				logger.warn(
+					`High number of filtered chunks (${filteredChunksCount}) - consider lowering ${thresholdName} threshold from ${minBlockChars}`,
+					"CodeParser",
+				)
+			}
 		}
 
 		return chunks
@@ -741,8 +956,34 @@ export class CodeParser implements ICodeParser {
 		fileHash: string,
 		seenSegmentHashes: Set<string>,
 	): CodeBlock[] {
+		logger.debug(`Starting fallback chunking for ${filePath}`, "CodeParser")
+		logger.debug(
+			`File details: content length=${content.length}, lines=${content.split("\n").length}, MIN_FALLBACK_CHUNK_CHARS=${MIN_FALLBACK_CHUNK_CHARS}`,
+			"CodeParser",
+		)
+
 		const lines = content.split("\n")
-		return this._chunkTextByLines(lines, filePath, fileHash, "fallback_chunk", seenSegmentHashes)
+		const chunks = this._chunkTextByLines(
+			lines,
+			filePath,
+			fileHash,
+			"fallback_chunk",
+			seenSegmentHashes,
+			1,
+			MIN_FALLBACK_CHUNK_CHARS,
+		)
+
+		logger.debug(`Fallback chunking completed: created ${chunks.length} blocks for ${filePath}`, "CodeParser")
+		if (chunks.length === 0) {
+			logger.warn(
+				`No blocks created by fallback chunking for ${filePath} (content length: ${content.length})`,
+				"CodeParser",
+			)
+		} else {
+			logger.debug(`First block sample: ${chunks[0].content.slice(0, 100)}...`, "CodeParser")
+		}
+
+		return chunks
 	}
 
 	private _chunkLeafNodeByLines(
@@ -1010,7 +1251,10 @@ export class CodeParser implements ICodeParser {
 			}
 		} catch (error) {
 			// Silently fail - import extraction is optional
-			console.debug("Failed to extract imports:", error)
+			logger.debug(
+				`Failed to extract imports: ${error instanceof Error ? error.message : String(error)}`,
+				"CodeParser",
+			)
 		}
 
 		return imports
@@ -1041,7 +1285,10 @@ export class CodeParser implements ICodeParser {
 				lspAvailable: true,
 			}
 		} catch (error) {
-			console.debug(`[CodeParser] Failed to enrich with LSP info: ${error}`)
+			logger.debug(
+				`Failed to enrich with LSP info: ${error instanceof Error ? error.message : String(error)}`,
+				"CodeParser",
+			)
 			return {
 				lspAvailable: false,
 			}
@@ -1169,6 +1416,7 @@ export class CodeParser implements ICodeParser {
 
 	/**
 	 * Parse a JavaScript/TypeScript call expression
+	 * Enhanced to handle method calls, property access, and chained calls
 	 */
 	private parseJSCallExpression(callNode: Node): CallInfo | null {
 		const line = callNode.startPosition.row + 1 // Convert to 1-based
@@ -1205,7 +1453,7 @@ export class CodeParser implements ICodeParser {
 			}
 		}
 
-		// Method call: obj.method() or Class.staticMethod()
+		// Enhanced method call handling: obj.method(), obj.prop.method(), function().method()
 		if (functionNode.type === "member_expression") {
 			const objectNode = functionNode.childForFieldName("object")
 			const propertyNode = functionNode.childForFieldName("property")
@@ -1213,6 +1461,39 @@ export class CodeParser implements ICodeParser {
 			if (objectNode && propertyNode) {
 				const objectName = objectNode.text
 				const methodName = propertyNode.text
+
+				// Handle chained property access: obj.prop.method()
+				if (objectNode.type === "member_expression") {
+					const nestedObject = objectNode.childForFieldName("object")
+					const nestedProperty = objectNode.childForFieldName("property")
+
+					if (nestedObject && nestedProperty) {
+						// This is a chained call like obj.prop.method()
+						const baseObject = nestedObject.text
+						const intermediateProp = nestedProperty.text
+
+						return {
+							calleeName: methodName,
+							callType: "chained_method",
+							line,
+							column,
+							receiver: `${baseObject}.${intermediateProp}`,
+							qualifier: undefined,
+						}
+					}
+				}
+
+				// Handle function result method calls: function().method()
+				if (objectNode.type === "call_expression") {
+					return {
+						calleeName: methodName,
+						callType: "method",
+						line,
+						column,
+						receiver: "(function_result)",
+						qualifier: undefined,
+					}
+				}
 
 				// Heuristic: If object starts with uppercase, it's likely a static method
 				// This is not perfect but works for common cases like Math.max(), Array.from()
@@ -1225,6 +1506,29 @@ export class CodeParser implements ICodeParser {
 					column,
 					receiver: isStatic ? undefined : objectName,
 					qualifier: isStatic ? objectName : undefined,
+				}
+			}
+		}
+
+		// Handle optional chaining calls: obj?.method()
+		if (functionNode.type === "chain_expression") {
+			const memberNode = functionNode.childForFieldName("expression")
+			if (memberNode && memberNode.type === "member_expression") {
+				const objectNode = memberNode.childForFieldName("object")
+				const propertyNode = memberNode.childForFieldName("property")
+
+				if (objectNode && propertyNode) {
+					const objectName = objectNode.text
+					const methodName = propertyNode.text
+
+					return {
+						calleeName: methodName,
+						callType: "optional_method",
+						line,
+						column,
+						receiver: objectName,
+						qualifier: undefined,
+					}
 				}
 			}
 		}
@@ -1940,7 +2244,10 @@ export class CodeParser implements ICodeParser {
 
 			return chunks
 		} catch (error) {
-			console.debug(`Error in splitAtLogicalBoundaries for ${filePath}:`, error)
+			logger.debug(
+				`Error in splitAtLogicalBoundaries for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+				"CodeParser",
+			)
 			// Fall back to line-based chunking on error
 			return this._chunkLeafNodeByLines(node, filePath, fileHash, seenSegmentHashes)
 		}
@@ -2349,7 +2656,10 @@ export class CodeParser implements ICodeParser {
 					}
 				} catch (error) {
 					// Silently fail metadata extraction
-					console.debug(`Failed to extract metadata for chunk ${filePath}:${group.startLine + 1}`, error)
+					logger.debug(
+						`Failed to extract metadata for chunk ${filePath}:${group.startLine + 1}: ${error instanceof Error ? error.message : String(error)}`,
+						"CodeParser",
+					)
 				}
 			}
 
@@ -2362,7 +2672,10 @@ export class CodeParser implements ICodeParser {
 				}
 			} catch (error) {
 				// Silently fail call extraction
-				console.debug(`Failed to extract calls for chunk ${filePath}:${group.startLine + 1}`, error)
+				logger.debug(
+					`Failed to extract calls for chunk ${filePath}:${group.startLine + 1}: ${error instanceof Error ? error.message : String(error)}`,
+					"CodeParser",
+				)
 			}
 
 			// Determine chunk type and identifier
@@ -2385,7 +2698,10 @@ export class CodeParser implements ICodeParser {
 				testMetadata,
 			}
 		} catch (error) {
-			console.debug(`Failed to create chunk from boundary group for ${filePath}:`, error)
+			logger.debug(
+				`Failed to create chunk from boundary group for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+				"CodeParser",
+			)
 			return null
 		}
 	}
@@ -2453,7 +2769,14 @@ export class CodeParser implements ICodeParser {
 }
 
 // Export a singleton instance for convenience
-export const codeParser = new CodeParser()
+export const codeParser = new CodeParser(undefined, undefined)
+
+/**
+ * Set the metrics collector for the singleton parser instance
+ */
+export function setParserMetricsCollector(collector: MetricsCollector): void {
+	;(codeParser as any).metricsCollector = collector
+}
 
 // Type definitions for the logical boundary system
 

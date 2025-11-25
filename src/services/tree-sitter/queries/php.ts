@@ -167,9 +167,7 @@ export default `
 ; Heredoc syntax
 (heredoc) @definition.heredoc
 
-; Nowdoc syntax
-(nowdoc) @definition.nowdoc
-; Nowdoc syntax
+
 (nowdoc) @definition.nowdoc
 
 ; ===== TESTING FRAMEWORK PATTERNS FOR PHP =====
@@ -294,7 +292,7 @@ export default `
     (#match? @pest.test_function "^(test|it)$")
     arguments: (arguments
       (string) @pest.test_description
-      (closure_expression) @pest.test_closure))) @definition.est_test
+      (closure_expression) @pest.test_closure))) @definition.pest_test
 
 ; Pest - Test with closure only
 (expression_statement
@@ -399,12 +397,8 @@ export default `
 (class_declaration
   name: (name) @php.test_trait_class
   (declaration_list
-    (property_declaration
-      (property_element
-        (variable_name
-          (name) @php.trait_property
-          (#match! @php.trait_property "^(use|uses)$"))
-        (name) @php.trait_name)))) @definition.php_test_with_traits
+    (trait_use_clause
+      (name) @php.trait_name))) @definition.php_test_with_traits
 
 ; Test configuration files
 (class_declaration

@@ -81,6 +81,14 @@ export class CodeIndexStateManager {
 	private _neo4jErrorTimestamp: number | undefined
 	private _neo4jRetrySuggestion: string | undefined
 
+	// File discovery metrics
+	private _filesDiscovered: number = 0
+	private _filesFilteredByRooignore: number = 0
+	private _filesFilteredByExtension: number = 0
+	private _filesSkippedBySize: number = 0
+	private _filesSkippedByCache: number = 0
+	private _filesActivelyIndexing: number = 0
+
 	private _progressEmitter = new vscode.EventEmitter<ReturnType<typeof this.getCurrentStatus>>()
 
 	// --- Public API ---
@@ -116,6 +124,13 @@ export class CodeIndexStateManager {
 			vectorRetrySuggestion: this._vectorRetrySuggestion,
 			// System health
 			systemHealth: this._systemHealth,
+			// File discovery metrics
+			filesDiscovered: this._filesDiscovered,
+			filesFilteredByRooignore: this._filesFilteredByRooignore,
+			filesFilteredByExtension: this._filesFilteredByExtension,
+			filesSkippedBySize: this._filesSkippedBySize,
+			filesSkippedByCache: this._filesSkippedByCache,
+			filesActivelyIndexing: this._filesActivelyIndexing,
 		}
 	}
 
@@ -236,7 +251,19 @@ export class CodeIndexStateManager {
 			if (newState !== "Indexing") {
 				this._processedItems = 0
 				this._totalItems = 0
+
 				this._currentItemUnit = "blocks" // Reset to default unit
+
+				// Reset file discovery metrics only if not transitioning to Indexed state
+				// This allows users to see what happened during the scan even after it completes
+				if (newState !== "Indexed") {
+					this._filesDiscovered = 0
+					this._filesFilteredByRooignore = 0
+					this._filesFilteredByExtension = 0
+					this._filesSkippedBySize = 0
+					this._filesSkippedByCache = 0
+					this._filesActivelyIndexing = 0
+				}
 
 				// Reset component statuses appropriately
 				if (newState === "Standby") {
@@ -360,6 +387,34 @@ export class CodeIndexStateManager {
 		}
 	}
 
+	public reportFileDiscoveryMetrics(
+		filesDiscovered: number,
+		filesFilteredByRooignore: number,
+		filesFilteredByExtension: number,
+		filesSkippedBySize: number,
+		filesSkippedByCache: number,
+		filesActivelyIndexing: number,
+	): void {
+		const changed =
+			filesDiscovered !== this._filesDiscovered ||
+			filesFilteredByRooignore !== this._filesFilteredByRooignore ||
+			filesFilteredByExtension !== this._filesFilteredByExtension ||
+			filesSkippedBySize !== this._filesSkippedBySize ||
+			filesSkippedByCache !== this._filesSkippedByCache ||
+			filesActivelyIndexing !== this._filesActivelyIndexing
+
+		if (changed) {
+			this._filesDiscovered = filesDiscovered
+			this._filesFilteredByRooignore = filesFilteredByRooignore
+			this._filesFilteredByExtension = filesFilteredByExtension
+			this._filesSkippedBySize = filesSkippedBySize
+			this._filesSkippedByCache = filesSkippedByCache
+			this._filesActivelyIndexing = filesActivelyIndexing
+
+			this._progressEmitter.fire(this.getCurrentStatus())
+		}
+	}
+
 	// --- Neo4j Graph Indexing Progress ---
 
 	/**
@@ -448,7 +503,10 @@ export class CodeIndexStateManager {
 			if (status === "connection-failed" || status === "resource-exhausted") {
 				// Don't fail the entire system, just mark as degraded
 				if (this._systemStatus === "Indexing") {
-					this._statusMessage = this._statusMessage + " (Graph indexing degraded)"
+					const suffix = " (Graph indexing degraded)"
+					if (!this._statusMessage.includes(suffix)) {
+						this._statusMessage = this._statusMessage + suffix
+					}
 				}
 			}
 

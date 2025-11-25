@@ -525,6 +525,80 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			vscode.window.showErrorMessage(`Failed to run embedding provider diagnostic: ${errorMsg}`)
 		}
 	},
+	dumpIndexingDiagnostics: async () => {
+		try {
+			const manager = CodeIndexManager.getInstance(context)
+
+			if (!manager) {
+				vscode.window.showErrorMessage("Code index manager not initialized")
+				return
+			}
+
+			if (!manager.outputChannel) {
+				vscode.window.showErrorMessage("Code index manager output channel not available")
+				return
+			}
+
+			// Get comprehensive diagnostic snapshot
+			const diagnosticSnapshot = manager.getDiagnosticSnapshot()
+
+			// Format as JSON with indentation
+			const formattedDiagnostics = JSON.stringify(diagnosticSnapshot, null, 2)
+
+			// Write to output channel
+			manager.outputChannel.appendLine("=== INDEXING DIAGNOSTICS ===")
+			manager.outputChannel.appendLine(formattedDiagnostics)
+			manager.outputChannel.appendLine("=== END DIAGNOSTICS ===")
+
+			// Write to file in workspace root
+			try {
+				const workspaceFolders = vscode.workspace.workspaceFolders
+				if (!workspaceFolders || workspaceFolders.length === 0) {
+					vscode.window.showErrorMessage("No workspace folder available for diagnostics file")
+					return
+				}
+
+				const workspacePath = workspaceFolders[0].uri.fsPath
+				const timestamp = new Date().toISOString().replace(/[:.]/g, "-")
+
+				// Ensure .roo directory exists
+				const rooDirUri = vscode.Uri.joinPath(vscode.Uri.file(workspacePath), ".roo")
+				await vscode.workspace.fs.createDirectory(rooDirUri)
+
+				// Build diagnostic file path by joining rooDirUri with the file name
+				const diagnosticFileName = `indexing-diagnostics-${timestamp}.json`
+				const diagnosticFilePath = vscode.Uri.joinPath(rooDirUri, diagnosticFileName)
+
+				// Write diagnostics to file
+				const diagnosticContent = JSON.stringify(diagnosticSnapshot, null, 2)
+				await vscode.workspace.fs.writeFile(diagnosticFilePath, Buffer.from(diagnosticContent, "utf8"))
+
+				// Show notification with options
+				const action = await vscode.window.showInformationMessage(
+					"Indexing diagnostics saved to file",
+					"Show Output",
+					"Open File",
+				)
+
+				if (action === "Show Output") {
+					manager.outputChannel.show()
+				} else if (action === "Open File") {
+					const document = await vscode.workspace.openTextDocument(diagnosticFilePath)
+					await vscode.window.showTextDocument(document)
+				}
+			} catch (error) {
+				const errorMessage = error instanceof Error ? error.message : String(error)
+				manager.outputChannel.appendLine(`Failed to save diagnostics: ${errorMessage}`)
+
+				if (manager.outputChannel) {
+					vscode.window.showErrorMessage(`Failed to save diagnostics: ${errorMessage}`, "Show Output")
+				}
+			}
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			vscode.window.showErrorMessage(`Failed to run diagnostics: ${errorMessage}`)
+		}
+	},
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {

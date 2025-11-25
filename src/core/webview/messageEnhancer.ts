@@ -204,7 +204,7 @@ ${contentPreview}`)
 	 * @param value Value to cache
 	 */
 	private static setInCache(key: string, value: string): void {
-		// Simple LRU: if cache is full, remove oldest entry
+		// Simple FIFO: if cache is full, remove oldest entry by insertion order
 		if (this.codebaseContextCache.size >= this.CACHE_SIZE_LIMIT) {
 			const firstKey = this.codebaseContextCache.keys().next().value
 			if (firstKey) {

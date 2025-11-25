@@ -386,6 +386,10 @@ export class QdrantVectorStore implements IVectorStore {
 		}>,
 	): Promise<void> {
 		try {
+			this.log(
+				`[QdrantVectorStore] upsertPoints ENTRY: Received ${points.length} points to upsert to collection ${this.collectionName}`,
+			)
+
 			const processedPoints = points.map((point) => {
 				if (point.payload?.filePath) {
 					const segments = point.payload.filePath.split(path.sep).filter(Boolean)
@@ -407,12 +411,29 @@ export class QdrantVectorStore implements IVectorStore {
 				return point
 			})
 
+			this.log(
+				`[QdrantVectorStore] Processed ${processedPoints.length} points (${processedPoints.filter((p) => p.payload.pathSegments).length} with pathSegments)`,
+			)
+
 			await this.client.upsert(this.collectionName, {
 				points: processedPoints,
 				wait: true,
 			})
+
+			this.log(
+				`[QdrantVectorStore] upsertPoints SUCCESS: Successfully upserted ${points.length} points to collection ${this.collectionName}`,
+			)
+			this.log(
+				`[QdrantVectorStore] Sample point IDs: ${points
+					.slice(0, 3)
+					.map((p) => p.id)
+					.join(", ")}${points.length > 3 ? ` (and ${points.length - 3} more)` : ""}`,
+			)
 		} catch (error) {
-			this.log("Failed to upsert points:", error)
+			this.log(
+				`[QdrantVectorStore] Failed to upsert ${points.length} points to collection ${this.collectionName}:`,
+				error,
+			)
 			throw error
 		}
 	}

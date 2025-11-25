@@ -39,7 +39,7 @@ export default `${typescriptQuery}
 ; React library imports (react-dom, @testing-library/react, etc.)
 (import_statement
   source: (string
-    (#match? @source "^['\"](@?react|react-|@testing-library)['\"]"))) @definition.react_library_import
+    (#match? @source "^['\"](@react.*|react-.*|@testing-library/.*)['\""]$"))) @definition.react_library_import
 
 ; ===== FUNCTION COMPONENTS =====
 ; Function Components - Basic detection
@@ -365,7 +365,7 @@ export default `${typescriptQuery}
 ; Next.js library imports (next/navigation, next/image, etc.)
 (import_statement
   source: (string
-    (#match? @source "^['\"]next/['\"]"))) @definition.nextjs_library_import
+    (#match? @source "^['\"]next/.*['\"]"))) @definition.nextjs_library_import
 
 ; Next.js Page Components - Pages Router
 (export_statement
@@ -384,12 +384,7 @@ export default `${typescriptQuery}
         body: (jsx_element))))) @definition.nextjs_page_component
 
 ; Next.js Page Components - Default Export
-(export_statement
-  (function_declaration
-    name: (identifier) @nextjs.page.name
-    body: (statement_block
-      (return_statement
-        (jsx_element))))) @definition.nextjs_default_page
+
 
 ; Next.js getServerSideProps
 (export_statement
@@ -502,7 +497,7 @@ export default `${typescriptQuery}
 (expression_statement
   (string
     (string_fragment) @nextjs.client.directive
-    (#match? @nextjs.client.directive "^['\"]use client['\"]$"))) @definition.nextjs_client_component
+    (#match? @nextjs.client.directive "^use client$"))) @definition.nextjs_client_component
 
 ; Next.js Metadata Export - App Router
 (export_statement
@@ -571,21 +566,6 @@ export default `${typescriptQuery}
       (required_parameter
         pattern: (identifier) @nextjs.middleware.res)))) @definition.nextjs_middleware
 
-; Next.js Dynamic Route Patterns - Pages Router
-; [slug].js, [id].tsx, etc.
-(function_declaration
-  name: (identifier) @nextjs.dynamic.name
-  (#match? @nextjs.dynamic.name "^[a-zA-Z]\\w*$")) @definition.nextjs_dynamic_route
-
-; Catch-all routes [...slug].js
-(function_declaration
-  name: (identifier) @nextjs.catchall.name
-  (#match? @nextjs.catchall.name "^[a-zA-Z]\\w*$")) @definition.nextjs_catchall_route
-
-; Optional catch-all routes [[...slug]].js
-(function_declaration
-  name: (identifier) @nextjs.optional.name
-  (#match? @nextjs.optional.name "^[a-zA-Z]\\w*$")) @definition.nextjs_optional_route
 
 ; Next.js Image Component Usage
 (jsx_element

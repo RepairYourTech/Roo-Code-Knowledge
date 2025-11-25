@@ -1,4 +1,5 @@
 import { OpenAI } from "openai"
+import * as vscode from "vscode"
 import { IEmbedder, EmbeddingResponse, EmbedderInfo } from "../interfaces/embedder"
 import {
 	MAX_BATCH_TOKENS,
@@ -90,6 +91,11 @@ export class OpenRouterEmbedder implements IEmbedder {
 	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		const modelToUse = model || this.defaultModelId
 
+		// Log method entry
+		console.log(
+			`[OpenRouterEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
+		)
+
 		// Apply model-specific query prefix if required
 		const queryPrefix = getModelQueryPrefix("openrouter", modelToUse)
 		const processedTexts = queryPrefix
@@ -115,11 +121,18 @@ export class OpenRouterEmbedder implements IEmbedder {
 				})
 			: texts
 
+		// Log prefix application
+		console.log(
+			`[OpenRouterEmbedder] Applied query prefix to ${processedTexts.filter((t) => t.startsWith(queryPrefix || "")).length}/${processedTexts.length} texts`,
+		)
+
 		const allEmbeddings: number[][] = []
 		const usage = { promptTokens: 0, totalTokens: 0 }
 		const remainingTexts = [...processedTexts]
 
+		let batchNumber = 0
 		while (remainingTexts.length > 0) {
+			batchNumber++
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -155,11 +168,34 @@ export class OpenRouterEmbedder implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
+				// Log batch processing
+				console.log(
+					`[OpenRouterEmbedder] Processing batch ${batchNumber}: ${currentBatch.length} texts (${currentBatchTokens} tokens)`,
+				)
+
 				const batchResult = await this._embedBatchWithRetries(currentBatch, modelToUse)
+
+				// Log batch result
+				console.log(
+					`[OpenRouterEmbedder] Batch ${batchNumber} complete: Received ${batchResult.embeddings.length} embeddings (tokens: ${batchResult.usage.promptTokens}/${batchResult.usage.totalTokens})`,
+				)
+
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
 			}
+		}
+
+		// Log final verification
+		console.log(
+			`[OpenRouterEmbedder] createEmbeddings EXIT: Generated ${allEmbeddings.length} embeddings from ${texts.length} input texts (usage: ${usage.promptTokens}/${usage.totalTokens} tokens)`,
+		)
+
+		// Check for embedding count mismatch
+		if (allEmbeddings.length !== texts.length) {
+			console.error(
+				`[OpenRouterEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${allEmbeddings.length}`,
+			)
 		}
 
 		return { embeddings: allEmbeddings, usage }
@@ -322,10 +358,49 @@ export class OpenRouterEmbedder implements IEmbedder {
 
 			if (state.isRateLimited && state.rateLimitResetTime > Date.now()) {
 				const waitTime = state.rateLimitResetTime - Date.now()
-				// Silent wait - no logging to prevent flooding
+
+				// Show user notification about rate limit with progress indication
+				const waitSeconds = Math.ceil(waitTime / 1000)
+				const message = `OpenRouter API rate limit reached. Waiting ${waitSeconds}s for automatic retry...`
+
+				// Show initial rate limit notification
+				vscode.window.showWarningMessage(message, "Show Output").then((action: string | undefined) => {
+					if (action === "Show Output") {
+						// User can view output channel for detailed progress
+					}
+				})
+
 				release()
 				mutexReleased = true
-				await new Promise((resolve) => setTimeout(resolve, waitTime))
+
+				// Implement progress indication during wait
+				const progressInterval = setInterval(() => {
+					const remainingTime = Math.max(0, state.rateLimitResetTime - Date.now())
+					const remainingSeconds = Math.ceil(remainingTime / 1000)
+
+					if (remainingTime <= 0) {
+						clearInterval(progressInterval)
+						vscode.window.showInformationMessage("OpenRouter API rate limit reset. Resuming indexing...")
+						return
+					}
+
+					// Update progress every 5 seconds to avoid spamming
+					if (remainingSeconds % 5 === 0 || remainingSeconds <= 3) {
+						console.log(`[OpenRouter] Rate limit wait: ${remainingSeconds}s remaining`)
+					}
+				}, 1000)
+
+				try {
+					await new Promise((resolve) => {
+						const timeout = setTimeout(resolve, waitTime)
+						// Clear progress when wait completes
+						// Store timeout reference for cleanup
+						;(progressInterval as any).timeoutRef = timeout
+					})
+				} finally {
+					clearInterval(progressInterval)
+				}
+
 				return
 			}
 
@@ -370,7 +445,22 @@ export class OpenRouterEmbedder implements IEmbedder {
 			state.isRateLimited = true
 			state.rateLimitResetTime = now + exponentialDelay
 
-			// Silent rate limit activation - no logging to prevent flooding
+			// Add user notification for rate limit activation
+			const delaySeconds = Math.ceil(exponentialDelay / 1000)
+			vscode.window
+				.showWarningMessage(
+					`OpenRouter API rate limit activated. Consecutive errors: ${state.consecutiveRateLimitErrors}. Waiting ${delaySeconds}s before retry...`,
+					"Show Output",
+				)
+				.then((action: string | undefined) => {
+					if (action === "Show Output") {
+						// User can view output channel for detailed information
+					}
+				})
+
+			console.log(
+				`[OpenRouter] Rate limit activated: ${delaySeconds}s delay, ${state.consecutiveRateLimitErrors} consecutive errors`,
+			)
 		} finally {
 			release()
 		}

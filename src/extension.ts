@@ -2,16 +2,6 @@ import * as vscode from "vscode"
 import * as dotenvx from "@dotenvx/dotenvx"
 import * as path from "path"
 
-// Load environment variables from .env file
-try {
-	// Specify path to .env file in the project root directory
-	const envPath = path.join(__dirname, "..", ".env")
-	dotenvx.config({ path: envPath })
-} catch (e) {
-	// Silently handle environment loading errors
-	console.warn("Failed to load environment variables:", e)
-}
-
 import type { CloudUserInfo, AuthState } from "@roo-code/types"
 import { CloudService, BridgeOrchestrator } from "@roo-code/cloud"
 import { TelemetryService, PostHogTelemetryClient } from "@roo-code/telemetry"
@@ -65,6 +55,18 @@ export async function activate(context: vscode.ExtensionContext) {
 	outputChannel = vscode.window.createOutputChannel(Package.outputChannel)
 	context.subscriptions.push(outputChannel)
 	outputChannel.appendLine(`${Package.name} extension activated - ${JSON.stringify(Package)}`)
+
+	// Load environment variables from .env file
+	try {
+		// Use extensionPath instead of __dirname for correct path resolution after packaging
+		const envPath = path.join(context.extensionPath, ".env")
+		if (require("fs").existsSync(envPath)) {
+			dotenvx.config({ path: envPath })
+		}
+	} catch (e) {
+		// Silently handle environment loading errors
+		console.warn("Failed to load environment variables:", e)
+	}
 
 	// Migrate old settings to new
 	await migrateSettings(context, outputChannel)

@@ -20,6 +20,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "./shared/validation-helpers"
 import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
+import { MetricsCollector } from "./utils/metrics-collector"
 
 export class CodeIndexManager {
 	// --- Singleton Implementation ---
@@ -43,6 +44,9 @@ export class CodeIndexManager {
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
+
+	// Comprehensive metrics collection
+	private readonly _metricsCollector: MetricsCollector
 
 	public static getInstance(context: vscode.ExtensionContext, workspacePath?: string): CodeIndexManager | undefined {
 		// If workspacePath is not provided, try to get it from the active editor or first workspace folder
@@ -86,6 +90,7 @@ export class CodeIndexManager {
 		this._stateManager = new CodeIndexStateManager()
 		this._outputChannel = vscode.window.createOutputChannel("Roo Code - Indexing")
 		this._log = createOutputChannelLogger(this._outputChannel)
+		this._metricsCollector = new MetricsCollector()
 	}
 
 	// --- Public API ---
@@ -144,6 +149,8 @@ export class CodeIndexManager {
 	 * @returns Object indicating if a restart is needed
 	 */
 	public async initialize(contextProxy: ContextProxy): Promise<{ requiresRestart: boolean }> {
+		this._log(`[CodeIndexManager] Initialization starting for workspace: ${this.workspacePath}`)
+
 		// 1. ConfigManager Initialization and Configuration Loading
 		if (!this._configManager) {
 			this._configManager = new CodeIndexConfigManager(contextProxy)
@@ -151,8 +158,16 @@ export class CodeIndexManager {
 		// Load configuration once to get current state and restart requirements
 		const { requiresRestart } = await this._configManager.loadConfiguration()
 
+		this._log(`[CodeIndexManager] Configuration loaded:
+			Enabled: ${this.isFeatureEnabled}
+			Configured: ${this.isFeatureConfigured}
+			Neo4j Enabled: ${this._configManager.isNeo4jEnabled}
+			Requires Restart: ${requiresRestart}
+		`)
+
 		// 2. Check if feature is enabled
 		if (!this.isFeatureEnabled) {
+			this._log("[CodeIndexManager] Indexing is disabled. Exiting initialization.")
 			if (this._orchestrator) {
 				// Cancel any active indexing operation
 				this._orchestrator.cancelIndexing()
@@ -203,7 +218,9 @@ export class CodeIndexManager {
 		const needsServiceRecreation = !this._serviceFactory || requiresRestart
 
 		if (needsServiceRecreation) {
+			this._log("[CodeIndexManager] (Re)Creating core services...")
 			await this._recreateServices()
+			this._log("[CodeIndexManager] Core services (re)created.")
 		}
 
 		// 5. Handle Indexing Start/Restart
@@ -212,6 +229,10 @@ export class CodeIndexManager {
 		const shouldStartOrRestartIndexing =
 			requiresRestart ||
 			(needsServiceRecreation && (!this._orchestrator || this._orchestrator.state !== "Indexing"))
+
+		this._log(
+			`[CodeIndexManager] Initialization complete. Starting/Restarting indexing: ${shouldStartOrRestartIndexing}`,
+		)
 
 		if (shouldStartOrRestartIndexing) {
 			this._orchestrator?.startIndexing() // This method is async, but we don't await it here
@@ -332,6 +353,7 @@ export class CodeIndexManager {
 		}
 		this._stateManager.dispose()
 		this._outputChannel.dispose()
+		this._metricsCollector.dispose()
 	}
 
 	/**
@@ -453,6 +475,7 @@ export class CodeIndexManager {
 				rooIgnoreController,
 				this._bm25Index,
 				this._stateManager, // Pass state manager for Neo4j progress tracking
+				this._metricsCollector, // Pass metrics collector
 			)
 
 		// Initialize Neo4j if enabled
@@ -535,13 +558,7 @@ export class CodeIndexManager {
 		if (!validationResult.valid) {
 			const errorMessage = validationResult.error || "Embedder configuration validation failed"
 			// Categorize embedder validation errors as configuration errors
-			this._stateManager.setVectorStatus(
-				"error",
-				errorMessage,
-				"configuration",
-				errorMessage,
-				"Review embedder configuration and API key",
-			)
+			this._stateManager.setVectorStatus("error", errorMessage, "configuration", errorMessage, errorMessage)
 			this._stateManager.setSystemState("Error", errorMessage)
 			throw new Error(errorMessage)
 		}
@@ -558,6 +575,7 @@ export class CodeIndexManager {
 			graphIndexer,
 			neo4jService,
 			this._outputChannel,
+			this._metricsCollector,
 		)
 
 		// (Re)Initialize search service (keep for backward compatibility)
@@ -650,5 +668,130 @@ export class CodeIndexManager {
 				}
 			}
 		}
+	}
+
+	// --- Metrics Collection API ---
+
+	/**
+	 * Get comprehensive performance metrics
+	 */
+	public getMetrics() {
+		return this._metricsCollector.getPerformanceSummary()
+	}
+
+	/**
+	 * Get file type metrics
+	 */
+	public getFileTypeMetrics() {
+		return this._metricsCollector.getAllFileTypeMetrics()
+	}
+
+	/**
+	 * Get block type metrics
+	 */
+	public getBlockTypeMetrics() {
+		return this._metricsCollector.getAllBlockTypeMetrics()
+	}
+
+	/**
+	 * Get parser metrics
+	 */
+	public getParserMetrics() {
+		return this._metricsCollector.getAllParserMetrics()
+	}
+
+	/**
+	 * Get diagnostic snapshot for comprehensive debugging
+	 */
+	public getDiagnosticSnapshot() {
+		return {
+			timestamp: new Date().toISOString(),
+			workspacePath: this.workspacePath,
+			currentState: this.getCurrentStatus(),
+			metrics: this.getMetrics(),
+			fileTypeMetrics: this.getFileTypeMetrics(),
+			blockTypeMetrics: this.getBlockTypeMetrics(),
+			parserMetrics: this.getParserMetrics(),
+			componentStatus: this._stateManager.getComponentStatus(),
+			configuration: {
+				enabled: this.isFeatureEnabled,
+				configured: this.isFeatureConfigured,
+				neo4jEnabled: this._configManager?.isNeo4jEnabled ?? false,
+			},
+		}
+	}
+
+	/**
+	 * Get real-time progress metrics
+	 */
+	public getProgressMetrics() {
+		return this._metricsCollector.getProgressMetrics()
+	}
+
+	/**
+	 * Get provider-specific metrics
+	 */
+	public getProviderMetrics(providerName: string) {
+		return this._metricsCollector.getProviderMetrics(providerName)
+	}
+
+	/**
+	 * Get operation-specific metrics
+	 */
+	public getOperationMetrics(operationName: string) {
+		return this._metricsCollector.getOperationMetrics(operationName)
+	}
+
+	/**
+	 * Reset all metrics
+	 */
+	public resetMetrics(): void {
+		this._metricsCollector.resetMetrics()
+	}
+
+	/**
+	 * Record batch metrics for tracking
+	 */
+	public recordBatchMetrics(metrics: {
+		batchId: string
+		startTime: number
+		itemCount: number
+		success: boolean
+		errorType?: string
+		retryCount: number
+		provider: string
+		tokenCount: number
+		vectorStoreOperationTime?: number
+		graphOperationTime?: number
+	}): void {
+		this._metricsCollector.recordBatchMetrics(metrics)
+	}
+
+	/**
+	 * Record operation metrics for tracking
+	 */
+	public recordOperationMetrics(
+		operationName: string,
+		duration: number,
+		success: boolean,
+		metadata?: Record<string, any>,
+	): void {
+		this._metricsCollector.recordOperationMetrics(operationName, duration, success, metadata)
+	}
+
+	/**
+	 * Record provider metrics for tracking
+	 */
+	public recordProviderMetrics(
+		providerName: string,
+		metrics: {
+			success: boolean
+			latency: number
+			tokenCount?: number
+			rateLimited?: boolean
+			circuitBreakerTrip?: boolean
+		},
+	): void {
+		this._metricsCollector.recordProviderMetrics(providerName, metrics)
 	}
 }

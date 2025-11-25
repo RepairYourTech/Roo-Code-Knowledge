@@ -17,11 +17,6 @@ export function isPathInIgnoredDirectory(filePath: string): boolean {
 		// Skip empty parts (from leading or trailing slashes)
 		if (!part) continue
 
-		// Handle the ".*" pattern for hidden directories
-		if (DIRS_TO_IGNORE.includes(".*") && part.startsWith(".") && part !== ".") {
-			return true
-		}
-
 		// Check for exact matches
 		if (DIRS_TO_IGNORE.includes(part)) {
 			return true
@@ -30,11 +25,6 @@ export function isPathInIgnoredDirectory(filePath: string): boolean {
 
 	// Check if path contains any ignored directory pattern
 	for (const dir of DIRS_TO_IGNORE) {
-		if (dir === ".*") {
-			// Already handled above
-			continue
-		}
-
 		// Check if the directory appears in the path
 		if (normalizedPath.includes(`/${dir}/`)) {
 			return true

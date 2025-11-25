@@ -1,9 +1,11 @@
 {
 	"extends": "@roo-code/config-typescript/base.json",
 	"compilerOptions": {
+		"module": "ESNext",
+		"moduleResolution": "bundler",
 		"types": ["vitest/globals"],
 		"outDir": "dist"
 	},
-	"include": ["src"],
+	"include": ["src/**/*.ts"],
 	"exclude": ["node_modules"]
 }

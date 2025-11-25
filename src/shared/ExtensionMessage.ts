@@ -66,6 +66,13 @@ export interface IndexingStatus {
 	neo4jRetrySuggestion?: string
 	// System health
 	systemHealth?: "healthy" | "degraded" | "failed"
+	// File discovery metrics
+	filesDiscovered?: number
+	filesFilteredByRooignore?: number
+	filesFilteredByExtension?: number
+	filesSkippedBySize?: number
+	filesSkippedByCache?: number
+	filesActivelyIndexing?: number
 }
 
 export interface IndexingStatusUpdateMessage {

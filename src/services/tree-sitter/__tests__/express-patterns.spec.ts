@@ -84,7 +84,8 @@ describe("Express.js Tree-sitter Patterns", () => {
 			`
 			(call_expression
 			  function: (member_expression
-			    object: (identifier) @app
+			    object: (identifier) @express
+			    (#eq? @express "express")
 			    property: (property_identifier) @method
 			    (#eq? @method "static"))
 			  arguments: (arguments

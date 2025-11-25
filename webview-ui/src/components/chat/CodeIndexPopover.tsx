@@ -65,7 +65,6 @@ interface LocalCodeIndexSettings {
 	codebaseIndexEmbedderModelDimension?: number // Generic dimension for all providers
 	codebaseIndexSearchMaxResults?: number
 	codebaseIndexSearchMinScore?: number
-	maxFileDiscoveryLimit: number
 
 	// Neo4j settings (following Qdrant pattern - single set of fields for both local and cloud)
 	neo4jEnabled: boolean
@@ -202,6 +201,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 	const [open, setOpen] = useState(false)
 	const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false)
 	const [isSetupSettingsOpen, setIsSetupSettingsOpen] = useState(false)
+	const [isFileDetailsOpen, setIsFileDetailsOpen] = useState(false)
 
 	const [indexingStatus, setIndexingStatus] = useState<IndexingStatus>(externalIndexingStatus)
 
@@ -225,7 +225,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		codebaseIndexEmbedderModelDimension: undefined,
 		codebaseIndexSearchMaxResults: CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 		codebaseIndexSearchMinScore: CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_MIN_SCORE,
-		maxFileDiscoveryLimit: 50000,
 		neo4jEnabled: false,
 		neo4jUri: "bolt://localhost:7687",
 		neo4jUsername: "neo4j",
@@ -269,7 +268,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 					codebaseIndexConfig.codebaseIndexSearchMaxResults ?? CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 				codebaseIndexSearchMinScore:
 					codebaseIndexConfig.codebaseIndexSearchMinScore ?? CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_MIN_SCORE,
-				maxFileDiscoveryLimit: codebaseIndexConfig.maxFileDiscoveryLimit ?? 50000,
 				neo4jEnabled: codebaseIndexConfig.neo4jEnabled ?? false,
 				neo4jUri: codebaseIndexConfig.neo4jUri || "bolt://localhost:7687",
 				neo4jUsername: codebaseIndexConfig.neo4jUsername || "neo4j",
@@ -364,8 +362,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 						codebaseIndexSearchMinScore:
 							backendSettings.codebaseIndexSearchMinScore ??
 							currentSettingsRef.current.codebaseIndexSearchMinScore,
-						maxFileDiscoveryLimit:
-							backendSettings.maxFileDiscoveryLimit ?? currentSettingsRef.current.maxFileDiscoveryLimit,
 						codebaseIndexOpenAiCompatibleBaseUrl:
 							backendSettings.codebaseIndexOpenAiCompatibleBaseUrl ??
 							currentSettingsRef.current.codebaseIndexOpenAiCompatibleBaseUrl,
@@ -929,6 +925,51 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 										)}
 									</div>
 								)}
+
+							{/* File Discovery Details */}
+							{(indexingStatus.systemStatus === "Indexing" ||
+								indexingStatus.systemStatus === "Indexed" ||
+								(currentSettings.neo4jEnabled && indexingStatus.neo4jStatus === "indexing")) && (
+								<div className="mt-3">
+									<button
+										onClick={() => setIsFileDetailsOpen(!isFileDetailsOpen)}
+										className="flex items-center text-xs text-vscode-descriptionForeground hover:text-vscode-foreground focus:outline-none mb-2"
+										aria-expanded={isFileDetailsOpen}>
+										<span
+											className={`codicon codicon-${isFileDetailsOpen ? "chevron-down" : "chevron-right"} mr-1`}></span>
+										<span className="font-medium">File Discovery Details</span>
+									</button>
+
+									{isFileDetailsOpen && (
+										<div className="pl-4 space-y-1 text-xs text-vscode-descriptionForeground">
+											<div className="flex justify-between">
+												<span>🔍 Discovered:</span>
+												<span>{indexingStatus.filesDiscovered ?? "—"}</span>
+											</div>
+											<div className="flex justify-between">
+												<span>🚫 Filtered (.rooignore):</span>
+												<span>{indexingStatus.filesFilteredByRooignore ?? "—"}</span>
+											</div>
+											<div className="flex justify-between">
+												<span>🚫 Filtered (ext/git):</span>
+												<span>{indexingStatus.filesFilteredByExtension ?? "—"}</span>
+											</div>
+											<div className="flex justify-between">
+												<span>⚠️ Skipped (size):</span>
+												<span>{indexingStatus.filesSkippedBySize ?? "—"}</span>
+											</div>
+											<div className="flex justify-between">
+												<span>⚡ Skipped (cache):</span>
+												<span>{indexingStatus.filesSkippedByCache ?? "—"}</span>
+											</div>
+											<div className="flex justify-between font-medium text-vscode-foreground">
+												<span>📝 Actively Indexing:</span>
+												<span>{indexingStatus.filesActivelyIndexing ?? "—"}</span>
+											</div>
+										</div>
+									)}
+								</div>
+							)}
 						</div>
 
 						{/* Setup Settings Disclosure */}
@@ -1780,42 +1821,6 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 														CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_RESULTS,
 													)
 												}>
-												<span className="codicon codicon-discard" />
-											</VSCodeButton>
-										</div>
-									</div>
-
-									{/* Max File Discovery Limit Slider */}
-									<div className="space-y-2">
-										<div className="flex items-center gap-2">
-											<label className="text-sm font-medium">Max Files to Index</label>
-											<StandardTooltip content="Maximum number of files to index (0 = unlimited). Default: 50,000.">
-												<span className="codicon codicon-info text-xs text-vscode-descriptionForeground cursor-help" />
-											</StandardTooltip>
-										</div>
-										<div className="flex items-center gap-2">
-											<Slider
-												min={0}
-												max={1000000}
-												step={1000}
-												value={[currentSettings.maxFileDiscoveryLimit]}
-												onValueChange={(values) =>
-													updateSetting("maxFileDiscoveryLimit", values[0])
-												}
-												className="flex-1"
-												data-testid="max-file-limit-slider"
-											/>
-											<span className="w-12 text-center">
-												{currentSettings.maxFileDiscoveryLimit === 0
-													? "Unlimited"
-													: currentSettings.maxFileDiscoveryLimit >= 1000
-														? `${currentSettings.maxFileDiscoveryLimit / 1000}k`
-														: currentSettings.maxFileDiscoveryLimit}
-											</span>
-											<VSCodeButton
-												appearance="icon"
-												title={t("settings:codeIndex.resetToDefault")}
-												onClick={() => updateSetting("maxFileDiscoveryLimit", 50000)}>
 												<span className="codicon codicon-discard" />
 											</VSCodeButton>
 										</div>

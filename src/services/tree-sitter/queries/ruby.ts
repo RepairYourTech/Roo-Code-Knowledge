@@ -430,19 +430,19 @@ export default `
 ; Capybara patterns
 (call
   method: (identifier) @test.capybara_method
-  (#match! @test.capybara_method "^(visit|page|click_on|fill_in|choose|check|uncheck|select|attach_file|have_content|have_text|have_title|have_current_path|have_selector|have_css|have_xpath|wait_for_ajax|wait_for_turbo|save_and_open_page|save_screenshot)$"))
+  (#match! @test.capybara_method "^(visit|page|click_on|fill_in|choose|check|uncheck|select|attach_file|have_content|have_text|have_title|have_current_path|have_selector|have_css|have_xpath|wait_for_ajax|wait_for_turbo|save_and_open_page|save_screenshot)$")
   arguments: (argument_list)?) @definition.test_capybara
 
 ; Factory Bot patterns
 (call
   method: (identifier) @test.factory_bot_method
-  (#match! @test.factory_bot_method "^(FactoryBot\\.define|factory|create|build|build_stubbed|attributes_for|generate|trait|sequence|association)$"))
+  (#match! @test.factory_bot_method "^(FactoryBot\\.define|factory|create|build|build_stubbed|attributes_for|generate|trait|sequence|association)$")
   arguments: (argument_list)?) @definition.test_factory_bot
 
 ; WebMock patterns
 (call
   method: (identifier) @test.webmock_method
-  (#match! @test.webmock_method "^(stub_request|stub_http_request|a_request|a_get|a_post|a_put|a_delete|a_patch|a_head|a_options|to_return|to_raise|with|with_headers|with_body|with_query|times|once|twice|at_least_once|at_most_once)$"))
+  (#match! @test.webmock_method "^(stub_request|stub_http_request|a_request|a_get|a_post|a_put|a_delete|a_patch|a_head|a_options|to_return|to_raise|with|with_headers|with_body|with_query|times|once|twice|at_least_once|at_most_once)$")
   arguments: (argument_list)?) @definition.test_webmock
 
 `

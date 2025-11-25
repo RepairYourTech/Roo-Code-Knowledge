@@ -39,6 +39,11 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 		const modelToUse = model || this.defaultModelId
 		const url = `${this.baseUrl}/api/embed` // Endpoint as specified
 
+		// Log method entry
+		console.log(
+			`[CodeIndexOllamaEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
+		)
+
 		// Apply model-specific query prefix if required
 		const queryPrefix = getModelQueryPrefix("ollama", modelToUse)
 		const processedTexts = queryPrefix
@@ -63,6 +68,11 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 					return prefixedText
 				})
 			: texts
+
+		// Log prefix application
+		console.log(
+			`[CodeIndexOllamaEmbedder] Applied query prefix to ${processedTexts.filter((t) => t.startsWith(queryPrefix || "")).length}/${processedTexts.length} texts`,
+		)
 
 		try {
 			// Note: Standard Ollama API uses 'prompt' for single text, not 'input' for array.
@@ -107,6 +117,18 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 			const embeddings = data.embeddings
 			if (!embeddings || !Array.isArray(embeddings)) {
 				throw new Error(t("embeddings:ollama.invalidResponseStructure"))
+			}
+
+			// Log final verification
+			console.log(
+				`[CodeIndexOllamaEmbedder] createEmbeddings EXIT: Generated ${embeddings.length} embeddings from ${texts.length} input texts`,
+			)
+
+			// Check for embedding count mismatch
+			if (embeddings.length !== texts.length) {
+				console.error(
+					`[CodeIndexOllamaEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${embeddings.length}`,
+				)
 			}
 
 			return {

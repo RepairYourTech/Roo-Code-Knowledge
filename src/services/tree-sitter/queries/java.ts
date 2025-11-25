@@ -226,8 +226,8 @@ export default `
 ; Mockito - Mock creation
 (method_invocation
   name: (identifier) @mockito.mock_method
-  (#match? @mockito.mock_method "^(mock|spy|when|verify|times|never|atLeastOnce|atMost|atLeast|doReturn|doThrow|doAnswer|doNothing|doCallRealMethod)$"))
-  arguments: (argument_list)?) @definition.mockito_mock_method
+  (#match? @mockito.mock_method "^(mock|spy|when|verify|times|never|atLeastOnce|atMost|atLeast|doReturn|doThrow|doAnswer|doNothing|doCallRealMethod)$")
+  (argument_list)?) @definition.mockito_mock_method
 
 ; Mockito - Verification patterns
 (method_invocation

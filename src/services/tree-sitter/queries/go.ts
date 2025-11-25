@@ -95,8 +95,8 @@ export default `
 ; Testing package imports
 (import_declaration
   (import_spec
-    name: (package_identifier) @go.testing_import
-    (#eq? @go.testing_import "testing"))) @definition.go_testing_import
+    path: (interpreted_string_literal) @go.testing_import_path
+    (#match? @go.testing_import_path "^\"testing\"$"))) @definition.go_testing_import
 
 ; Testing sub-packages
 (import_declaration
@@ -104,14 +104,22 @@ export default `
     path: (interpreted_string_literal) @go.test_import_path
     (#match? @go.test_import_path "^.*/testing$"))) @definition.go_testing_subpackage_import
 
-; Test assertions and utilities
+; Test methods requiring arguments
 (call_expression
   function: (selector_expression
     object: (identifier) @go.test_obj
     (#eq? @go.test_obj "t")
     property: (field_identifier) @go.test_method
-    (#match? @go.test_method "^(Log|Logf|Error|Errorf|Fatal|Fatalf|Skip|Skipf|Fail|FailNow|Helper|Run|Parallel|TempDir|Setenv|Cleanup)$"))
-  arguments: (argument_list)?) @definition.go_test_method
+    (#match? @go.test_method "^(Log|Logf|Error|Errorf|Fatal|Fatalf|Skip|Skipf|Run|TempDir|Setenv|Cleanup)$"))
+  arguments: (argument_list)) @definition.go_test_method
+
+; Test methods without required arguments
+(call_expression
+  function: (selector_expression
+    object: (identifier) @go.test_obj
+    (#eq? @go.test_obj "t")
+    property: (field_identifier) @go.test_method
+    (#match? @go.test_method "^(Fail|FailNow|Helper|Parallel)$"))) @definition.go_test_method
 
 ; Testing.TB methods (interface methods)
 (call_expression
@@ -152,9 +160,14 @@ export default `
   name: (identifier) @go.mock_func_name
   (#match? @go.mock_func_name "^(mock|Mock|fake|Fake|stub|Stub).*")) @definition.go_mock_function
 
-(struct_type
-  name: (type_identifier) @go.mock_struct_name
-  (#match? @go.mock_struct_name "^(Mock|Fake|Stub).*")) @definition.go_mock_struct
+(type_declaration
+  (type_spec
+; Mock and fake struct types
+(type_declaration
+  (type_spec
+    name: (type_identifier) @go.mock_struct_name
+    (#match? @go.mock_struct_name "^(Mock|Fake|Stub).*")
+    type: (struct_type))) @definition.go_mock_struct
 
 ; Interface-based testing
 (type_declaration
@@ -164,9 +177,11 @@ export default `
     (#match? @go.interface_name ".*(Interface|Mocker|Faker).*"))) @definition.go_test_interface
 
 ; Test data structures
-(struct_type
-  name: (type_identifier) @go.test_data_name
-  (#match? @go.test_data_name ".*(TestData|TestCase|TestScenario|TestFixtures).*")) @definition.go_test_data_struct
+(type_declaration
+  (type_spec
+    name: (type_identifier) @go.test_data_name
+    type: (struct_type)
+    (#match? @go.test_data_name ".*(TestData|TestCase|TestScenario|TestFixtures).*"))) @definition.go_test_data_struct
 
 ; Test constants
 (const_declaration
@@ -192,8 +207,10 @@ export default `
 
 ; Testify assertions
 (call_expression
-  function: (identifier) @go.testify_func
-  (#match? @go.testify_func "^(assert|require|mock)$")
+  function: (selector_expression
+    object: (identifier) @go.testify_pkg
+    (#match? @go.testify_pkg "^(assert|require)$")
+    property: (field_identifier) @go.testify_method)
   arguments: (argument_list
     (identifier) @go.testify_param
     (_)*)) @definition.go_testify
@@ -239,8 +256,5 @@ export default `
   arguments: (argument_list)?) @definition.go_test_environment
 
 ; Test file patterns (detect test files)
-(source_file
-  name: (identifier) @go.test_file_name
-  (#match? @go.test_file_name ".*_test\\.go$")) @definition.go_test_file
 
 `

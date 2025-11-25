@@ -31,7 +31,7 @@ function authenticate(req, res, next) {
 		req.user = decoded
 		next()
 	} catch (error) {
-		res.status(401).json({ error: "Invalid token" })
+		return res.status(401).json({ error: "Invalid token" })
 	}
 }
 
@@ -151,7 +151,7 @@ router.put("/users/:id", authenticate, async (req, res, next) => {
 		const { name, email } = req.body
 
 		// Check if user can update (own profile or admin)
-		if (req.user.id !== id && req.user.role !== "admin") {
+		if (req.user.id !== parseInt(id) && req.user.role !== "admin") {
 			return res.status(403).json({ error: "Cannot update other users" })
 		}
 

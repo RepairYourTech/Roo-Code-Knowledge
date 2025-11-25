@@ -10,6 +10,30 @@ import { BaseTool, ToolCallbacks } from "./BaseTool"
 import type { ToolUse } from "../../shared/tools"
 import { SymbolMetadata, ParameterInfo } from "../../services/code-index/types/metadata"
 
+// Module-level constant for file extension to language mapping
+const LANGUAGE_MAP: Record<string, string> = {
+	".ts": "TypeScript",
+	".tsx": "TypeScript React",
+	".js": "JavaScript",
+	".jsx": "JavaScript React",
+	".py": "Python",
+	".java": "Java",
+	".cpp": "C++",
+	".c": "C",
+	".cs": "C#",
+	".go": "Go",
+	".rs": "Rust",
+	".rb": "Ruby",
+	".php": "PHP",
+	".swift": "Swift",
+	".kt": "Kotlin",
+	".scala": "Scala",
+	".md": "Markdown",
+	".json": "JSON",
+	".yaml": "YAML",
+	".yml": "YAML",
+}
+
 interface CodebaseSearchParams {
 	query: string
 	path?: string
@@ -163,29 +187,7 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 
 				// Extract language from file extension
 				const fileExt = path.extname(result.payload.filePath).toLowerCase()
-				const languageMap: Record<string, string> = {
-					".ts": "TypeScript",
-					".tsx": "TypeScript React",
-					".js": "JavaScript",
-					".jsx": "JavaScript React",
-					".py": "Python",
-					".java": "Java",
-					".cpp": "C++",
-					".c": "C",
-					".cs": "C#",
-					".go": "Go",
-					".rs": "Rust",
-					".rb": "Ruby",
-					".php": "PHP",
-					".swift": "Swift",
-					".kt": "Kotlin",
-					".scala": "Scala",
-					".md": "Markdown",
-					".json": "JSON",
-					".yaml": "YAML",
-					".yml": "YAML",
-				}
-				const language = languageMap[fileExt] || null
+				const language = LANGUAGE_MAP[fileExt] || null
 
 				// Phase 2: Build enhanced result with metadata
 				// Phase 12: Type as any to allow dynamic enrichment properties

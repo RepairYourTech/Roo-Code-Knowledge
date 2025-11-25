@@ -1,89 +1,44 @@
 
  RUN  v3.2.4 /home/birdman/RooKnowledge/Roo-Code-Knowledge/src
 
-·xxxx
 
-⎯⎯⎯⎯⎯⎯⎯ Failed Tests 4 ⎯⎯⎯⎯⎯⎯⎯
 
- FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle partial configuration (missing Qdrant URL)
-AssertionError: expected false to be true // Object.is equality
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
 
-[32m- Expected[39m
-[31m+ Received[39m
+ FAIL  services/glob/__tests__/list-files.spec.ts [ services/glob/__tests__/list-files.spec.ts ]
+Error: [vitest] There was an error when mocking a module. If you are using "vi.mock" factory, make sure there are no top level variables inside, since this call is hoisted to top of the file. Read more: https://vitest.dev/api/vi.html#vi-mock
+ ❯ services/glob/__tests__/list-files.spec.ts:3:1
+      1| import * as path from "path"
+      2| import * as childProcess from "child_process"
+      3| import { listFiles } from "../list-files"
+       | ^
+      4| 
+      5| vi.mock("child_process")
 
-[32m- true[39m
-[31m+ false[39m
+Caused by: Error: Transform failed with 1 error:
+/home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/glob/list-files.ts:504:11: ERROR: The symbol "isHiddenDir" has already been declared
+  Plugin: vite:esbuild
+  File: /home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/glob/list-files.ts:504:11
+  
+  The symbol "isHiddenDir" has already been declared
+  502|  					// Don't recurse into hidden directories unless they are the explicit target
+  503|  					// or we're already inside an explicitly targeted hidden directory
+  504|  					const isHiddenDir = dirName.startsWith(".")
+     |             ^
+  505|  
+  506|  					// Use the same logic as shouldIncludeDirectory for recursion decisions
+  
+ ❯ failureErrorWithLog ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:1467:15
+ ❯ ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:736:50
+ ❯ responseCallbacks.<computed> ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:603:9
+ ❯ handleIncomingPacket ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:658:12
+ ❯ Socket.readFromStdout ../node_modules/.pnpm/esbuild@0.25.9/node_modules/esbuild/lib/main.js:581:7
 
- ❯ services/code-index/__tests__/config-edge-cases.test.ts:72:45
-     70|   expect(result.currentConfig.qdrantUrl).toBe("http://localhost:6333")
-     71|   // Should be configured because defaults are valid
-     72|   expect(result.currentConfig.isConfigured).toBe(true)
-       |                                             ^
-     73|  })
-     74| 
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/4]⎯
-
- FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle boundary values for search settings
-AssertionError: expected 0.4 to be +0 // Object.is equality
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- 0[39m
-[31m+ 0.4[39m
-
- ❯ services/code-index/__tests__/config-edge-cases.test.ts:91:47
-     89|   const result = await configManager.loadConfiguration()
-     90| 
-     91|   expect(result.currentConfig.searchMinScore).toBe(0)
-       |                                               ^
-     92|   expect(result.currentConfig.searchMaxResults).toBe(1)
-     93|  })
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/4]⎯
-
- FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should handle extreme boundary values for search settings
-AssertionError: expected 0.4 to be 1 // Object.is equality
-
-[32m- Expected[39m
-[31m+ Received[39m
-
-[32m- 1[39m
-[31m+ 0.4[39m
-
- ❯ services/code-index/__tests__/config-edge-cases.test.ts:111:47
-    109|   const result = await configManager.loadConfiguration()
-    110| 
-    111|   expect(result.currentConfig.searchMinScore).toBe(1.0)
-       |                                               ^
-    112|   expect(result.currentConfig.searchMaxResults).toBe(1000)
-    113|  })
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/4]⎯
-
- FAIL  services/code-index/__tests__/config-edge-cases.test.ts > CodeIndexConfigManager Edge Cases > should reject out-of-bounds values
-AssertionError: expected 0.4 to be undefined
-
-[32m- Expected:[39m 
-undefined
-
-[31m+ Received:[39m 
-0.4
-
- ❯ services/code-index/__tests__/config-edge-cases.test.ts:140:47
-    138|   // Since we initialized with empty/default, `searchMinScore` might b…
-    139|   // CodeIndexConfigManager initializes `searchMinScore` as undefined.
-    140|   expect(result.currentConfig.searchMinScore).toBeUndefined()
-       |                                               ^
-    141|  })
-    142| })
-
-⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/4]⎯
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
 
 
  Test Files  1 failed (1)
-      Tests  4 failed | 1 passed (5)
-   Start at  18:49:55
-   Duration  666ms (transform 286ms, setup 39ms, collect 377ms, tests 23ms, environment 0ms, prepare 71ms)
+      Tests  no tests
+   Start at  17:18:54
+   Duration  296ms (transform 64ms, setup 50ms, collect 0ms, tests 0ms, environment 0ms, prepare 63ms)
 

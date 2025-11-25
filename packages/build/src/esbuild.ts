@@ -1,6 +1,8 @@
 import * as fs from "fs"
 import * as path from "path"
 import { execSync } from "child_process"
+import { glob } from "glob"
+import * as mkdirp from "mkdirp"
 
 import { ViewsContainer, Views, Menus, Configuration, Keybindings, contributesSchema } from "./types.js"
 
@@ -113,69 +115,118 @@ export function copyPaths(copyPaths: [string, string, CopyPathOptions?][], srcDi
 
 export function copyWasms(srcDir: string, distDir: string): void {
 	const nodeModulesDir = path.join(srcDir, "node_modules")
+	const servicesDir = path.join(distDir, "services", "tree-sitter")
 
-	fs.mkdirSync(distDir, { recursive: true })
+	// Create the services/tree-sitter directory
+	mkdirp.sync(servicesDir)
+	console.log(`[copyWasms] Created directory: ${servicesDir}`)
 
-	// Tiktoken WASM file.
-	fs.copyFileSync(
-		path.join(nodeModulesDir, "tiktoken", "lite", "tiktoken_bg.wasm"),
-		path.join(distDir, "tiktoken_bg.wasm"),
-	)
+	// Copy WASM files from tree-sitter-wasms
+	const treeSitterWasmsDir = path.join(nodeModulesDir, "tree-sitter-wasms")
+	if (fs.existsSync(treeSitterWasmsDir)) {
+		const wasmFiles = glob.sync("out/*.wasm", { cwd: treeSitterWasmsDir })
 
-	console.log(`[copyWasms] Copied tiktoken WASMs to ${distDir}`)
+		wasmFiles.forEach((wasmFile) => {
+			const srcPath = path.join(treeSitterWasmsDir, wasmFile)
+			const destPath = path.join(servicesDir, path.basename(wasmFile))
 
-	// Also copy Tiktoken WASMs to the workers directory.
-	const workersDir = path.join(distDir, "workers")
-	fs.mkdirSync(workersDir, { recursive: true })
+			try {
+				fs.copyFileSync(srcPath, destPath)
+				console.log(`[copyWasms] Copied: ${srcPath} -> ${destPath}`)
 
-	fs.copyFileSync(
-		path.join(nodeModulesDir, "tiktoken", "lite", "tiktoken_bg.wasm"),
-		path.join(workersDir, "tiktoken_bg.wasm"),
-	)
+				// Verify the file was copied successfully
+				if (fs.existsSync(destPath)) {
+					const srcStats = fs.statSync(srcPath)
+					const destStats = fs.statSync(destPath)
+					if (srcStats.size === destStats.size) {
+						console.log(`[copyWasms] Verified: ${destPath} (${destStats.size} bytes)`)
+					} else {
+						console.error(`[copyWasms] Verification failed: Size mismatch for ${destPath}`)
+					}
+				} else {
+					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
+				}
+			} catch (error) {
+				console.error(
+					`[copyWasms] Failed to copy ${srcPath} to ${destPath}:`,
+					error instanceof Error ? error.message : "Unknown error",
+				)
+			}
+		})
 
-	console.log(`[copyWasms] Copied tiktoken WASMs to ${workersDir}`)
-
-	// Main tree-sitter WASM file.
-	fs.copyFileSync(
-		path.join(nodeModulesDir, "web-tree-sitter", "tree-sitter.wasm"),
-		path.join(distDir, "tree-sitter.wasm"),
-	)
-
-	console.log(`[copyWasms] Copied tree-sitter.wasm to ${distDir}`)
-
-	// Copy language-specific WASM files.
-	const languageWasmDir = path.join(nodeModulesDir, "tree-sitter-wasms", "out")
-
-	if (!fs.existsSync(languageWasmDir)) {
-		throw new Error(`Directory does not exist: ${languageWasmDir}`)
+		console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from tree-sitter-wasms`)
+	} else {
+		console.error(`[copyWasms] Source directory not found: ${treeSitterWasmsDir}`)
 	}
 
-	// Dynamically read all WASM files from the directory instead of using a hardcoded list.
-	const wasmFiles = fs.readdirSync(languageWasmDir).filter((file) => file.endsWith(".wasm"))
+	// Copy WASM files from web-tree-sitter
+	const webTreeSitterDir = path.join(nodeModulesDir, "web-tree-sitter")
+	if (fs.existsSync(webTreeSitterDir)) {
+		const wasmFiles = glob.sync("lib/*.wasm", { cwd: webTreeSitterDir })
 
-	wasmFiles.forEach((filename) => {
-		fs.copyFileSync(path.join(languageWasmDir, filename), path.join(distDir, filename))
-	})
+		wasmFiles.forEach((wasmFile) => {
+			const srcPath = path.join(webTreeSitterDir, wasmFile)
+			const destPath = path.join(servicesDir, path.basename(wasmFile))
 
-	console.log(`[copyWasms] Copied ${wasmFiles.length} tree-sitter language wasms to ${distDir}`)
+			try {
+				fs.copyFileSync(srcPath, destPath)
+				console.log(`[copyWasms] Copied: ${srcPath} -> ${destPath}`)
+
+				// Verify the file was copied successfully
+				if (fs.existsSync(destPath)) {
+					const srcStats = fs.statSync(srcPath)
+					const destStats = fs.statSync(destPath)
+					if (srcStats.size === destStats.size) {
+						console.log(`[copyWasms] Verified: ${destPath} (${destStats.size} bytes)`)
+					} else {
+						console.error(`[copyWasms] Verification failed: Size mismatch for ${destPath}`)
+					}
+				} else {
+					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
+				}
+			} catch (error) {
+				console.error(
+					`[copyWasms] Failed to copy ${srcPath} to ${destPath}:`,
+					error instanceof Error ? error.message : "Unknown error",
+				)
+			}
+		})
+
+		console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from web-tree-sitter`)
+	} else {
+		console.error(`[copyWasms] Source directory not found: ${webTreeSitterDir}`)
+	}
 }
 
 export function copyLocales(srcDir: string, distDir: string): void {
+	const srcLocaleDir = path.join(srcDir, "i18n", "locales")
 	const destDir = path.join(distDir, "i18n", "locales")
-	fs.mkdirSync(destDir, { recursive: true })
-	const count = copyDir(path.join(srcDir, "i18n", "locales"), destDir, 0)
-	console.log(`[copyLocales] Copied ${count} locale files to ${destDir}`)
-}
 
-export function setupLocaleWatcher(srcDir: string, distDir: string) {
-	const localesDir = path.join(srcDir, "i18n", "locales")
-
-	if (!fs.existsSync(localesDir)) {
-		console.warn(`Cannot set up watcher: Source locales directory does not exist: ${localesDir}`)
+	if (!fs.existsSync(srcLocaleDir)) {
+		console.warn(`[copyLocales] Source locale directory does not exist: ${srcLocaleDir}`)
 		return
 	}
 
-	console.log(`Setting up watcher for locale files in ${localesDir}`)
+	// Create destination directory
+	mkdirp.sync(destDir)
+	console.log(`[copyLocales] Created directory: ${destDir}`)
+
+	// Copy locale files preserving directory structure
+	const count = copyDir(srcLocaleDir, destDir, 0)
+	console.log(`[copyLocales] Copied ${count} locale files from ${srcLocaleDir} to ${destDir}`)
+}
+
+export function setupLocaleWatcher(srcDir: string, distDir: string): void {
+	const localesDir = path.join(srcDir, "i18n", "locales")
+
+	if (!fs.existsSync(localesDir)) {
+		console.warn(
+			`[setupLocaleWatcher] Cannot set up watcher: Source locales directory does not exist: ${localesDir}`,
+		)
+		return
+	}
+
+	console.log(`[setupLocaleWatcher] Setting up watcher for locale files in ${localesDir}`)
 
 	let debounceTimer: NodeJS.Timeout | null = null
 
@@ -186,22 +237,22 @@ export function setupLocaleWatcher(srcDir: string, distDir: string) {
 
 		// Wait 300ms after last change before copying.
 		debounceTimer = setTimeout(() => {
-			console.log("Locale files changed, copying...")
+			console.log("[setupLocaleWatcher] Locale files changed, copying...")
 			copyLocales(srcDir, distDir)
 		}, 300)
 	}
 
 	try {
 		fs.watch(localesDir, { recursive: true }, (_eventType, filename) => {
-			if (filename && filename.endsWith(".json")) {
-				console.log(`Locale file ${filename} changed, triggering copy...`)
+			if (filename && (filename.endsWith(".json") || filename.endsWith(".md"))) {
+				console.log(`[setupLocaleWatcher] Locale file ${filename} changed, triggering copy...`)
 				debouncedCopy()
 			}
 		})
-		console.log("Watcher for locale files is set up")
+		console.log("[setupLocaleWatcher] Watcher for locale files is set up")
 	} catch (error) {
 		console.error(
-			`Error setting up watcher for ${localesDir}:`,
+			`[setupLocaleWatcher] Error setting up watcher for ${localesDir}:`,
 			error instanceof Error ? error.message : "Unknown error",
 		)
 	}

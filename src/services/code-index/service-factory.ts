@@ -35,6 +35,7 @@ import { TelemetryEventName } from "@roo-code/types"
 import { Package } from "../../shared/package"
 import { BATCH_SEGMENT_THRESHOLD } from "./constants"
 import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
+import { MetricsCollector } from "./utils/metrics-collector"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -201,8 +202,8 @@ export class CodeIndexServiceFactory {
 	 * Creates a code parser instance with optional LSP service
 	 * Phase 6: Parser can be enriched with LSP type information
 	 */
-	public createParser(lspService?: ILSPService): ICodeParser {
-		return new CodeParser(lspService)
+	public createParser(lspService?: ILSPService, metricsCollector?: MetricsCollector): ICodeParser {
+		return new CodeParser(lspService, metricsCollector)
 	}
 
 	/**
@@ -270,6 +271,7 @@ export class CodeIndexServiceFactory {
 		bm25Index?: IBM25Index,
 		graphIndexer?: IGraphIndexer,
 		stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
+		metricsCollector?: MetricsCollector,
 	): DirectoryScanner {
 		// Get the configurable batch size from VSCode settings
 		let batchSize: number
@@ -292,6 +294,8 @@ export class CodeIndexServiceFactory {
 			graphIndexer,
 			stateManager,
 			this.outputChannel,
+			undefined, // verboseLogging
+			metricsCollector,
 		)
 	}
 
@@ -358,6 +362,7 @@ export class CodeIndexServiceFactory {
 		rooIgnoreController?: RooIgnoreController,
 		bm25Index?: IBM25Index,
 		stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
+		metricsCollector?: MetricsCollector,
 	): {
 		embedder: IEmbedder
 		vectorStore: IVectorStore
@@ -377,7 +382,7 @@ export class CodeIndexServiceFactory {
 
 		// Create LSP service and parser with LSP support (Phase 6)
 		const lspService = this.createLSPService()
-		const parser = this.createParser(lspService)
+		const parser = this.createParser(lspService, metricsCollector)
 
 		// Create Neo4j service and graph indexer if enabled
 		const neo4jService = this.createNeo4jService()
@@ -391,6 +396,7 @@ export class CodeIndexServiceFactory {
 			bm25Index,
 			graphIndexer,
 			stateManager,
+			metricsCollector,
 		)
 		const fileWatcher = this.createFileWatcher(
 			context,

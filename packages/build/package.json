@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"main": "./dist/index.js",
-	"types": "./src/index.ts",
+	"types": "./dist/index.d.ts",
 	"scripts": {
 		"lint": "eslint src --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
@@ -13,6 +13,8 @@
 		"clean": "rimraf dist .turbo"
 	},
 	"dependencies": {
+		"glob": "^10.3.10",
+		"mkdirp": "^3.0.1",
 		"zod": "^3.25.61"
 	},
 	"devDependencies": {

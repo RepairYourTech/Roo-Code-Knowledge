@@ -50,6 +50,11 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
 		const modelToUse = model || this.defaultModelId
 
+		// Log method entry
+		console.log(
+			`[OpenAiEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
+		)
+
 		// Apply model-specific query prefix if required
 		const queryPrefix = getModelQueryPrefix("openai", modelToUse)
 		const processedTexts = queryPrefix
@@ -75,11 +80,18 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 				})
 			: texts
 
+		// Log prefix application
+		console.log(
+			`[OpenAiEmbedder] Applied query prefix to ${processedTexts.filter((t) => t.startsWith(queryPrefix || "")).length}/${processedTexts.length} texts`,
+		)
+
 		const allEmbeddings: number[][] = []
 		const usage = { promptTokens: 0, totalTokens: 0 }
 		const remainingTexts = [...processedTexts]
 
+		let batchNumber = 0
 		while (remainingTexts.length > 0) {
+			batchNumber++
 			const currentBatch: string[] = []
 			let currentBatchTokens = 0
 			const processedIndices: number[] = []
@@ -115,11 +127,45 @@ export class OpenAiEmbedder extends OpenAiNativeHandler implements IEmbedder {
 			}
 
 			if (currentBatch.length > 0) {
+				// Log batch processing
+				console.log(
+					`[OpenAiEmbedder] Processing batch ${batchNumber}: ${currentBatch.length} texts (${currentBatchTokens} tokens)`,
+				)
+
 				const batchResult = await this._embedBatchWithRetries(currentBatch, modelToUse)
+
+				// Log batch result
+				console.log(
+					`[OpenAiEmbedder] Batch ${batchNumber} complete: Received ${batchResult.embeddings.length} embeddings (tokens: ${batchResult.usage.promptTokens}/${batchResult.usage.totalTokens})`,
+				)
+
 				allEmbeddings.push(...batchResult.embeddings)
 				usage.promptTokens += batchResult.usage.promptTokens
 				usage.totalTokens += batchResult.usage.totalTokens
 			}
+		}
+
+		// Log final verification
+		console.log(
+			`[OpenAiEmbedder] createEmbeddings EXIT: Generated ${allEmbeddings.length} embeddings from ${texts.length} input texts (usage: ${usage.promptTokens}/${usage.totalTokens} tokens)`,
+		)
+
+		// Check for embedding count mismatch and throw explicit error
+		if (allEmbeddings.length !== texts.length) {
+			const errorMessage = `Embedding count mismatch detected! Expected ${texts.length} embeddings but received ${allEmbeddings.length}. This would cause misalignment between vectors and input texts.`
+			console.error(`[OpenAiEmbedder] CRITICAL ERROR: ${errorMessage}`)
+
+			// Capture telemetry for this critical error
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: errorMessage,
+				location: "OpenAiEmbedder:createEmbeddings",
+				inputCount: texts.length,
+				outputCount: allEmbeddings.length,
+				model: modelToUse,
+			})
+
+			// Throw explicit error to prevent silent failures
+			throw new Error(errorMessage)
 		}
 
 		return { embeddings: allEmbeddings, usage }

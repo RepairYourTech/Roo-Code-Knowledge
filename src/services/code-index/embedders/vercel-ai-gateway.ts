@@ -56,10 +56,29 @@ export class VercelAiGatewayEmbedder implements IEmbedder {
 	 * @returns Promise resolving to embedding response
 	 */
 	async createEmbeddings(texts: string[], model?: string): Promise<EmbeddingResponse> {
+		const modelToUse = model || this.modelId
+
+		// Log method entry
+		console.log(
+			`[VercelAiGatewayEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
+		)
+
 		try {
-			// Use the provided model or fall back to the instance's model
-			const modelToUse = model || this.modelId
-			return await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
+			const result = await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
+
+			// Log final verification
+			console.log(
+				`[VercelAiGatewayEmbedder] createEmbeddings EXIT: Generated ${result.embeddings.length} embeddings from ${texts.length} input texts`,
+			)
+
+			// Check for embedding count mismatch
+			if (result.embeddings.length !== texts.length) {
+				console.error(
+					`[VercelAiGatewayEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${result.embeddings.length}`,
+				)
+			}
+
+			return result
 		} catch (error) {
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),

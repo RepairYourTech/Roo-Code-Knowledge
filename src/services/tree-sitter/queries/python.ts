@@ -368,13 +368,13 @@ export default `
       (#match? @pytest.test_method_name "^test_.*$")))) @definition.pytest_test_method
 
 ; Pytest - Fixture patterns
-(function_definition
-  name: (identifier) @pytest.fixture_name
-  decorators: (decorated_definition
-    (decorator
-      (call_expression
-        function: (identifier) @pytest.fixture_decorator
-        (#eq? @pytest.fixture_decorator "pytest.fixture"))))) @definition.pytest_fixture
+(decorated_definition
+  (decorator
+    (call_expression
+      function: (identifier) @pytest.fixture_decorator
+      (#eq? @pytest.fixture_decorator "pytest.fixture")))
+  definition: (function_definition
+    name: (identifier) @pytest.fixture_name)) @definition.pytest_fixture
 
 ; Pytest - Parametrized tests
 (decorated_definition
@@ -598,7 +598,7 @@ export default `
 ; Poetry pyproject.toml configuration
 (call_expression
   function: (identifier) @pyproject.function
-  (#eq? @pyproject.function " Poetry")
+  (#eq? @pyproject.function "Poetry")
   arguments: (arguments
     (keyword_argument
       name: (identifier) @pyproject.kwarg

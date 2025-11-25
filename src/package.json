@@ -441,13 +441,6 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%settings.codeIndex.enabled.description%"
-				},
-				"roo-cline.codeIndex.maxFileDiscoveryLimit": {
-					"type": "number",
-					"default": 50000,
-					"minimum": 0,
-					"maximum": 1000000,
-					"description": "%settings.codeIndex.maxFileDiscoveryLimit.description%"
 				}
 			}
 		}

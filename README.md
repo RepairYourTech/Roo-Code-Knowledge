@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+    </details>
 
 ---
 
@@ -148,6 +148,21 @@ If you prefer to install the VSIX package manually:
     ```sh
     code --install-extension bin/roo-cline-<version>.vsix
     ```
+
+---
+
+## Troubleshooting
+
+### Codebase Index Not Working
+
+If the codebase index is not finding code blocks:
+
+1. **Rebuild the extension**: Run `pnpm clean && pnpm build` to ensure WASM files are copied
+2. **Check WASM files**: Verify that `src/dist/services/tree-sitter/*.wasm` files exist after build
+3. **Check logs**: Look for parser loading errors in the VSCode Developer Console (Help > Toggle Developer Tools)
+4. **Verify dependencies**: Ensure `tree-sitter-wasms` and `web-tree-sitter` are installed in `src/node_modules`
+
+If you see "No parser available for file extension" errors, the WASM files may not have been copied during build.
 
 ---
 

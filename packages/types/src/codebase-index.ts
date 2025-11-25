@@ -40,7 +40,6 @@ export const codebaseIndexConfigSchema = z.object({
 	neo4jEnabled: z.boolean().optional(),
 	neo4jUri: z.string().optional(),
 	neo4jUsername: z.string().optional(),
-	maxFileDiscoveryLimit: z.number().min(0).optional(),
 })
 
 export type CodebaseIndexConfig = z.infer<typeof codebaseIndexConfigSchema>

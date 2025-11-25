@@ -57,6 +57,7 @@ export const commandIds = [
 	"testQdrantConnection",
 	"testNeo4jConnection",
 	"testEmbeddingProvider",
+	"dumpIndexingDiagnostics",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

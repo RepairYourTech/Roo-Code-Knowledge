@@ -374,23 +374,22 @@ export default `
 ; Next.js page type declarations in .ts files
 (type_alias_declaration
   name: (type_identifier) @nextjs.page.type
-  (#match? @nextjs.page.type ".*Page$"))) @definition.nextjs_page_type
+  (#match? @nextjs.page.type ".*Page$")) @definition.nextjs_page_type
 
 ; Next.js layout type declarations in .ts files
 (type_alias_declaration
   name: (type_identifier) @nextjs.layout.type
-  (#match? @nextjs.layout.type ".*Layout$"))) @definition.nextjs_layout_type
+  (#match? @nextjs.layout.type ".*Layout$")) @definition.nextjs_layout_type
 
 ; Next.js API route types in .ts files
 (type_alias_declaration
   name: (type_identifier) @nextjs.api.type
-  (#match? @nextjs.api.type ".*Api.*$"))) @definition.nextjs_api_type
+  (#match? @nextjs.api.type ".*Api.*$")) @definition.nextjs_api_type
 
 ; Next.js metadata type declarations in .ts files
 (type_alias_declaration
   name: (type_identifier) @nextjs.metadata.type
-  (#match? @nextjs.metadata.type ".*Metadata$"))) @definition.nextjs_metadata_type
-
+  (#match? @nextjs.metadata.type ".*Metadata$")) @definition.nextjs_metadata_type
 ; Next.js getServerSideProps function declarations in .ts files
 (function_declaration
   name: (identifier) @nextjs.gssp.name
@@ -518,7 +517,7 @@ export default `
 ; TypeScript configuration type aliases
 (type_alias_declaration
   name: (type_identifier) @tsconfig.type.name
-  (#match? @tsconfig.type.name "^(TsConfigJson|CompilerOptions|WatchOptions|TypeAcquisition|BuildOptions)$"))) @definition.tsconfig_type
+  (#match? @tsconfig.type.name "^(TsConfigJson|CompilerOptions|WatchOptions|TypeAcquisition|BuildOptions)$")) @definition.tsconfig_type
 
 ; Webpack TypeScript configuration exports
 (export_statement

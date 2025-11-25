@@ -17,6 +17,7 @@ import {
 	BM25Document,
 	IGraphIndexer,
 } from "../interfaces"
+import { PointStruct } from "../interfaces/vector-store"
 import { createHash } from "crypto"
 import { v5 as uuidv5 } from "uuid"
 import pLimit from "p-limit"
@@ -25,9 +26,11 @@ import { CacheManager } from "../cache-manager"
 import { t } from "../../../i18n"
 import { buildEmbeddingContext, EnhancedCodeSegment } from "../types/metadata"
 import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
+import { AdaptiveBatchOptimizer } from "../utils/batch-optimizer"
+import { MetricsCollector } from "../utils/metrics-collector"
 
 // Per-file mutex map for Neo4j file indexing operations to prevent race conditions
-// This allows concurrent indexing of different files while preventing concurrent indexing of the same file
+// This allows concurrent indexing of different files while preventing concurrent indexing of same file
 const fileMutexMap = new Map<string, Mutex>()
 
 // Track which file is holding which mutex for deadlock detection
@@ -66,6 +69,14 @@ import {
 	TRANSACTION_TIMEOUT_MS,
 	MAX_BATCH_RETRIES,
 	INITIAL_RETRY_DELAY_MS,
+	MAX_FILE_SIZE_BYTES,
+	BATCH_SEGMENT_THRESHOLD,
+	PARSING_CONCURRENCY,
+	BATCH_PROCESSING_CONCURRENCY,
+	MAX_PENDING_BATCHES,
+	QDRANT_CODE_BLOCK_NAMESPACE,
+	MAX_BATCH_TOKENS,
+	MAX_ITEM_TOKENS,
 } from "../constants"
 import { isPathInIgnoredDirectory } from "../../glob/ignore-utils"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -73,23 +84,19 @@ import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
 
-// Additional constants needed for scanner functionality
-const DNS_NAMESPACE = "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
-const QDRANT_CODE_BLOCK_NAMESPACE = uuidv5("code-blocks", DNS_NAMESPACE)
-const MAX_FILE_SIZE_BYTES = 1024 * 1024 * 10 // 10MB
-const MAX_LIST_FILES_LIMIT_CODE_INDEX = 50000
-const BATCH_SEGMENT_THRESHOLD = 100
-const PARSING_CONCURRENCY = 4
-const BATCH_PROCESSING_CONCURRENCY = 2
-const MAX_PENDING_BATCHES = 5
-
 export class DirectoryScanner implements IDirectoryScanner {
-	private readonly batchSegmentThreshold: number
+	private batchSegmentThreshold: number
 	// Track cumulative Neo4j progress across all batches
 	private neo4jCumulativeFilesProcessed: number = 0
 	private neo4jTotalFilesToProcess: number = 0
 	// Cancellation support
 	private _cancelled: boolean = false
+
+	// Adaptive batch optimization
+	private batchOptimizer: AdaptiveBatchOptimizer
+	private totalBatchesProcessed = 0
+	// Verbose logging control
+	private verboseLogging: boolean = false
 
 	/**
 	 * Get or create a mutex for a specific file
@@ -388,8 +395,22 @@ export class DirectoryScanner implements IDirectoryScanner {
 		private readonly graphIndexer?: IGraphIndexer,
 		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
 		private readonly outputChannel?: vscode.OutputChannel,
+		verboseLogging?: boolean,
+		private readonly metricsCollector?: MetricsCollector,
 	) {
 		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
+		this.verboseLogging = verboseLogging || false
+
+		// Initialize adaptive batch optimizer
+		this.batchOptimizer = new AdaptiveBatchOptimizer(MAX_BATCH_TOKENS, MAX_ITEM_TOKENS, {
+			minBatchSize: 5,
+			maxBatchSize: 100,
+			targetLatency: 2000, // 2 seconds
+			targetThroughput: 50, // 50 items per second
+			adjustmentFactor: 0.2, // 20% adjustment
+			metricsWindow: 10, // consider last 10 batches
+		})
+
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
 		if (batchSegmentThreshold !== undefined) {
@@ -404,9 +425,21 @@ export class DirectoryScanner implements IDirectoryScanner {
 				this.batchSegmentThreshold = BATCH_SEGMENT_THRESHOLD
 			}
 		}
+
+		// Inject metrics collector into parser if available
+		if (this.metricsCollector) {
+			this.codeParser.setMetricsCollector(this.metricsCollector)
+		}
 	}
 
 	private readonly log: LogFunction
+
+	/**
+	 * Helper method to extract file extension from path
+	 */
+	private getFileExtension(filePath: string): string {
+		return path.extname(filePath).toLowerCase()
+	}
 
 	/**
 	 * Cancel the current indexing operation
@@ -436,7 +469,16 @@ export class DirectoryScanner implements IDirectoryScanner {
 		onError?: (error: Error) => void,
 		onBlocksIndexed?: (indexedCount: number) => void,
 		onFileParsed?: (fileBlockCount: number) => void,
-	): Promise<{ stats: { processed: number; skipped: number }; totalBlockCount: number }> {
+	): Promise<{
+		stats: { processed: number; skipped: number }
+		totalBlockCount: number
+		filesDiscovered: number
+		filesAfterRooignore: number
+		filesAfterExtensionFilter: number
+		filesSkippedBySize: number
+		filesSkippedByCache: number
+		filesProcessed: number
+	}> {
 		const directoryPath = directory
 		// Capture workspace context at scan start
 		const scanWorkspace = getWorkspacePathForContext(directoryPath)
@@ -447,16 +489,30 @@ export class DirectoryScanner implements IDirectoryScanner {
 			throw new Error("Indexing cancelled by user")
 		}
 
-		// Get configured limit
-		const config = vscode.workspace.getConfiguration(Package.name)
-		const userMaxFiles = config.get<number>("codeIndex.maxFileDiscoveryLimit", MAX_LIST_FILES_LIMIT_CODE_INDEX)
-		const effectiveLimit = userMaxFiles === 0 ? Number.MAX_SAFE_INTEGER : userMaxFiles
-
 		// Get all files recursively (handles .gitignore automatically)
-		const [allPaths, _] = await listFiles(directoryPath, true, effectiveLimit)
+		const [allPaths, _] = await listFiles(directoryPath, true)
 
 		// Filter out directories (marked with trailing '/')
 		const filePaths = allPaths.filter((p) => !p.endsWith("/"))
+		const dirCount = allPaths.length - filePaths.length
+
+		this.log(
+			`[DirectoryScanner] Discovered ${allPaths.length} paths (${dirCount} directories, ${filePaths.length} files)`,
+		)
+
+		// Log each discovered file with its extension (verbose only)
+		if (this.verboseLogging) {
+			for (const filePath of filePaths) {
+				const ext = path.extname(filePath).toLowerCase()
+				this.log(`[DirectoryScanner] Discovered file: ${filePath} (extension: ${ext || "none"})`)
+			}
+		}
+
+		// Record file discovery metrics
+		for (const filePath of filePaths) {
+			const ext = this.getFileExtension(filePath)
+			this.metricsCollector?.recordFileTypeMetric(ext, "discovered")
+		}
 
 		// Initialize RooIgnoreController if not provided
 		const ignoreController = new RooIgnoreController(directoryPath)
@@ -465,6 +521,20 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		// Filter paths using .rooignore
 		const allowedPaths = ignoreController.filterPaths(filePaths)
+		this.log(`[DirectoryScanner] ${allowedPaths.length} files remain after .rooignore filtering`)
+
+		// record rooignore filtering metrics
+		for (const filePath of filePaths) {
+			if (!allowedPaths.includes(filePath)) {
+				const ext = this.getFileExtension(filePath)
+				this.metricsCollector?.recordFileTypeMetric(ext, "filteredByRooignore")
+			}
+		}
+
+		// Initialize filter counters before using them in the filter callback
+		let ignoredDirCount = 0
+		let unsupportedExtCount = 0
+		let gitignoreCount = 0
 
 		// Filter by supported extensions, ignore patterns, and excluded directories
 		const supportedPaths = allowedPaths.filter((filePath) => {
@@ -473,16 +543,49 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 			// Check if file is in an ignored directory using the shared helper
 			if (isPathInIgnoredDirectory(filePath)) {
+				if (this.verboseLogging) {
+					this.log(`[DirectoryScanner] Filtered out file in ignored directory: ${filePath}`)
+				}
+				ignoredDirCount++
 				return false
 			}
 
-			return scannerExtensions.includes(ext) && !this.ignoreInstance.ignores(relativeFilePath)
+			const isSupportedExt = scannerExtensions.includes(ext)
+			const isIgnoredByGitignore = this.ignoreInstance.ignores(relativeFilePath)
+
+			if (!isSupportedExt) {
+				if (this.verboseLogging) {
+					this.log(
+						`[DirectoryScanner] Filtered out file with unsupported extension: ${filePath} (extension: ${ext})`,
+					)
+				}
+				unsupportedExtCount++
+				this.metricsCollector?.recordFileTypeMetric(ext, "filteredByExtension")
+				return false
+			}
+
+			if (isIgnoredByGitignore) {
+				if (this.verboseLogging) {
+					this.log(`[DirectoryScanner] Filtered out file ignored by .gitignore: ${filePath}`)
+				}
+				gitignoreCount++
+				this.metricsCollector?.recordFileTypeMetric(ext, "filteredByRooignore")
+				return false
+			}
+
+			if (this.verboseLogging) {
+				this.log(`[DirectoryScanner] File passed all filters: ${filePath}`)
+			}
+			return true
 		})
+		this.log(`[DirectoryScanner] ${supportedPaths.length} files remain after extension and .gitignore filtering`)
 
 		// Initialize tracking variables
 		const processedFiles = new Set<string>()
 		let processedCount = 0
 		let skippedCount = 0
+		let sizeSkippedCount = 0
+		let cacheSkippedCount = 0
 
 		// Reset Neo4j cumulative counters at the start of each scan
 		this.neo4jCumulativeFilesProcessed = 0
@@ -511,11 +614,31 @@ export class DirectoryScanner implements IDirectoryScanner {
 					throw new Error("Indexing cancelled by user")
 				}
 
+				let stats: any = null
+
 				try {
 					// Check file size
-					const stats = await stat(filePath)
+					try {
+						stats = await stat(filePath)
+					} catch (statError) {
+						this.log(
+							`[DirectoryScanner] Failed to get file stats for ${filePath}: ${statError instanceof Error ? statError.message : String(statError)}`,
+						)
+						return
+					}
+					if (this.verboseLogging) {
+						this.log(`[DirectoryScanner] File size check: ${filePath} (${stats.size} bytes)`)
+					}
 					if (stats.size > MAX_FILE_SIZE_BYTES) {
+						if (this.verboseLogging) {
+							this.log(
+								`[DirectoryScanner] File too large, skipping: ${filePath} (${stats.size} bytes > ${MAX_FILE_SIZE_BYTES} bytes)`,
+							)
+						}
 						skippedCount++ // Skip large files
+						sizeSkippedCount++
+						const ext = this.getFileExtension(filePath)
+						this.metricsCollector?.recordFileTypeMetric(ext, "skippedBySize")
 						return
 					}
 
@@ -543,8 +666,22 @@ export class DirectoryScanner implements IDirectoryScanner {
 					const isNewFile = !cachedFileHash
 					if (cachedFileHash === currentFileHash) {
 						// File is unchanged
+						if (this.verboseLogging) {
+							this.log(`[DirectoryScanner] Cache hit - file unchanged: ${filePath}`)
+						}
 						skippedCount++
+						cacheSkippedCount++
+						const ext = this.getFileExtension(filePath)
+						this.metricsCollector?.recordFileTypeMetric(ext, "skippedByCache")
 						return
+					}
+
+					if (this.verboseLogging) {
+						if (isNewFile) {
+							this.log(`[DirectoryScanner] Cache miss - new file: ${filePath}`)
+						} else {
+							this.log(`[DirectoryScanner] Cache miss - file modified: ${filePath} (hash changed)`)
+						}
 					}
 
 					// Check for cancellation before parsing
@@ -555,8 +692,31 @@ export class DirectoryScanner implements IDirectoryScanner {
 					// File is new or changed - parse it using the injected parser function
 					const blocks = await this.codeParser.parseFile(filePath, { content, fileHash: currentFileHash })
 					const fileBlockCount = blocks.length
+					const ext = this.getFileExtension(filePath)
+
+					// Add diagnostic for 0-block parses
+					if (fileBlockCount === 0) {
+						const fileExtension = path.extname(filePath).toLowerCase()
+						const fileSize = stats?.size || "unknown"
+						this.log(
+							`[DirectoryScanner] WARNING: File parsed but generated 0 blocks: ${filePath} (extension: ${fileExtension}, size: ${fileSize} bytes)`,
+						)
+					}
+
+					this.log(
+						`[DirectoryScanner] Successfully parsed file: ${filePath} (${fileBlockCount} code blocks found)`,
+					)
 					onFileParsed?.(fileBlockCount)
 					processedCount++
+
+					// Record parse metrics
+					if (fileBlockCount > 0) {
+						this.metricsCollector?.recordFileTypeMetric(ext, "parsed")
+						this.metricsCollector?.recordBlockTypeMetric(ext, "generated", fileBlockCount)
+						this.metricsCollector?.recordFileTypeMetric(ext, "blocksGenerated", fileBlockCount)
+					} else {
+						this.metricsCollector?.recordFileTypeMetric(ext, "parseFailed")
+					}
 
 					// Check for cancellation after parsing
 					if (this._cancelled) {
@@ -565,6 +725,10 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 					// Process embeddings if configured
 					if (this.embedder && this.qdrantClient && blocks.length > 0) {
+						const previousBatchSize = currentBatchBlocks.length
+						this.log(`Filtering blocks for embeddings: ${blocks.length} blocks parsed`)
+
+						let filteredCount = 0
 						let addedBlocksFromFile = false
 						for (const block of blocks) {
 							const trimmedContent = block.content.trim()
@@ -572,8 +736,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 								currentBatchBlocks.push(block)
 								currentBatchTexts.push(trimmedContent)
 								addedBlocksFromFile = true
+							} else {
+								filteredCount++
 							}
 						}
+
+						this.log(
+							`Blocks after filtering empty content: ${currentBatchBlocks.length - previousBatchSize} added (${filteredCount} filtered out due to empty content)`,
+						)
 
 						// Add file info once per file (outside the block loop)
 						if (addedBlocksFromFile) {
@@ -584,9 +754,22 @@ export class DirectoryScanner implements IDirectoryScanner {
 								isNew: isNewFile,
 							})
 
-							// Check if batch threshold is met AFTER adding all blocks for this file
-							// This ensures a file is never split across batches
-							if (currentBatchBlocks.length >= this.batchSegmentThreshold) {
+							// Use adaptive batch sizing to determine if we should process current batch
+							const batchOptimization = this.batchOptimizer.calculateOptimalBatchSize(
+								currentBatchBlocks,
+								this.batchSegmentThreshold,
+							)
+
+							// Check if we should process the batch based on adaptive sizing
+							const shouldProcessBatch = currentBatchBlocks.length >= batchOptimization.optimalBatchSize
+
+							if (shouldProcessBatch) {
+								this.log(
+									`[DirectoryScanner] Adaptive batch optimization: ${batchOptimization.reasoning}`,
+								)
+
+								// Use the optimized batch size for this batch
+								const optimizedBatchSize = batchOptimization.optimalBatchSize
 								// Check for cancellation before processing batch
 								if (this._cancelled) {
 									throw new Error("Indexing cancelled by user")
@@ -638,22 +821,47 @@ export class DirectoryScanner implements IDirectoryScanner {
 						await this.cacheManager.updateHash(filePath, currentFileHash)
 					}
 				} catch (error) {
-					this.log(`Error processing file ${filePath} in workspace ${scanWorkspace}:`, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "scanDirectory:processFile",
-					})
-					if (onError) {
-						onError(
-							error instanceof Error
-								? new Error(`${error.message} (Workspace: ${scanWorkspace}, File: ${filePath})`)
-								: new Error(
-										t("embeddings:scanner.unknownErrorProcessingFile", { filePath }) +
-											` (Workspace: ${scanWorkspace})`,
-									),
-						)
+					const errorMessage = error instanceof Error ? error.message : String(error)
+					const errorStack = error instanceof Error ? error.stack : undefined
+					this.log(`[DirectoryScanner] Error processing file: ${filePath} in workspace: ${scanWorkspace}`)
+					this.log(`[DirectoryScanner] Error details: ${errorMessage}`)
+					if (errorStack) {
+						this.log(`[DirectoryScanner] Error stack: ${errorStack}`)
 					}
+					this.log(`[DirectoryScanner] File size: ${stats?.size || "unknown"} bytes`)
+					this.log(`[DirectoryScanner] File extension: ${path.extname(filePath).toLowerCase()}`)
+
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(errorMessage),
+						stack: sanitizeErrorMessage(errorStack || ""),
+						location: "scanDirectory:processFile",
+						filePath: filePath,
+						fileSize: stats?.size,
+						fileExtension: path.extname(filePath).toLowerCase(),
+					})
+
+					// Create enhanced error with context
+					const enhancedError =
+						error instanceof Error
+							? new Error(
+									`${error.message} (Workspace: ${scanWorkspace}, File: ${filePath}, Size: ${stats?.size || "unknown"} bytes)`,
+								)
+							: new Error(
+									t("embeddings:scanner.unknownErrorProcessingFile", { filePath }) +
+										` (Workspace: ${scanWorkspace}, Size: ${stats?.size || "unknown"} bytes)`,
+								)
+
+					// Preserve original error stack and context
+					if (error instanceof Error) {
+						enhancedError.stack = error.stack
+					}
+
+					if (onError) {
+						onError(enhancedError)
+					}
+
+					// Re-throw the error to ensure proper error propagation instead of continuing silently
+					throw enhancedError
 				}
 			}),
 		)
@@ -727,6 +935,20 @@ export class DirectoryScanner implements IDirectoryScanner {
 			throw error
 		}
 
+		this.log(`[DirectoryScanner] Scan summary:
+			Total files discovered: ${filePaths.length}
+			Files after .rooignore: ${allowedPaths.length}
+			Files filtered by ignored directories: ${ignoredDirCount}
+			Files filtered by unsupported extensions: ${unsupportedExtCount}
+			Files filtered by .gitignore: ${gitignoreCount}
+			Files to process: ${supportedPaths.length}
+			Files skipped by size: ${sizeSkippedCount}
+			Files skipped by cache: ${cacheSkippedCount}
+			Files parsed: ${processedCount}
+			Total blocks found: ${totalBlockCount}
+			Average blocks per parsed file: ${processedCount > 0 ? (totalBlockCount / processedCount).toFixed(2) : "0"}
+		`)
+
 		// Report final Neo4j status after all batches complete
 		if (this.graphIndexer && this.stateManager && this.neo4jTotalFilesToProcess > 0) {
 			this.stateManager.reportNeo4jIndexingProgress(
@@ -789,6 +1011,12 @@ export class DirectoryScanner implements IDirectoryScanner {
 				skipped: skippedCount,
 			},
 			totalBlockCount,
+			filesDiscovered: filePaths.length,
+			filesAfterRooignore: allowedPaths.length,
+			filesAfterExtensionFilter: supportedPaths.length,
+			filesSkippedBySize: sizeSkippedCount,
+			filesSkippedByCache: cacheSkippedCount,
+			filesProcessed: processedCount,
 		}
 	}
 
@@ -808,10 +1036,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 			throw new Error("Indexing cancelled by user")
 		}
 
-		let attempts = 0
-		let success = false
-		let lastError: Error | null = null
-		let batchFailed = false
+		// Record batch start time for performance tracking
+		const batchStartTime = Date.now()
 
 		// Group blocks and file infos by file path for per-file processing
 		const blocksByFile = new Map<string, CodeBlock[]>()
@@ -828,6 +1054,22 @@ export class DirectoryScanner implements IDirectoryScanner {
 			fileInfosByFile.set(fileInfo.filePath, fileInfo)
 		}
 
+		// Comprehensive batch entry logging
+		this.log(
+			`[DirectoryScanner] processBatch ENTRY: Received ${batchBlocks.length} blocks from ${batchFileInfos.length} files`,
+		)
+		this.log(
+			`Files in batch: ${Array.from(blocksByFile.entries())
+				.map(([path, blocks]) => `${path} (${blocks.length} blocks)`)
+				.join(", ")}`,
+		)
+
+		let attempts = 0
+		let success = false
+		let lastError: Error | null = null
+		let batchFailed = false
+		const filesWithFailedMetrics = new Set<string>()
+
 		while (attempts < MAX_BATCH_RETRIES && !success) {
 			attempts++
 			try {
@@ -837,7 +1079,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 					throw new Error("Indexing cancelled by user")
 				}
 
-				// Process each file individually while holding its mutex for the entire lifecycle
+				// Process each file individually while holding its mutex for entire lifecycle
 				for (const [filePath, fileBlocks] of blocksByFile) {
 					const fileInfo = fileInfosByFile.get(filePath)
 					if (!fileInfo) {
@@ -856,6 +1098,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 						}
 
 						this.log(`[DirectoryScanner] Processing file with full lifecycle mutex: ${filePath}`)
+						this.log(`[DirectoryScanner] Processing ${fileBlocks.length} blocks for file: ${filePath}`)
 
 						// Step 1: Delete existing points for modified files (Qdrant operation)
 						if (!fileInfo.isNew) {
@@ -879,283 +1122,122 @@ export class DirectoryScanner implements IDirectoryScanner {
 									location: "processBatch:deletePointsByFilePath",
 									filePath: filePath,
 								})
-
-								// Re-throw to trigger retry
-								throw new Error(`Failed to delete points for file ${filePath}: ${errorMessage}`, {
-									cause: deleteError,
-								})
 							}
 						}
 
-						// Step 2: Create embeddings for this file's blocks
-						const enrichedTexts = fileBlocks.map((block) => {
-							// If block has enhanced metadata, use buildEmbeddingContext
-							if (block.symbolMetadata || block.documentation || block.lspTypeInfo) {
-								const segment: EnhancedCodeSegment = {
-									segmentHash: block.segmentHash,
-									filePath: block.file_path,
-									content: block.content,
-									startLine: block.start_line,
-									endLine: block.end_line,
-									fileHash: block.fileHash,
-									identifier: block.identifier,
-									type: block.type,
-									language: path.extname(block.file_path).slice(1).toLowerCase(),
-									symbolMetadata: block.symbolMetadata,
-									documentation: block.documentation,
-									lspTypeInfo: block.lspTypeInfo,
-								}
-								return buildEmbeddingContext(segment)
-							}
-							// Fallback to plain content for blocks without metadata
-							return block.content
-						})
+						// Step 2: Generate embeddings for all blocks in batch
+						const enrichedTexts: string[] = []
+						for (const block of fileBlocks) {
+							const enrichedText = buildEmbeddingContext(block)
+							enrichedTexts.push(enrichedText)
+						}
 
-						const { embeddings } = await this.embedder.createEmbeddings(enrichedTexts)
+						// Step 3: Generate embeddings in a single API call for entire batch
+						this.log(
+							`[DirectoryScanner] Generating embeddings for ${enrichedTexts.length} enriched text segments`,
+						)
+						const embeddingResponse = await this.embedder.createEmbeddings(enrichedTexts)
+						this.log(
+							`[DirectoryScanner] Generated ${embeddingResponse.embeddings.length} embeddings for batch`,
+						)
 
-						// Step 3: Prepare and upsert points to Qdrant
-						const points = fileBlocks.map((block, index) => {
-							const normalizedAbsolutePath = generateNormalizedAbsolutePath(
-								block.file_path,
-								scanWorkspace,
+						// Verification logging for embedding generation
+						this.log(
+							`[DirectoryScanner] Embedding generation: Requested ${enrichedTexts.length} embeddings, received ${embeddingResponse.embeddings.length} embeddings for file: ${filePath}`,
+						)
+						if (enrichedTexts.length !== embeddingResponse.embeddings.length) {
+							this.log(
+								`[DirectoryScanner] ERROR: Embedding count mismatch for ${filePath}: expected ${enrichedTexts.length}, got ${embeddingResponse.embeddings.length}`,
 							)
-							const pointId = uuidv5(block.segmentHash, QDRANT_CODE_BLOCK_NAMESPACE)
 
-							const ext = path.extname(block.file_path).slice(1).toLowerCase()
-							const languageMap: Record<string, string> = {
-								ts: "TypeScript",
-								tsx: "TypeScript",
-								js: "JavaScript",
-								jsx: "JavaScript",
-								py: "Python",
-								java: "Java",
-								cpp: "C++",
-								c: "C",
-								cs: "C#",
-								go: "Go",
-								rs: "Rust",
-								rb: "Ruby",
-								php: "PHP",
-								swift: "Swift",
-								kt: "Kotlin",
-								scala: "Scala",
+							// Mark batch as failed to prevent cache hash update
+							batchFailed = true
+
+							// Record failed block metrics
+							const ext = this.getFileExtension(filePath)
+							this.metricsCollector?.recordBlockTypeMetric(ext, "failed", fileBlocks.length)
+							filesWithFailedMetrics.add(filePath)
+
+							// Report to telemetry for monitoring
+							TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+								error: `Embedding count mismatch for ${filePath}: expected ${enrichedTexts.length}, got ${embeddingResponse.embeddings.length}`,
+								location: "processBatch:embeddingCountMismatch",
+								filePath: filePath,
+								expectedCount: enrichedTexts.length,
+								actualCount: embeddingResponse.embeddings.length,
+							})
+
+							// Throw error to trigger batch retry path
+							throw new Error(
+								`Embedding count mismatch for ${filePath}: expected ${enrichedTexts.length}, got ${embeddingResponse.embeddings.length}`,
+							)
+						}
+
+						// Record successful embedding metrics
+						const ext = this.getFileExtension(filePath)
+						this.metricsCollector?.recordBlockTypeMetric(ext, "embedded", fileBlocks.length)
+
+						// Step 4: Prepare and upsert points to Qdrant
+						const points: PointStruct[] = []
+						for (let i = 0; i < embeddingResponse.embeddings.length; i++) {
+							const enrichedText = enrichedTexts[i]
+							const embedding = embeddingResponse.embeddings[i]
+							const block = fileBlocks[i]
+
+							// Validate array bounds
+							if (i >= fileBlocks.length) {
+								this.log(
+									`[DirectoryScanner] ERROR: Embedding index ${i} out of bounds for ${filePath}: only ${fileBlocks.length} embeddings available`,
+								)
+
+								// Record failed block metrics
+								const ext = this.getFileExtension(filePath)
+								this.metricsCollector?.recordBlockTypeMetric(ext, "failed", fileBlocks.length)
+								filesWithFailedMetrics.add(filePath)
+
+								TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+									error: `Embedding index ${i} out of bounds for ${filePath}: only ${fileBlocks.length} embeddings available`,
+									location: "processBatch:embeddingIndexOutOfBounds",
+									filePath: filePath,
+								})
+
+								// Throw error to trigger batch retry path
+								throw new Error(
+									`Embedding index ${i} out of bounds for ${filePath}: only ${fileBlocks.length} embeddings available`,
+								)
 							}
-							const language = languageMap[ext] || ext
 
-							return {
-								id: pointId,
-								vector: embeddings[index],
+							const point: PointStruct = {
+								id: uuidv5(block.segmentHash, filePath),
+								vector: embedding,
 								payload: {
-									filePath: generateRelativeFilePath(normalizedAbsolutePath, scanWorkspace),
-									codeChunk: block.content,
-									startLine: block.start_line,
-									endLine: block.end_line,
-									segmentHash: block.segmentHash,
+									file_path: block.file_path,
 									identifier: block.identifier,
 									type: block.type,
-									language,
+									start_line: block.start_line,
+									end_line: block.end_line,
+									content: block.content,
+									fileHash: block.fileHash,
+									segmentHash: block.segmentHash,
 									symbolMetadata: block.symbolMetadata,
 									imports: block.imports,
 									exports: block.exports,
 									documentation: block.documentation,
 									lspTypeInfo: block.lspTypeInfo,
-								},
+									calls: block.calls,
+									testMetadata: block.testMetadata,
+									// React-specific metadata
+									reactComponentMetadata: block.reactComponentMetadata,
+									reactHookMetadata: block.reactHookMetadata,
+									jsxMetadata: block.jsxMetadata,
+								} as any,
 							}
-						})
+							points.push(point)
+						}
 
+						// Step 5: Upsert points to Qdrant
+						this.log(`[DirectoryScanner] Upserting ${points.length} points to Qdrant for batch`)
 						await this.qdrantClient.upsertPoints(points)
-						onBlocksIndexed?.(fileBlocks.length)
-						this.log(`[DirectoryScanner] Upserted ${fileBlocks.length} points for file: ${filePath}`)
-
-						// Step 4: Add to BM25 index if available
-						if (this.bm25Index) {
-							const languageMap: Record<string, string> = {
-								ts: "TypeScript",
-								tsx: "TypeScript",
-								js: "JavaScript",
-								jsx: "JavaScript",
-								py: "Python",
-								java: "Java",
-								cpp: "C++",
-								c: "C",
-								cs: "C#",
-								go: "Go",
-								rs: "Rust",
-								rb: "Ruby",
-								php: "PHP",
-								swift: "Swift",
-								kt: "Kotlin",
-								scala: "Scala",
-							}
-							const bm25Documents: BM25Document[] = fileBlocks.map((block) => {
-								const ext = path.extname(block.file_path).slice(1).toLowerCase()
-								const language = languageMap[ext] || ext
-								return {
-									id: block.segmentHash,
-									text: block.content,
-									filePath: block.file_path,
-									startLine: block.start_line,
-									endLine: block.end_line,
-									metadata: {
-										identifier: block.identifier,
-										type: block.type,
-										language,
-									},
-								}
-							})
-							this.bm25Index.addDocuments(bm25Documents)
-						}
-
-						// Step 5: Add to Neo4j graph if available
-						if (this.graphIndexer) {
-							// Wait for available transaction slot
-							await this.waitForTransactionSlot()
-							await this.incrementActiveTransactions()
-
-							try {
-								this.log(`[DirectoryScanner] Starting Neo4j indexing for file: ${filePath}`)
-								await this.graphIndexer.indexFile(filePath, fileBlocks)
-								this.neo4jCumulativeFilesProcessed++
-								this.log(
-									`[DirectoryScanner] Successfully indexed file to Neo4j: ${filePath} (${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess})`,
-								)
-
-								// Report cumulative progress
-								if (this.stateManager) {
-									this.stateManager.reportNeo4jIndexingProgress(
-										this.neo4jCumulativeFilesProcessed,
-										this.neo4jTotalFilesToProcess,
-										"indexing",
-										`Indexed ${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess} files to graph`,
-									)
-								}
-
-								// Reset circuit breaker on successful operation
-								this.resetCircuitBreaker("transactionErrors")
-								this.resetCircuitBreaker("connectionErrors")
-								this.resetCircuitBreaker("deadlockErrors")
-							} catch (error) {
-								// Mark batch as failed for transaction coordination
-								batchFailed = true
-
-								// Enhanced error handling with proper error propagation and circuit breaker pattern
-								const errorMessage = error instanceof Error ? error.message : String(error)
-								const errorStack = error instanceof Error ? error.stack : undefined
-
-								this.log(`[Neo4j Connection Error] Error indexing file to Neo4j:`, {
-									filePath: filePath,
-									error: errorMessage,
-									stack: errorStack,
-									processedFiles: `${this.neo4jCumulativeFilesProcessed}/${this.neo4jTotalFilesToProcess}`,
-									circuitBreakerState: Object.entries(circuitBreakerState)
-										.map(([type, state]) => `${type}: ${state.consecutiveFailures}/3 failures`)
-										.join(", "),
-								})
-
-								// Determine error type for circuit breaker
-								let errorType: "connectionErrors" | "transactionErrors" | "deadlockErrors"
-								if (
-									errorMessage.includes("connection") ||
-									errorMessage.includes("pool") ||
-									errorMessage.includes("timeout")
-								) {
-									errorType = "connectionErrors"
-									this.log(
-										`[DirectoryScanner] Neo4j connection issue detected - possible resource exhaustion. Consider reducing batch size or concurrency.`,
-									)
-								} else if (errorMessage.includes("deadlock") || errorMessage.includes("lock")) {
-									errorType = "deadlockErrors"
-								} else {
-									errorType = "transactionErrors"
-								}
-
-								// Update circuit breaker for specific error type
-								this.updateCircuitBreaker(errorType)
-								const cbState = circuitBreakerState[errorType]
-								this.log(`[Neo4j ${errorType}] Consecutive failures: ${cbState.consecutiveFailures}/3`)
-
-								// Update state manager with cumulative circuit breaker statistics
-								if (this.stateManager && cbState.consecutiveFailures < 3) {
-									// Only update if circuit breaker hasn't opened yet (will be updated in the circuit breaker block if it opens)
-									this.stateManager.reportNeo4jIndexingProgress(
-										this.neo4jCumulativeFilesProcessed,
-										this.neo4jTotalFilesToProcess,
-										"error",
-										`Graph indexing error: ${errorMessage} (${errorType} failure ${cbState.consecutiveFailures}/3)`,
-									)
-								}
-
-								// Report to telemetry for monitoring with full error context
-								TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-									error: sanitizeErrorMessage(errorMessage),
-									stack: sanitizeErrorMessage(errorStack || ""),
-									location: "processBatch:neo4jIndexing",
-									filePath: filePath,
-									errorType: errorType,
-									circuitBreakerState: cbState,
-									cumulativeStats: {
-										processedFiles: this.neo4jCumulativeFilesProcessed,
-										totalFiles: this.neo4jTotalFilesToProcess,
-									},
-								})
-
-								// Circuit breaker: stop Neo4j indexing after consecutive failures
-								if (this.isCircuitBreakerOpen(errorType)) {
-									const cbState = circuitBreakerState[errorType]
-									this.log(
-										`[Neo4j Circuit Breaker] Circuit breaker triggered for ${errorType} - disabling Neo4j indexing for this batch.`,
-									)
-									this.log(
-										`[Neo4j Circuit Breaker] State: ${cbState.consecutiveFailures} consecutive failures`,
-									)
-
-									// Report circuit breaker activation to telemetry
-									TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-										error: sanitizeErrorMessage(errorMessage),
-										stack: sanitizeErrorMessage(errorStack || ""),
-										location: "processBatch:neo4jCircuitBreaker",
-										errorType: "circuit_breaker_triggered",
-										circuitBreakerType: errorType,
-										circuitBreakerState: circuitBreakerState[errorType],
-									})
-
-									// Update state manager with detailed circuit breaker status
-									if (this.stateManager) {
-										const categorized = this.stateManager.categorizeError(error as Error)
-										this.stateManager.setNeo4jStatus(
-											"error",
-											`Neo4j indexing disabled - circuit breaker triggered (${errorType})`,
-											errorMessage,
-											categorized.category,
-											`Circuit breaker activated after ${cbState.consecutiveFailures} consecutive ${errorType}. ${categorized.retrySuggestion}`,
-										)
-									}
-
-									// Don't re-throw for circuit breaker - continue with vector indexing
-									return
-								}
-
-								// Re-throw critical errors that should stop the entire indexing process
-								if (
-									errorMessage.includes("authentication") ||
-									errorMessage.includes("authorization") ||
-									errorMessage.includes("invalid database")
-								) {
-									this.log(
-										`[DirectoryScanner] Critical Neo4j error - stopping indexing: ${errorMessage}`,
-									)
-									throw new Error(`Neo4j critical error: ${errorMessage}`)
-								}
-
-								// For other errors, log and continue with vector indexing (graceful degradation)
-								this.log(
-									`[DirectoryScanner] Neo4j error handled gracefully - continuing with vector indexing: ${errorMessage}`,
-								)
-							} finally {
-								// Decrement active transaction counter
-								await this.decrementActiveTransactions()
-							}
-						}
 
 						// Step 6: Update cache hash for successfully processed file
 						// Only update if batch didn't fail (transaction coordination)
@@ -1195,6 +1277,17 @@ export class DirectoryScanner implements IDirectoryScanner {
 					batchSize: batchBlocks.length,
 				})
 
+				// Record failed metrics for all files in batch that haven't already been recorded
+				for (const [filePath, fileBlocks] of blocksByFile) {
+					if (!filesWithFailedMetrics.has(filePath)) {
+						this.metricsCollector?.recordBlockTypeMetric(
+							this.getFileExtension(filePath),
+							"failed",
+							fileBlocks.length,
+						)
+					}
+				}
+
 				if (attempts < MAX_BATCH_RETRIES) {
 					const delay = INITIAL_RETRY_DELAY_MS * Math.pow(2, attempts - 1)
 					await new Promise((resolve) => setTimeout(resolve, delay))
@@ -1202,8 +1295,18 @@ export class DirectoryScanner implements IDirectoryScanner {
 			}
 		}
 
+		// Success case - log successful batch completion
+		if (success) {
+			this.log(
+				`[DirectoryScanner] processBatch EXIT: Successfully processed ${batchBlocks.length} blocks from ${blocksByFile.size} files in ${Date.now() - batchStartTime}ms`,
+			)
+		}
+
+		// Failure case - handle batch failure after exhausting retries
 		if (!success && lastError) {
-			this.log(`[DirectoryScanner] Failed to process batch after ${MAX_BATCH_RETRIES} attempts`)
+			this.log(
+				`[DirectoryScanner] processBatch EXIT-ERROR: Failed to process batch after ${MAX_BATCH_RETRIES} attempts`,
+			)
 			// Preserve the original error message from embedders which now have detailed i18n messages
 			const errorMessage = lastError.message || "Unknown error"
 

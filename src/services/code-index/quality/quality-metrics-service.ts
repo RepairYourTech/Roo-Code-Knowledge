@@ -188,9 +188,103 @@ export class QualityMetricsService implements IQualityMetricsService {
 	}
 
 	/**
+	 * Calculate cognitive complexity
+	 * Based on SonarQube's Cognitive Complexity specification
+	 */
+	private calculateCognitiveComplexity(node: Node, nestingLevel: number = 0): number {
+		let complexity = 0
+
+		// Decision point node types across different languages
+		// These increment complexity
+		const incrementPoints: Record<string, number> = {
+			// Basic control flow
+			if_statement: 1,
+			else: 1,
+			elif: 1,
+			for_statement: 1,
+			for_in_statement: 1,
+			while_statement: 1,
+			do_statement: 1,
+			switch_statement: 1,
+			switch_expression: 1,
+			case: 1,
+			case_clause: 1,
+			catch_clause: 1,
+			except_clause: 1,
+			finally_clause: 1,
+
+			// Conditional expressions
+			ternary_expression: 1,
+			conditional_expression: 1,
+
+			// Language-specific constructs
+			guard_statement: 1, // Swift
+			match_expression: 1, // Rust, Swift
+			match_arm: 1, // Rust
+			match_case: 1, // Swift
+		}
+
+		// Add base increment for this node
+		const baseIncrement = incrementPoints[node.type] || 0
+		if (baseIncrement > 0) {
+			// Add nesting penalty (current nesting level)
+			complexity += baseIncrement + nestingLevel
+		}
+
+		// Handle binary logical operators specially
+		if (node.type === "binary_expression") {
+			const operator = node.childForFieldName("operator")
+			if (
+				operator &&
+				(operator.text === "&&" || operator.text === "||" || operator.text === "and" || operator.text === "or")
+			) {
+				complexity += 1 // Boolean operators don't increase nesting
+			}
+		} else if (node.type === "boolean_operator") {
+			// Python boolean operators
+			complexity += 1
+		} else if (node.type === "logical_expression") {
+			// Some languages use logical_expression
+			complexity += 1
+		}
+
+		// Recursively calculate for children with increased nesting
+		// Only structural nodes increase nesting level for their children
+		const nestingNodes = [
+			"if_statement",
+			"else_clause",
+			"elif",
+			"for_statement",
+			"for_in_statement",
+			"while_statement",
+			"do_statement",
+			"switch_statement",
+			"switch_expression",
+			"case_clause",
+			"case",
+			"catch_clause",
+			"except_clause",
+			"finally_clause",
+			"function_definition", // Nested functions
+			"arrow_function",
+			"lambda_expression",
+		]
+
+		const increasesNesting = nestingNodes.includes(node.type)
+		const newNestingLevel = increasesNesting ? nestingLevel + 1 : nestingLevel
+
+		for (const child of node.children || []) {
+			if (child) {
+				complexity += this.calculateCognitiveComplexity(child, newNestingLevel)
+			}
+		}
+
+		return complexity
+	}
+
+	/**
 	 * Calculate cyclomatic complexity from AST
 	 * Formula: 1 + (number of decision points)
-	 * Supports multiple programming languages
 	 */
 	private calculateCyclomaticComplexity(node: Node): number {
 		let complexity = 1 // Base complexity
@@ -241,26 +335,31 @@ export class QualityMetricsService implements IQualityMetricsService {
 
 		// Traverse AST and count decision points
 		const traverse = (n: Node) => {
+			let countedByType = false
 			if (decisionPoints.includes(n.type)) {
 				// Special handling for binary expressions (only count logical operators)
 				if (n.type === "binary_expression") {
 					const operator = n.childForFieldName("operator")
 					if (operator && logicalOperators.some((op) => operator.text.includes(op))) {
 						complexity++
+						countedByType = true
 					}
 				} else if (n.type === "boolean_operator") {
 					// Python boolean operators
 					complexity++
+					countedByType = true
 				} else if (n.type === "logical_expression") {
 					// Some languages use logical_expression
 					complexity++
+					countedByType = true
 				} else {
 					complexity++
+					countedByType = true
 				}
 			}
 
 			// Check for logical operators in other node types
-			if (n.text && logicalOperators.some((op) => n.text.includes(op))) {
+			if (!countedByType && n.text && logicalOperators.some((op) => n.text.includes(op))) {
 				// Additional check for logical operators that might be missed
 				const text = n.text
 				for (const op of logicalOperators) {
@@ -279,83 +378,6 @@ export class QualityMetricsService implements IQualityMetricsService {
 		}
 
 		traverse(node)
-		return complexity
-	}
-
-	/**
-	 * Calculate cognitive complexity from AST
-	 * Considers nesting and structural complexity based on SonarQube's cognitive complexity metric
-	 * Supports multiple programming languages
-	 */
-	private calculateCognitiveComplexity(node: Node, nestingLevel: number = 0): number {
-		let complexity = 0
-
-		// Increment points based on node type (following SonarQube's cognitive complexity rules)
-		const incrementPoints: Record<string, number> = {
-			// Basic control flow
-			if_statement: 1,
-			else: 1,
-			elif: 1,
-			for_statement: 1,
-			for_in_statement: 1,
-			while_statement: 1,
-			do_statement: 1,
-			switch_statement: 1,
-			switch_expression: 1,
-			case: 1,
-			case_clause: 1,
-			catch_clause: 1,
-			except_clause: 1,
-			finally_clause: 1,
-
-			// Conditional expressions
-			ternary_expression: 1,
-			conditional_expression: 1,
-
-			// Language-specific constructs
-			guard_statement: 1, // Swift
-			match_expression: 1, // Rust, Swift
-			match_arm: 1, // Rust
-			match_case: 1, // Swift
-
-			// Binary logical operators (each one adds complexity)
-			binary_expression: 0, // Handled separately
-			boolean_operator: 0, // Python
-			logical_expression: 0, // Some languages
-		}
-
-		// Add base increment for this node
-		const baseIncrement = incrementPoints[node.type] || 0
-		if (baseIncrement > 0) {
-			// Add nesting penalty (current nesting level)
-			complexity += baseIncrement + nestingLevel
-		}
-
-		// Handle binary logical operators specially
-		if (node.type === "binary_expression") {
-			const operator = node.childForFieldName("operator")
-			if (
-				operator &&
-				(operator.text === "&&" || operator.text === "||" || operator.text === "and" || operator.text === "or")
-			) {
-				complexity += 1 + nestingLevel
-			}
-		} else if (node.type === "boolean_operator") {
-			// Python boolean operators
-			complexity += 1 + nestingLevel
-		} else if (node.type === "logical_expression") {
-			// Some languages use logical_expression
-			complexity += 1 + nestingLevel
-		}
-
-		// Recursively calculate for children with increased nesting
-		const newNestingLevel = baseIncrement > 0 ? nestingLevel + 1 : nestingLevel
-		for (const child of node.children || []) {
-			if (child) {
-				complexity += this.calculateCognitiveComplexity(child, newNestingLevel)
-			}
-		}
-
 		return complexity
 	}
 
@@ -507,8 +529,16 @@ export class QualityMetricsService implements IQualityMetricsService {
 			let duplicateCount = 0
 			const processedPairs = new Set<string>()
 
-			for (let i = 0; i < functions.length; i++) {
-				for (let j = i + 1; j < functions.length; j++) {
+			// Limit analysis to first 50 functions to prevent performance issues
+			const functionsToAnalyze = functions.slice(0, 50)
+			if (functions.length > 50) {
+				console.debug(
+					`Limiting duplicate detection to first 50 of ${functions.length} functions in ${filePath}`,
+				)
+			}
+
+			for (let i = 0; i < functionsToAnalyze.length; i++) {
+				for (let j = i + 1; j < functionsToAnalyze.length; j++) {
 					const pairKey = `${i}-${j}`
 					if (processedPairs.has(pairKey)) continue
 
