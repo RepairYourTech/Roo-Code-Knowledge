@@ -1208,7 +1208,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 							}
 
 							const point: PointStruct = {
-								id: uuidv5(block.segmentHash, filePath),
+								id: uuidv5(block.segmentHash, QDRANT_CODE_BLOCK_NAMESPACE),
 								vector: embedding,
 								payload: {
 									file_path: block.file_path,

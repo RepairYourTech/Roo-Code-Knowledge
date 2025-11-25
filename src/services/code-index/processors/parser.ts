@@ -4,6 +4,7 @@ import * as path from "path"
 import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
+import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
 import { MetricsCollector } from "../utils/metrics-collector"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
 import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo, TestMetadata, TestTarget } from "../interfaces"
@@ -396,7 +397,7 @@ export class CodeParser implements ICodeParser {
 				}
 			} else {
 				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
-				const loadPromise = loadRequiredLanguageParsers([filePath], undefined, this.metricsCollector)
+				const loadPromise = loadRequiredLanguageParsers([filePath], getWasmDirectory(), this.metricsCollector)
 				this.pendingLoads.set(ext, loadPromise)
 				try {
 					const newParsers = await loadPromise

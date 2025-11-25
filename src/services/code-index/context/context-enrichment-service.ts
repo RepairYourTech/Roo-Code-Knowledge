@@ -14,6 +14,7 @@ import {
 import * as fs from "fs/promises"
 import * as path from "path"
 import { loadRequiredLanguageParsers, LanguageParser } from "../../tree-sitter/languageParser"
+import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
 import { Query, QueryCapture } from "web-tree-sitter"
 
 /**
@@ -757,7 +758,7 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 
 		try {
 			// Load language parser for this file
-			const languageParsers = await loadRequiredLanguageParsers([filePath])
+			const languageParsers = await loadRequiredLanguageParsers([filePath], getWasmDirectory())
 			const parserInfo = languageParsers[ext]
 
 			if (!parserInfo) {
