@@ -196,6 +196,44 @@ export function copyWasms(srcDir: string, distDir: string): void {
 	} else {
 		console.error(`[copyWasms] Source directory not found: ${webTreeSitterDir}`)
 	}
+
+	// Copy tiktoken WASM file to dist directory root
+	const tiktokenDir = path.join(nodeModulesDir, "tiktoken")
+	if (fs.existsSync(tiktokenDir)) {
+		const tiktokenWasmFiles = glob.sync("*.wasm", { cwd: tiktokenDir })
+
+		tiktokenWasmFiles.forEach((wasmFile) => {
+			const srcPath = path.join(tiktokenDir, wasmFile)
+			const destPath = path.join(distDir, wasmFile)
+
+			try {
+				fs.copyFileSync(srcPath, destPath)
+				console.log(`[copyWasms] Copied tiktoken: ${srcPath} -> ${destPath}`)
+
+				// Verify the file was copied successfully
+				if (fs.existsSync(destPath)) {
+					const srcStats = fs.statSync(srcPath)
+					const destStats = fs.statSync(destPath)
+					if (srcStats.size === destStats.size) {
+						console.log(`[copyWasms] Verified tiktoken: ${destPath} (${destStats.size} bytes)`)
+					} else {
+						console.error(`[copyWasms] Verification failed: Size mismatch for tiktoken ${destPath}`)
+					}
+				} else {
+					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
+				}
+			} catch (error) {
+				console.error(
+					`[copyWasms] Failed to copy tiktoken ${srcPath} to ${destPath}:`,
+					error instanceof Error ? error.message : "Unknown error",
+				)
+			}
+		})
+
+		console.log(`[copyWasms] Copied ${tiktokenWasmFiles.length} tiktoken WASM files`)
+	} else {
+		console.error(`[copyWasms] Source directory not found: ${tiktokenDir}`)
+	}
 }
 
 export function copyLocales(srcDir: string, distDir: string): void {
