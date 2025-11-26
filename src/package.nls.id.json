@@ -26,6 +26,7 @@
 	"command.terminal.fixCommand.title": "Perbaiki Perintah Ini",
 	"command.terminal.explainCommand.title": "Jelaskan Perintah Ini",
 	"command.acceptInput.title": "Terima Input/Saran",
+	"command.downloadTreeSitterWasms.title": "Unduh File WASM Tree-sitter",
 	"command.toggleAutoApprove.title": "Alihkan Persetujuan Otomatis",
 	"configuration.title": "Roo Code",
 	"commands.allowedCommands.description": "Perintah yang dapat dijalankan secara otomatis ketika 'Selalu setujui operasi eksekusi' diaktifkan",

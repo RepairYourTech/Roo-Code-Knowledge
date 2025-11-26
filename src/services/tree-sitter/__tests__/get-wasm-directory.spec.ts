@@ -18,6 +18,21 @@ vi.mock("fs", () => ({
 	readdirSync: vi.fn(),
 }))
 
+// Mock logger
+vi.mock("../shared/logger", () => ({
+	logger: {
+		info: vi.fn(),
+		debug: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		trace: vi.fn(),
+		getRecentLogs: vi.fn(() => []),
+		clearHistory: vi.fn(),
+		setLogLevel: vi.fn(),
+		getLogLevel: vi.fn(() => 1),
+	},
+}))
+
 describe("getWasmDirectory", () => {
 	const mockGetExtension = vscode.extensions.getExtension as unknown as ReturnType<typeof vi.fn>
 	const mockExistsSync = fs.existsSync as unknown as ReturnType<typeof vi.fn>

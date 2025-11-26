@@ -169,15 +169,13 @@ export async function loadRequiredLanguageParsers(
 ): Promise<{ [key: string]: LanguageParser }> {
 	const { Parser } = require("web-tree-sitter")
 
-	const strictWasmLoading = getStrictWasmLoading()
-
 	// Run diagnostics once before initializing parsers
 	if (!hasRunDiagnostics) {
 		// If critical WASM files are missing, handle based on strict mode
 		const downloadInstructions = `Missing tree-sitter WASM files in ${getWasmDirectory()}.
 Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WASM Files' to install them.`
 
-		if (strictWasmLoading) {
+		if (getStrictWasmLoading()) {
 			throw new Error(`Strict mode enabled. ${downloadInstructions}`)
 		} else {
 			console.warn(downloadInstructions)
@@ -253,7 +251,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 		try {
 			const language = await loadLanguage(parserKey, sourceDirectory)
 			if (!language) {
-				if (strictWasmLoading) {
+				if (getStrictWasmLoading()) {
 					throw new Error(`Failed to load language: ${parserKey}`)
 				} else {
 					console.warn(`Failed to load language: ${parserKey}`)
@@ -499,7 +497,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 			}
 		} catch (error) {
 			console.error(`Failed to load parser for ${parserKey}:`, error)
-			if (strictWasmLoading) {
+			if (getStrictWasmLoading()) {
 				throw error
 			}
 			// Continue to the next extension instead of throwing
@@ -512,7 +510,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 	console.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`)
 
 	// Final strict-mode check: ensure at least one parser was loaded when we had input files to process
-	if (strictWasmLoading && filesToParse.length > 0 && Object.keys(parsers).length === 0) {
+	if (getStrictWasmLoading() && filesToParse.length > 0 && Object.keys(parsers).length === 0) {
 		const wasmDir = getWasmDirectory()
 		const diag = diagnoseWasmSetup(wasmDir)
 		throw new Error(`

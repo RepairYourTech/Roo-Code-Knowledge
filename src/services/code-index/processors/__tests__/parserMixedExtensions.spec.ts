@@ -14,65 +14,47 @@ describe("CodeParser with mixed supported and unsupported extensions", () => {
 		const codeParser = new CodeParser()
 
 		// Test with a supported extension
-		try {
-			const results = await codeParser.parseFile("test.js", {
-				content: "console.log('hello');",
-			})
+		const results = await codeParser.parseFile("test.js", {
+			content: "console.log('hello');",
+		})
 
-			// Results should be an array (even if empty due to missing WASM files)
-			expect(Array.isArray(results)).toBe(true)
-		} catch (error) {
-			// If an error occurs, it should NOT be about unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+		// Results should be an array (even if empty due to missing WASM files)
+		expect(Array.isArray(results)).toBe(true)
 
 		// Test with an unsupported extension
-		try {
-			const results = await codeParser.parseFile("test.xyz", {
-				content: "some unsupported content",
-			})
+		const unsupportedResults = await codeParser.parseFile("test.xyz", {
+			content: "some unsupported content",
+		})
 
-			// Should return empty array for unsupported extensions
-			expect(Array.isArray(results)).toBe(true)
-			expect(results).toHaveLength(0)
-		} catch (error) {
-			// Should not throw due to unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+		// Should return empty array for unsupported extensions
+		expect(Array.isArray(unsupportedResults)).toBe(true)
+		expect(unsupportedResults).toHaveLength(0)
 	})
 
 	it("should verify that parseFile can be called with unsupported files", async () => {
 		const codeParser = new CodeParser()
 
-		// Test with unsupported extension
-		try {
-			const results = await codeParser.parseFile("test.unsupportedext", {
+		// Test with unsupported extension using Jest's modern async assertion patterns
+		await expect(
+			codeParser.parseFile("test.unsupportedext", {
 				content: "unsupported content",
-			})
-
-			// Should return an empty array for unsupported extensions
-			expect(Array.isArray(results)).toBe(true)
-			expect(results).toHaveLength(0)
-		} catch (error) {
-			// Should not throw due to unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+			}),
+		).resolves.toSatisfy((results: unknown) => {
+			return Array.isArray(results) && results.length === 0
+		})
 	})
 
 	it("should handle empty file content gracefully", async () => {
 		const codeParser = new CodeParser()
 
-		try {
-			const results = await codeParser.parseFile("test.js", {
+		// Test with empty content using Jest's modern async assertion patterns
+		await expect(
+			codeParser.parseFile("test.js", {
 				content: "",
-			})
-
-			// Should return an array (possibly empty)
-			expect(Array.isArray(results)).toBe(true)
-		} catch (error) {
-			// Should not throw due to unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+			}),
+		).resolves.toSatisfy((results: unknown) => {
+			return Array.isArray(results)
+		})
 	})
 
 	it("should verify the integration between loadRequiredLanguageParsers and parseFile", async () => {
@@ -81,31 +63,31 @@ describe("CodeParser with mixed supported and unsupported extensions", () => {
 		// Clear previous warnings
 		mockConsoleWarn.mockClear()
 
-		// Test with a supported extension
-		try {
-			await codeParser.parseFile("test.js", {
+		// Test with a supported extension using Jest's modern async assertion patterns
+		await expect(
+			codeParser.parseFile("test.js", {
 				content: "const x = 1;",
-			})
+			}),
+		).resolves.toSatisfy((results: unknown) => {
+			if (!Array.isArray(results) || results.length < 0) {
+				return false
+			}
 
-			// The important part is that parseFile completes without throwing
-			// errors for supported extensions
-			expect(true).toBe(true)
-		} catch (error) {
-			// Verify that any error is not related to unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+			// If we got any results, verify they have expected structure
+			if (results.length > 0) {
+				return results[0] !== null && typeof results[0] === "object" && "type" in results[0]
+			}
 
-		// Test with an unsupported extension
-		try {
-			const results = await codeParser.parseFile("test.unsupportedext", {
+			return true
+		})
+
+		// Test with an unsupported extension using Jest's modern async assertion patterns
+		await expect(
+			codeParser.parseFile("test.unsupportedext", {
 				content: "unsupported content",
-			})
-
-			// Should return empty array for unsupported extensions
-			expect(results).toHaveLength(0)
-		} catch (error) {
-			// Should not throw due to unsupported extensions
-			expect(error.message).not.toContain("Unsupported language")
-		}
+			}),
+		).resolves.toSatisfy((results: unknown) => {
+			return Array.isArray(results) && results.length === 0
+		})
 	})
 })

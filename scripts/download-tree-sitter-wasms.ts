@@ -75,7 +75,7 @@ const LANGUAGES = [
 ]
 
 const TARGET_DIR = path.join(process.cwd(), "src", "services", "tree-sitter")
-const WASM_VERSION = "0.1.12"
+const WASM_VERSION = "0.1.13"
 const NODE_MODULES_WASM_DIR = path.join("node_modules", "tree-sitter-wasms", "out")
 const CDN_BASE_URL = "https://unpkg.com/tree-sitter-wasms@" + WASM_VERSION + "/out"
 
@@ -125,6 +125,11 @@ async function downloadFile(url: string, destPath: string, maxRedirects: number 
 				}
 
 				response.pipe(file)
+
+				response.on("error", (err) => {
+					cleanup()
+					reject(err)
+				})
 
 				file.on("finish", () => {
 					file.close()

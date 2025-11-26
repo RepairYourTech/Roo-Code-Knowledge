@@ -1,9 +1,10 @@
-import { Parser, Query } from "web-tree-sitter"
+import { Parser, Query, Language } from "web-tree-sitter"
+import { initializeTreeSitter } from "./helpers"
 
 describe("Express.js Tree-sitter Patterns", () => {
 	let parser: Parser
-	let typescriptLanguage: any
-	let javascriptLanguage: any
+	let typescriptLanguage: Language
+	let javascriptLanguage: Language
 	let expressRoutesQuery: Query
 	let expressMiddlewareQuery: Query
 	let expressErrorHandlersQuery: Query
@@ -12,11 +13,13 @@ describe("Express.js Tree-sitter Patterns", () => {
 	let expressRoutersQuery: Query
 
 	beforeAll(async () => {
+		// Initialize tree-sitter
+		await initializeTreeSitter()
 		parser = new Parser()
-		// Note: In a real test environment, you would initialize languages
-		// For this example, we'll mock language objects
-		typescriptLanguage = {}
-		javascriptLanguage = {}
+
+		// Load actual TypeScript and JavaScript language objects
+		typescriptLanguage = await Language.load("tree-sitter-typescript.wasm")
+		javascriptLanguage = await Language.load("tree-sitter-javascript.wasm")
 
 		// Create queries for Express.js patterns
 		expressRoutesQuery = new Query(
@@ -98,7 +101,7 @@ describe("Express.js Tree-sitter Patterns", () => {
 			`
 			(call_expression
 			  function: (identifier) @function
-			  (#eq? @function "Router"))
+			  (#eq? @function "Router")
 			  arguments: (arguments)?)
 		`,
 		)

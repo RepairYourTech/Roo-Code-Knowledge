@@ -1,6 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
-import * as https from "https"
+import { https } from "follow-redirects"
 import * as vscode from "vscode"
 
 /**
@@ -78,9 +78,17 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 
 			response.pipe(file)
 
+			response.pipe(file)
+
 			file.on("finish", () => {
 				file.close()
 				resolve()
+			})
+
+			file.on("error", (err) => {
+				file.close()
+				fs.unlink(destPath, () => {})
+				reject(err)
 			})
 		})
 

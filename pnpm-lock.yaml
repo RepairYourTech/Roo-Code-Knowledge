@@ -26,6 +26,9 @@ importers:
       '@roo-code/config-typescript':
         specifier: workspace:^
         version: link:packages/config-typescript
+      '@types/follow-redirects':
+        specifier: ^1.14.4
+        version: 1.14.4
       '@types/glob':
         specifier: ^9.0.0
         version: 9.0.0
@@ -41,6 +44,9 @@ importers:
       eslint:
         specifier: ^9.27.0
         version: 9.28.0(jiti@2.4.2)
+      follow-redirects:
+        specifier: ^1.15.6
+        version: 1.15.11
       glob:
         specifier: '>=11.1.0'
         version: 11.1.0
@@ -4048,6 +4054,9 @@ packages:
   '@types/estree@1.0.8':
     resolution: {integrity: sha512-dWHzHa2WqEXI/O1E9OjrocMTKJl2mSrEolh1Iomrv6U+JuNwaHXsXx9bLu5gG7BUWFIN0skIQJQ/L1rIex4X6w==}
 
+  '@types/follow-redirects@1.14.4':
+    resolution: {integrity: sha512-GWXfsD0Jc1RWiFmMuMFCpXMzi9L7oPDVwxUnZdg89kDNnqsRfUKXEtUYtA98A6lig1WXH/CYY/fvPW9HuN5fTA==}
+
   '@types/geojson@7946.0.16':
     resolution: {integrity: sha512-6C8nqWur3j98U6+lXDfTUWIfgvZU+EumvpHKcYjujKH7woYyLj2sUmff0tRhrqM7BohUw7Pz3ZB1jj2gW9Fvmg==}
 
@@ -6137,15 +6146,6 @@ packages:
 
   follow-redirects@1.15.11:
     resolution: {integrity: sha512-deG2P0JfjrTxl50XGCDyfI97ZGVCxIpfKYmfyrQ54n5FO/0gfIES8C/Psl6kWVDolizcaaxZJnTS0QSMxvnsBQ==}
-    engines: {node: '>=4.0'}
-    peerDependencies:
-      debug: '*'
-    peerDependenciesMeta:
-      debug:
-        optional: true
-
-  follow-redirects@1.15.9:
-    resolution: {integrity: sha512-gew4GsXizNgdoRyqmyfMHyAmXsZDk6mHkSxZFCzW9gwlbtOW44CDtYavM+y+72qD/Vq2l550kMF52DT8fOLJqQ==}
     engines: {node: '>=4.0'}
     peerDependencies:
       debug: '*'
@@ -13854,6 +13854,10 @@ snapshots:
 
   '@types/estree@1.0.8': {}
 
+  '@types/follow-redirects@1.14.4':
+    dependencies:
+      '@types/node': 24.2.1
+
   '@types/geojson@7946.0.16': {}
 
   '@types/glob@8.1.0':
@@ -14219,7 +14223,7 @@ snapshots:
       sirv: 3.0.1
       tinyglobby: 0.2.14
       tinyrainbow: 2.0.0
-      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@20.17.50)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.8.0)
+      vitest: 3.2.4(@types/debug@4.1.12)(@types/node@24.2.1)(@vitest/ui@3.2.4)(jiti@2.4.2)(jsdom@26.1.0)(lightningcss@1.30.1)(tsx@4.19.4)(yaml@2.8.0)
 
   '@vitest/utils@2.1.9':
     dependencies:
@@ -16238,8 +16242,6 @@ snapshots:
   flatted@3.3.3: {}
 
   follow-redirects@1.15.11: {}
-
-  follow-redirects@1.15.9: {}
 
   for-each@0.3.5:
     dependencies:
@@ -18527,7 +18529,7 @@ snapshots:
     dependencies:
       '@vscode/vsce': 3.3.2
       commander: 6.2.1
-      follow-redirects: 1.15.9
+      follow-redirects: 1.15.11
       is-ci: 2.0.0
       leven: 3.1.0
       semver: 7.7.2

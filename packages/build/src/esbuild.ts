@@ -237,14 +237,20 @@ export function copyWasms(srcDir: string, distDir: string): boolean {
 			console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from ${source.dirName}`)
 		} catch (error) {
 			if (error instanceof Error) {
-				throw error
-			}
-			const errorMessage = `[copyWasms] Unexpected error processing ${source.dirName}: ${error}`
-			if (source.isOptional) {
-				console.error(errorMessage)
-				hasErrors = true
+				if (source.isOptional) {
+					console.error(error)
+					hasErrors = true
+				} else {
+					throw error
+				}
 			} else {
-				throw new Error(errorMessage)
+				const errorMessage = `[copyWasms] Unexpected error processing ${source.dirName}: ${error}`
+				if (source.isOptional) {
+					console.error(errorMessage)
+					hasErrors = true
+				} else {
+					throw new Error(errorMessage)
+				}
 			}
 		}
 	}

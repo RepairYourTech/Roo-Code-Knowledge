@@ -5,7 +5,8 @@ import { fileURLToPath } from "url"
 import process from "node:process"
 import * as console from "node:console"
 
-import { copyPaths, copyWasms, copyLocales, setupLocaleWatcher } from "@roo-code/build"
+import { copyWasms, copyLocales, setupLocaleWatcher } from "@roo-code/build"
+import { copyPaths as copyPathsWithDestinations } from "../packages/build/src/esbuild.ts"
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -47,11 +48,11 @@ async function main() {
 			name: "copyFiles",
 			setup(build) {
 				build.onEnd(async () => {
-					await copyPaths(
+					copyPathsWithDestinations(
 						[
-							"../README.md",
-							"../CHANGELOG.md",
-							"../LICENSE",
+							["../README.md", "README.md"],
+							["../CHANGELOG.md", "CHANGELOG.md"],
+							["../LICENSE", "LICENSE"],
 						],
 						srcDir,
 						buildDir,

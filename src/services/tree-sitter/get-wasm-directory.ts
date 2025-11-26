@@ -10,17 +10,13 @@ let wasmDirectoryCache: string | null = null
  * @returns Absolute path to the WASM directory
  */
 export function getWasmDirectory(): string {
-	// Log immediately to confirm function is being called
-	console.log("[getWasmDirectory] FUNCTION CALLED")
 	logger.info("[getWasmDirectory] FUNCTION CALLED - checking for WASM directory", "WasmDirectory")
 
 	if (wasmDirectoryCache) {
 		logger.debug(`[getWasmDirectory] Using cached WASM directory: ${wasmDirectoryCache}`, "WasmDirectory")
-		console.log(`[getWasmDirectory] Using cached: ${wasmDirectoryCache}`)
 		return wasmDirectoryCache
 	}
 
-	console.log("[getWasmDirectory] No cache, attempting to locate...")
 	logger.debug("[getWasmDirectory] Attempting to locate WASM directory...", "WasmDirectory")
 
 	// Find the extension - works for both roo-cline and forks
