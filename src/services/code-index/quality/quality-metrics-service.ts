@@ -172,8 +172,17 @@ export class QualityMetricsService implements IQualityMetricsService {
 				// Skip empty lines and comment-only lines
 				if (trimmed === "") continue
 				if (trimmed.startsWith("//")) continue
-				if (trimmed.startsWith("/*")) continue
-				if (trimmed.startsWith("*")) continue
+				if (trimmed.startsWith("/*")) {
+					// Handle multi-line comments that span multiple lines
+					if (trimmed.includes("*/")) {
+						// This line contains both start and end of comment
+						continue
+					}
+					// Skip until we find the end of the multi-line comment
+					continue
+				}
+				if (trimmed.startsWith("*") && !trimmed.startsWith("* ")) continue // Skip continuation of multi-line comment
+				if (trimmed.endsWith("*/")) continue // Skip end of multi-line comment
 				if (trimmed.startsWith("#")) continue // Python, shell comments
 				if (trimmed.startsWith("--")) continue // SQL, Lua comments
 
@@ -331,8 +340,8 @@ export class QualityMetricsService implements IQualityMetricsService {
 			"match_case", // Swift
 		]
 
-		// Logical operators that increase complexity
-		const logicalOperators = ["&&", "||", "and", "or", "&", "|"]
+		// Logical operators that increase complexity (excluding bitwise operators)
+		const logicalOperators = ["&&", "||", "and", "or"]
 
 		// Traverse AST and count decision points
 		const traverse = (n: Node) => {
@@ -889,6 +898,11 @@ export class QualityMetricsService implements IQualityMetricsService {
 	 * Helper: Set in cache with LRU eviction
 	 */
 	private setInCache(key: string, value: any): void {
+		// Remove existing entry to update LRU order
+		if (this.metricsCache.has(key)) {
+			this.metricsCache.delete(key)
+		}
+
 		// Simple LRU: if cache is full, remove oldest entry
 		if (this.metricsCache.size >= this.CACHE_SIZE_LIMIT) {
 			const firstKey = this.metricsCache.keys().next().value
@@ -1341,12 +1355,11 @@ export class QualityMetricsService implements IQualityMetricsService {
 		// Common patterns that indicate unreachable code
 		const unreachablePatterns = [
 			/true\s*&&\s*false/, // true && false
-			/false\s*||\s*true/, // false || true
+			/false\s*\|\|\s*true/, // false || true
 			/1\s*===\s*0/, // 1 === 0
 			/0\s*===\s*1/, // 0 === 1
-			/null\s*===\s*null/, // null === null (in some contexts)
-			/undefined\s*===\s*undefined/, // undefined === undefined
-			/"[^"]*"\s*===\s*"[^"]*"/, // string === different string
+			/"[^"]*"\s*===\s*"(?!\1)[^"]*"/, // string === different string (negative lookahead)
+			/'[^']*'\s*===\s*'(?!\1)[^']*'/, // single quote string === different string
 		]
 
 		for (const pattern of unreachablePatterns) {

@@ -160,8 +160,6 @@ export default `
   name: (identifier) @go.mock_func_name
   (#match? @go.mock_func_name "^(mock|Mock|fake|Fake|stub|Stub).*")) @definition.go_mock_function
 
-(type_declaration
-  (type_spec
 ; Mock and fake struct types
 (type_declaration
   (type_spec

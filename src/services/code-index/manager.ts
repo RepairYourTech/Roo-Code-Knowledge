@@ -280,14 +280,6 @@ export class CodeIndexManager {
 			this._stateManager.setNeo4jStatus("disabled", "")
 		}
 
-		// If disabling the main feature, also clear any system error state
-		if (!this.isFeatureEnabled) {
-			const currentStatus = this._stateManager.getCurrentStatus()
-			if (currentStatus.systemStatus === "Error") {
-				this._stateManager.setSystemState("Standby", "")
-			}
-		}
-
 		// 4. Check if workspace is available
 		const workspacePath = this.workspacePath
 		if (!workspacePath) {

@@ -4,6 +4,15 @@ import { Parser as ParserT, Language as LanguageT, Query as QueryT } from "web-t
 import { logger } from "../shared/logger"
 import { MetricsCollector } from "../code-index/utils/metrics-collector"
 import { getWasmDirectory } from "./get-wasm-directory"
+
+// Helper function to check strict WASM loading mode
+function getStrictWasmLoading(): boolean {
+	const isDevelopment = process.env.NODE_ENV === "development"
+	return (
+		process.env.ROO_CODE_STRICT_WASM_LOADING === "true" ||
+		(isDevelopment && process.env.ROO_CODE_STRICT_WASM_LOADING !== "false")
+	)
+}
 import {
 	javascriptQuery,
 	typescriptQuery,
@@ -49,11 +58,7 @@ async function loadLanguage(langName: string, sourceDirectory?: string) {
 	const baseDir = sourceDirectory || getWasmDirectory()
 	const wasmPath = path.join(baseDir, `tree-sitter-${langName}.wasm`)
 
-	// Check for strict WASM loading mode - default to true in development
-	const isDevelopment = process.env.NODE_ENV === "development"
-	const strictWasmLoading =
-		process.env.ROO_CODE_STRICT_WASM_LOADING === "true" ||
-		(isDevelopment && process.env.ROO_CODE_STRICT_WASM_LOADING !== "false")
+	const strictWasmLoading = getStrictWasmLoading()
 
 	// Log the full WASM path before attempting to load
 	logger.debug(`Attempting to load language WASM: ${wasmPath}`, "LanguageParser")
@@ -128,7 +133,7 @@ let languageParserMap: LanguageParser = {}
  * @param sourceDirectory Directory to check for WASM files
  */
 function verifyWasmFiles(sourceDirectory?: string): void {
-	const baseDir = sourceDirectory || __dirname
+	const baseDir = sourceDirectory || getWasmDirectory()
 	logger.debug(`Verifying WASM files in directory: ${baseDir}`, "LanguageParser")
 
 	try {
@@ -154,7 +159,7 @@ function verifyWasmFiles(sourceDirectory?: string): void {
  * @returns Diagnostic report with WASM file status
  */
 function diagnoseWasmSetup(sourceDirectory?: string) {
-	const baseDir = sourceDirectory || __dirname
+	const baseDir = sourceDirectory || getWasmDirectory()
 	const report: {
 		wasmDirectory: string
 		mainWasmExists: boolean
@@ -273,11 +278,7 @@ export async function loadRequiredLanguageParsers(
 ) {
 	const { Parser, Query } = require("web-tree-sitter")
 
-	// Check for strict WASM loading mode - default to true in development
-	const isDevelopment = process.env.NODE_ENV === "development"
-	const strictWasmLoading =
-		process.env.ROO_CODE_STRICT_WASM_LOADING === "true" ||
-		(isDevelopment && process.env.ROO_CODE_STRICT_WASM_LOADING !== "false")
+	const strictWasmLoading = getStrictWasmLoading()
 
 	// Run diagnostics once before initializing parsers
 	if (!hasRunDiagnostics) {
@@ -1519,8 +1520,7 @@ export async function loadRequiredLanguageParsers(
 			// Record parser load failure if metrics collector is provided
 			metricsCollector?.recordParserMetric(ext, "loadFailure", 1, errorMessage)
 
-			// Check for strict WASM loading mode
-			const strictWasmLoading = process.env.ROO_CODE_STRICT_WASM_LOADING === "true"
+			const strictWasmLoading = getStrictWasmLoading()
 			if (strictWasmLoading) {
 				throw new Error(errorMessage)
 			} else {

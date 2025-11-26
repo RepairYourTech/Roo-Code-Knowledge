@@ -246,7 +246,7 @@ export class FileWatcher implements IFileWatcher {
 						const errorMessage = error instanceof Error ? error.message : String(error)
 						const errorStack = error instanceof Error ? error.stack : undefined
 
-						this.log(`[FileWatcher] Neo4j file  removal failed:`, {
+						this.log?.error?.(`[FileWatcher] Neo4j file removal failed:`, {
 							operation: "delete",
 							affectedFiles: Array.from(allPathsToClearFromDB),
 							error: errorMessage,
@@ -345,7 +345,7 @@ export class FileWatcher implements IFileWatcher {
 					return { path: fileDetail.path, result: result, error: undefined }
 				} catch (e) {
 					const error = e as Error
-					this.log(`[FileWatcher] Unhandled exception processing file ${fileDetail.path}:`, e)
+					this.log?.error?.(`[FileWatcher] Unhandled exception processing file ${fileDetail.path}:`, e)
 					return { path: fileDetail.path, result: undefined, error: error }
 				}
 			})
@@ -390,7 +390,7 @@ export class FileWatcher implements IFileWatcher {
 				} else {
 					const error = settledResult.reason as Error
 					const rejectedPath = (settledResult.reason as any)?.path || "unknown"
-					this.log("[FileWatcher] A file processing promise was rejected:", settledResult.reason)
+					this.log?.error?.("[FileWatcher] A file processing promise was rejected:", settledResult.reason)
 					batchResults.push({
 						path: rejectedPath,
 						status: "error",
@@ -432,24 +432,6 @@ export class FileWatcher implements IFileWatcher {
 					while (retryCount < MAX_BATCH_RETRIES) {
 						try {
 							await this.vectorStore.upsertPoints(batch)
-
-							// Also add to BM25 index if available
-							if (this.bm25Index) {
-								const bm25Documents: BM25Document[] = batch.map((point) => ({
-									id: point.id,
-									text: point.payload.codeChunk || "",
-									filePath: point.payload.filePath || "",
-									startLine: point.payload.startLine || 0,
-									endLine: point.payload.endLine || 0,
-									metadata: {
-										identifier: point.payload.identifier,
-										type: point.payload.type,
-										language: point.payload.language,
-									},
-								}))
-								this.bm25Index.addDocuments(bm25Documents)
-							}
-
 							break
 						} catch (error) {
 							upsertError = error as Error
@@ -471,6 +453,23 @@ export class FileWatcher implements IFileWatcher {
 							)
 						}
 					}
+				}
+
+				// Add to BM25 index after all batches are successfully upserted
+				if (this.bm25Index && pointsForBatchUpsert.length > 0) {
+					const bm25Documents: BM25Document[] = pointsForBatchUpsert.map((point) => ({
+						id: point.id,
+						text: point.payload.codeChunk || "",
+						filePath: point.payload.filePath || "",
+						startLine: point.payload.startLine || 0,
+						endLine: point.payload.endLine || 0,
+						metadata: {
+							identifier: point.payload.identifier,
+							type: point.payload.type,
+							language: point.payload.language,
+						},
+					}))
+					this.bm25Index.addDocuments(bm25Documents)
 				}
 
 				for (const { path, newHash } of successfullyProcessedForUpsert) {
@@ -572,7 +571,7 @@ export class FileWatcher implements IFileWatcher {
 		).length
 
 		if (neo4jErrorCount > 0 && this.stateManager) {
-			this.log(
+			this.log?.info?.(
 				`[FileWatcher] Batch completed with ${neo4jErrorCount} Neo4j errors out of ${totalFilesInBatch} total files`,
 			)
 			this.stateManager.setNeo4jStatus(
@@ -680,7 +679,7 @@ export class FileWatcher implements IFileWatcher {
 					const errorMessage = error instanceof Error ? error.message : String(error)
 					const errorStack = error instanceof Error ? error.stack : undefined
 
-					this.log(`[FileWatcher] Neo4j indexing failed for ${filePath}:`, {
+					this.log?.error?.(`[FileWatcher] Neo4j indexing failed for ${filePath}:`, {
 						filePath,
 						operation: "index",
 						error: errorMessage,

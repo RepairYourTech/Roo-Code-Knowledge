@@ -80,36 +80,76 @@ const NODE_MODULES_WASM_DIR = path.join("node_modules", "tree-sitter-wasms", "ou
 const CDN_BASE_URL = "https://unpkg.com/tree-sitter-wasms@" + WASM_VERSION + "/out"
 
 /**
- * Downloads a file from a URL to a local path
+ * Downloads a file from a URL to a local path with redirect handling and proper cleanup
  */
-async function downloadFile(url: string, destPath: string): Promise<void> {
+async function downloadFile(url: string, destPath: string, maxRedirects: number = 5): Promise<void> {
 	return new Promise((resolve, reject) => {
-		const file = fs.createWriteStream(destPath)
+		let redirectCount = 0
+		let currentUrl = url
 
-		const request = https.get(url, (response) => {
-			if (response.statusCode !== 200) {
-				reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage} for ${url}`))
-				return
+		const attemptDownload = (targetUrl: string) => {
+			const file = fs.createWriteStream(destPath)
+			let cleanupPerformed = false
+
+			const cleanup = () => {
+				if (!cleanupPerformed) {
+					cleanupPerformed = true
+					file.close()
+					fs.unlink(destPath, () => {}) // Clean up file on error
+				}
 			}
 
-			response.pipe(file)
+			const request = https.get(targetUrl, (response) => {
+				// Handle redirects
+				if (
+					response.statusCode &&
+					response.statusCode >= 300 &&
+					response.statusCode < 400 &&
+					response.headers.location
+				) {
+					cleanup()
+					redirectCount++
+					if (redirectCount > maxRedirects) {
+						reject(new Error(`Too many redirects (${redirectCount}) for ${url}`))
+						return
+					}
+					// Recursively follow redirect
+					attemptDownload(new URL(response.headers.location, targetUrl).href)
+					return
+				}
 
-			file.on("finish", () => {
-				file.close()
-				resolve()
+				if (response.statusCode !== 200) {
+					cleanup()
+					reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage} for ${targetUrl}`))
+					return
+				}
+
+				response.pipe(file)
+
+				file.on("finish", () => {
+					file.close()
+					resolve()
+				})
+
+				file.on("error", (err) => {
+					cleanup()
+					reject(err)
+				})
 			})
-		})
 
-		request.on("error", (err) => {
-			fs.unlink(destPath, () => {}) // Clean up on error
-			reject(err)
-		})
+			request.on("error", (err) => {
+				cleanup()
+				reject(err)
+			})
 
-		request.setTimeout(30000, () => {
-			request.destroy()
-			fs.unlink(destPath, () => {}) // Clean up on timeout
-			reject(new Error(`Download timeout for ${url}`))
-		})
+			request.setTimeout(30000, () => {
+				request.destroy()
+				cleanup()
+				reject(new Error(`Download timeout for ${targetUrl}`))
+			})
+		}
+
+		attemptDownload(currentUrl)
 	})
 }
 

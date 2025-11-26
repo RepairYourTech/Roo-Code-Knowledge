@@ -177,15 +177,6 @@ export default `
   name: (name) @phpunit.test_method_name
   (#match? @phpunit.test_method_name "^test.*$")) @definition.phpunit_test_method
 
-; PHPUnit - Test methods with @test annotation
-(method_declaration
-  name: (name) @phpunit.annotated_test_name
-  (declaration_list
-    (property_declaration
-      (property_element
-        (variable_name
-          (name) @phpunit.test_property
-          (#eq? @phpunit.test_property "test")))))) @definition.phpunit_annotated_test
 
 ; PHPUnit - setUp and tearDown methods
 (method_declaration
@@ -241,49 +232,6 @@ export default `
     (#match? @phpunit.mock_config "^(method|willReturn|willReturnArgument|willReturnCallback|willReturnSelf|willThrowException|willReturnOnConsecutiveCalls|with|withConsecutive|withAnyArguments|once|twice|never|exactly)$"))
   arguments: (arguments)?) @definition.phpunit_mock_method_configuration
 
-; PHPUnit - Data providers
-(method_declaration
-  name: (name) @phpunit.data_provider_name
-  (declaration_list
-    (property_declaration
-      (property_element
-        (variable_name
-          (name) @phpunit.data_provider_property
-          (#eq? @phpunit.data_provider_property "dataProvider")))))) @definition.phpunit_data_provider
-
-; PHPUnit - Test with data provider
-(method_declaration
-  name: (name) @phpunit.test_with_provider_name
-  (declaration_list
-    (property_declaration
-      (property_element
-        (variable_name
-          (name) @phpunit.provider_property
-          (#eq? @phpunit.provider_property "dataProvider"))
-        (name) @phpunit.provider_method)))) @definition.phpunit_test_with_provider
-
-; PHPUnit - Test annotations
-(property_declaration
-  (property_element
-    (variable_name
-      (name) @phpunit.test_annotation
-      (#match? @phpunit.test_annotation "^(test|group|covers|uses|depends|skip|doesNotPerformAssertions|runInSeparateProcess|preserveGlobalState|backupGlobals|backupStaticAttributes|small|medium|large|timeout)$")))) @definition.phpunit_test_annotation
-
-; PHPUnit - Test groups
-(property_declaration
-  (property_element
-    (variable_name
-      (name) @phpunit.group_property
-      (#eq? @phpunit.group_property "group"))
-    (name) @phpunit.group_name)) @definition.phpunit_test_group
-
-; PHPUnit - Test dependencies
-(property_declaration
-  (property_element
-    (variable_name
-      (name) @phpunit.depends_property
-      (#eq? @phpunit.depends_property "depends"))
-    (name) @phpunit.dependency_name)) @definition.phpunit_test_dependency
 
 ; Pest - Test functions
 (expression_statement
@@ -332,7 +280,7 @@ export default `
   function: (member_expression
     object: (call_expression
       function: (name) @pest.expect_chain
-      (#eq! @pest.expect_chain "expect"))
+      (#eq? @pest.expect_chain "expect"))
     property: (name) @pest.matcher
     (#match? @pest.matcher "^(toBe|toEqual|toBeTrue|toBeFalse|toBeNull|toBeInstanceOf|toBeArray|toBeString|toBeInt|toBeFloat|toBeObject|toContain|toHaveCount|toHaveLength|toBeEmpty|toBeGreaterThan|toBeLessThan|toBeGreaterThanOrEqual|toBeLessThanOrEqual|toMatch|toThrow|toHaveProperty|toHaveKey|toHaveMethod|toBeCallable|toBeResource|toBeScalar|toBeBool|toBeNull|toBeWritable|toBeReadable|toBeDirectory|toBeFile|toThrow|not)$"))
   arguments: (arguments
@@ -366,12 +314,12 @@ export default `
 (namespace_use_declaration
   (namespace_use_clause
     (qualified_name) @pest.import_name
-    (#match! @pest.import_name "^(Pest\\\\Pest|Pest\\\\Expectation|Pest\\\\Support\\\\HigherOrderExpectation|Pest\\\\Support\\\\Arr|Pest\\\\Support\\\\Str)$"))) @definition.pest_import
+    (#match? @pest.import_name "^(Pest\\\\Pest|Pest\\\\Expectation|Pest\\\\Support\\\\HigherOrderExpectation|Pest\\\\Support\\\\Arr|Pest\\\\Support\\\\Str)$"))) @definition.pest_import
 
 ; Mockery patterns
 (call_expression
   function: (name) @mockery.mock_function
-  (#match! @mockery.mock_function "^(mock|spy|instanceMock|namedMock|mockery)$"))
+  (#match? @mockery.mock_function "^(mock|spy|instanceMock|namedMock|mockery)$"))
   arguments: (arguments
     (name) @mockery.mock_class)) @definition.mockery_mock
 
@@ -389,7 +337,7 @@ export default `
   function: (member_expression
     object: (call_expression) @mockery.mock_return
     property: (name) @mockery.return_method
-    (#match! @mockery.return_method "^(andReturn|andReturnValues|andThrow|andThrowExceptions|andSet|andSetNew|andSetProperties|andSetDefaultProperties)$"))
+    (#match? @mockery.return_method "^(andReturn|andReturnValues|andThrow|andThrowExceptions|andSet|andSetNew|andSetProperties|andSetDefaultProperties)$"))
   arguments: (arguments
     (_) @mockery.return_value)) @definition.mockery_return
 
@@ -403,21 +351,21 @@ export default `
 ; Test configuration files
 (class_declaration
   name: (name) @php.test_config_class
-  (#match! @php.test_config_class ".*(Config|Configuration|TestCase|TestHelper|TestUtil).*$")) @definition.php_test_configuration
+  (#match? @php.test_config_class ".*(Config|Configuration|TestCase|TestHelper|TestUtil).*$")) @definition.php_test_configuration
 
 ; Test data classes
 (class_declaration
   name: (name) @php.test_data_class
-  (#match! @php.test_data_class ".*(TestData|TestCase|TestFixtures|TestFactory|TestBuilder).*$")) @definition.php_test_data
+  (#match? @php.test_data_class ".*(TestData|TestCase|TestFixtures|TestFactory|TestBuilder).*$")) @definition.php_test_data
 
 ; Test helper classes
 (class_declaration
   name: (name) @php.test_helper_class
-  (#match! @php.test_helper_class ".*(TestHelper|TestUtil|TestSupport|TestBase).*$")) @definition.php_test_helper
+  (#match? @php.test_helper_class ".*(TestHelper|TestUtil|TestSupport|TestBase).*$")) @definition.php_test_helper
 
 ; Test file patterns (detect test files)
 (program
   (namespace_definition) @php.test_file_namespace
-  (#match! @php.test_file_namespace ".*Test.*$")) @definition.php_test_file
+  (#match? @php.test_file_namespace ".*Test.*$")) @definition.php_test_file
 
 `

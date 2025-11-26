@@ -38,7 +38,7 @@ export const tomlQuery = `
   value: [
     (string) @poetry.dep.version
     (inline_table) @poetry.dep.details
-  ]) @definition.poetry_dependency
+  ]) @definition.poetry_dependency)
 
 ; Python PDM configuration
 (table
@@ -55,32 +55,7 @@ export const tomlQuery = `
   (bare_key) @setuptools.table
   (#match? @setuptools.table "^(project|build-system|tool|setuptools)$")) @definition.setuptools_config
 
-; Go modules configuration
-(table
-  (bare_key) @go.table
-  (#match? @go.table "^(module|go|require|replace|exclude|retract)$")) @definition.go_config
 
-; Go module requirements
-(table
-  (bare_key) @go.table
-  (#eq? @go.table "require")
-  (pair
-    key: (bare_key) @go.require.key
-    value: [
-      (string) @go.require.version
-      (inline_table) @go.require.details
-    ])) @definition.go_requirement
-
-; .NET/MSBuild configurations
-(table
-  (bare_key) @dotnet.table
-  (#match? @dotnet.table "^(package|tool|build|config|runtime|restore|test|run|watch)$")) @definition.dotnet_config
-
-; NuGet package configuration
-(pair
-  key: (bare_key) @nuget.key
-  (#match? @nuget.key "^(name|version|description|authors|owners|license|projectUrl|iconUrl|repositoryUrl|tags|readme|requireLicenseAcceptance|dependencies|devDependencies|packOptions|scripts|config|runtimeDependencies|nativeDependencies)$")
-  value: (_) @nuget.value) @definition.nuget_config
 
 ; Rust/Cargo workspace configuration
 (table
@@ -115,7 +90,7 @@ export const tomlQuery = `
   value: (inline_table
     (pair
       key: (bare_key) @feature.name
-      value: (array) @feature.dependencies)*) @definition.cargo_features
+      value: (array) @feature.dependencies)*) @definition.cargo_features)
 
 ; Rust/Cargo source configuration
 (table
@@ -151,7 +126,7 @@ export const tomlQuery = `
   value: (inline_table
     (pair
       key: (bare_key) @poetry.extra.name
-      value: (array) @poetry.extra.dependencies)*) @definition.poetry_extras
+      value: (array) @poetry.extra.dependencies)*) @definition.poetry_extras)
 
 ; General TOML tables
 (table) @definition.toml_table

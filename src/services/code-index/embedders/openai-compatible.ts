@@ -213,9 +213,11 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		// Check for embedding count mismatch
 		if (allEmbeddings.length !== texts.length) {
-			console.error(
+			const error = new Error(
 				`[OpenAICompatibleEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${allEmbeddings.length}`,
 			)
+			console.error(error.message)
+			throw error
 		}
 
 		return { embeddings: allEmbeddings, usage }

@@ -116,10 +116,13 @@ export class ConfigMigrator {
 
 		// Ensure Neo4j defaults if enabled but missing details
 		if (newConfig.neo4jEnabled) {
-			if (!newConfig.neo4jCircuitBreakerThreshold) {
+			if (
+				newConfig.neo4jCircuitBreakerThreshold === undefined ||
+				newConfig.neo4jCircuitBreakerThreshold === null
+			) {
 				newConfig.neo4jCircuitBreakerThreshold = 5
 			}
-			if (!newConfig.neo4jMaxConnectionPoolSize) {
+			if (newConfig.neo4jMaxConnectionPoolSize === undefined || newConfig.neo4jMaxConnectionPoolSize === null) {
 				newConfig.neo4jMaxConnectionPoolSize = 50
 			}
 		}

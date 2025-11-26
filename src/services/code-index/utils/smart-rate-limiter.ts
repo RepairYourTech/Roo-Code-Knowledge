@@ -58,8 +58,8 @@ export interface RequestMetadata {
 export class SmartRateLimiter {
 	private readonly providerStates = new Map<string, ProviderRateLimitState>()
 	private readonly tokenBuckets = new Map<string, TokenBucketState>()
+	private readonly requestQueues = new Map<string, RequestMetadata[]>()
 	private readonly config: RateLimitConfig
-	private requestQueue: RequestMetadata[] = []
 	private processingTimer?: NodeJS.Timeout
 
 	constructor(config: Partial<RateLimitConfig> = {}) {
@@ -174,6 +174,20 @@ export class SmartRateLimiter {
 
 		const now = Date.now()
 
+		// Add request to provider-specific queue
+		let requestQueue = this.requestQueues.get(provider)
+		if (!requestQueue) {
+			requestQueue = []
+			this.requestQueues.set(provider, requestQueue)
+		}
+
+		requestQueue.push({
+			provider,
+			tokens,
+			timestamp: now,
+			priority: 1, // Default priority
+		})
+
 		// Update provider state
 		state.lastRequestTime = now
 		state.consecutiveRateLimitErrors = 0
@@ -240,19 +254,27 @@ export class SmartRateLimiter {
 
 		if (!state) return
 
+		// Get or create provider-specific request queue
+		let requestQueue = this.requestQueues.get(provider)
+		if (!requestQueue) {
+			requestQueue = []
+			this.requestQueues.set(provider, requestQueue)
+		}
+
 		// Remove old requests outside the window
 		const windowStart = now - this.config.windowDurationMs
-		this.requestQueue = this.requestQueue.filter((req) => req.timestamp >= windowStart)
+		const filteredQueue = requestQueue.filter((req) => req.timestamp >= windowStart)
+		this.requestQueues.set(provider, filteredQueue)
 
 		// Update state
-		state.requestsInWindow = this.requestQueue.length
+		state.requestsInWindow = filteredQueue.length
 		state.windowStartTime = windowStart
 
 		// Calculate average request interval
-		if (this.requestQueue.length > 1) {
+		if (filteredQueue.length > 1) {
 			const intervals: number[] = []
-			for (let i = 1; i < this.requestQueue.length; i++) {
-				intervals.push(this.requestQueue[i].timestamp - this.requestQueue[i - 1].timestamp)
+			for (let i = 1; i < filteredQueue.length; i++) {
+				intervals.push(filteredQueue[i].timestamp - filteredQueue[i - 1].timestamp)
 			}
 			state.averageRequestInterval = intervals.reduce((sum, interval) => sum + interval, 0) / intervals.length
 		}
@@ -356,6 +378,7 @@ export class SmartRateLimiter {
 	resetProvider(provider: string): void {
 		this.providerStates.delete(provider)
 		this.tokenBuckets.delete(provider)
+		this.requestQueues.delete(provider)
 	}
 
 	/**
@@ -364,7 +387,7 @@ export class SmartRateLimiter {
 	resetAll(): void {
 		this.providerStates.clear()
 		this.tokenBuckets.clear()
-		this.requestQueue = []
+		this.requestQueues.clear()
 		this.stopProcessingTimer()
 	}
 

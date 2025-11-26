@@ -298,7 +298,9 @@ ${jsonResult.results
 		if (result.tests) {
 			const testCount = (result.tests.directTests?.length || 0) + (result.tests.integrationTests?.length || 0)
 			if (testCount > 0) {
-				parts.push(`Tests: ${testCount} test(s) (${result.tests.coveragePercentage}% coverage)`)
+				const coverage =
+					typeof result.tests.coveragePercentage === "number" ? result.tests.coveragePercentage : "N/A"
+				parts.push(`Tests: ${testCount} test(s) (${coverage}% coverage)`)
 			}
 		}
 		if (result.fileSummary) {

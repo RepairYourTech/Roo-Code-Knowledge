@@ -39,6 +39,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 	private readonly apiKey: string
 	private readonly maxItemTokens: number
 	private readonly baseUrl: string = "https://openrouter.ai/api/v1"
+	private readonly outputChannel?: vscode.OutputChannel
 
 	// Global rate limiting state shared across all instances
 	private static globalRateLimitState = {
@@ -55,8 +56,9 @@ export class OpenRouterEmbedder implements IEmbedder {
 	 * @param apiKey The API key for authentication
 	 * @param modelId Optional model identifier (defaults to "openai/text-embedding-3-large")
 	 * @param maxItemTokens Optional maximum tokens per item (defaults to MAX_ITEM_TOKENS)
+	 * @param outputChannel Optional OutputChannel for error notifications
 	 */
-	constructor(apiKey: string, modelId?: string, maxItemTokens?: number) {
+	constructor(apiKey: string, modelId?: string, maxItemTokens?: number, outputChannel?: vscode.OutputChannel) {
 		if (!apiKey) {
 			throw new Error(t("embeddings:validation.apiKeyRequired"))
 		}
@@ -80,6 +82,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 
 		this.defaultModelId = modelId || getDefaultModelId("openrouter")
 		this.maxItemTokens = maxItemTokens || MAX_ITEM_TOKENS
+		this.outputChannel = outputChannel
 	}
 
 	/**
@@ -366,7 +369,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 				// Show initial rate limit notification
 				vscode.window.showWarningMessage(message, "Show Output").then((action: string | undefined) => {
 					if (action === "Show Output") {
-						// User can view output channel for detailed progress
+						this.outputChannel?.show()
 					}
 				})
 
@@ -454,7 +457,7 @@ export class OpenRouterEmbedder implements IEmbedder {
 				)
 				.then((action: string | undefined) => {
 					if (action === "Show Output") {
-						// User can view output channel for detailed information
+						this.outputChannel?.show()
 					}
 				})
 

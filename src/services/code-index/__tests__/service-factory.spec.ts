@@ -6,6 +6,7 @@ import { CodeIndexOllamaEmbedder } from "../embedders/ollama"
 import { OpenAICompatibleEmbedder } from "../embedders/openai-compatible"
 import { GeminiEmbedder } from "../embedders/gemini"
 import { QdrantVectorStore } from "../vector-store/qdrant-client"
+import { Logger } from "../../../shared/logger"
 
 // Mock vscode
 vitest.mock("vscode", () => ({
@@ -76,7 +77,10 @@ describe("CodeIndexServiceFactory", () => {
 		// Mock vscode.window.createOutputChannel to return our mock
 		;(vscode.window.createOutputChannel as any).mockReturnValue(mockOutputChannel)
 
-		factory = new CodeIndexServiceFactory(mockConfigManager, "/test/workspace", mockCacheManager, mockOutputChannel)
+		// Create a proper Logger instance
+		const mockLogger = new Logger(mockOutputChannel)
+
+		factory = new CodeIndexServiceFactory(mockConfigManager, "/test/workspace", mockCacheManager, mockLogger)
 	})
 
 	describe("createEmbedder", () => {

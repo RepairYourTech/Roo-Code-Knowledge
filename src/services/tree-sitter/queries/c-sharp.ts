@@ -267,11 +267,6 @@ export default `
     (#match? @nsubstitute.verify_method "^(Received|ReceivedWithAnyArgs|DidNotReceive|DidNotReceiveWithAnyArgs|ReceivedCalls)$"))
   arguments: (argument_list
     (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
-    (#match? @nsubstitute.verify_method "^(Received|ReceivedWithAnyArgs|DidNotReceive|DidNotReceiveWithAnyArgs|ReceivedCalls)$"))
-  arguments: (argument_list
-    (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
-  arguments: (argument_list
-    (_) @nsubstitute.verify_target)) @definition.nsubstitute_verification
 
 ; Test imports - xUnit
 (using_directive

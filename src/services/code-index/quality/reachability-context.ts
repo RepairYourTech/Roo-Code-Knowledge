@@ -108,6 +108,19 @@ export class ReachabilityContext implements IReachabilityContext {
 	 * Add an unreachable node to the results
 	 */
 	addUnreachableNode(node: Node, reason: UnreachableReason): void {
+		// Check for duplicates to avoid adding the same node multiple times
+		const nodeKey = `${node.startPosition.row}:${node.startPosition.column}:${node.type}`
+		const isDuplicate = this._unreachableNodes.some(
+			(existing) =>
+				existing.node.startPosition.row === node.startPosition.row &&
+				existing.node.startPosition.column === node.startPosition.column &&
+				existing.node.type === node.type,
+		)
+
+		if (isDuplicate) {
+			return
+		}
+
 		const unreachableNode: UnreachableNode = {
 			node,
 			reason,

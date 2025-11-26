@@ -114,8 +114,8 @@ export class AdaptiveBatchOptimizer {
 		const metrics: BatchPerformanceMetrics = {
 			averageProcessingTime: processingTime,
 			successRate: success ? 1 : 0,
-			averageLatency: processingTime / itemCount, // per item latency
-			throughput: itemCount / (processingTime / 1000), // items per second
+			averageLatency: itemCount > 0 ? processingTime / itemCount : 0, // per item latency
+			throughput: processingTime > 0 ? itemCount / (processingTime / 1000) : 0, // items per second
 			lastUpdated: Date.now(),
 		}
 
@@ -192,7 +192,7 @@ export class AdaptiveBatchOptimizer {
 
 		// Base token estimate + complexity adjustment
 		const baseTokens = Math.ceil(totalLength / 4)
-		const complexityMultiplier = 1 + (complexityScore / totalLength) * 0.3
+		const complexityMultiplier = totalLength > 0 ? 1 + (complexityScore / totalLength) * 0.3 : 1
 		const estimatedTokens = Math.round(baseTokens * complexityMultiplier)
 
 		// Higher confidence for complexity-based estimation
@@ -214,15 +214,19 @@ export class AdaptiveBatchOptimizer {
 		}
 
 		// Calculate how many items we can fit within token limits
-		const avgTokensPerItem = tokenEstimate.tokenCount / Math.max(1, this.performanceHistory.length || 1)
-		const maxItemsByTokens = Math.floor(this.maxTokenLimit / avgTokensPerItem)
-		const maxItemsByItemLimit = Math.floor(this.maxItemTokens / avgTokensPerItem)
+		// Use a conservative estimate of average tokens per item based on the current batch
+		const currentBatchSize = Math.max(1, this.config.minBatchSize)
+		const avgTokensPerItem = tokenEstimate.tokenCount / currentBatchSize
+		const maxItemsByTokens =
+			avgTokensPerItem > 0 ? Math.floor(this.maxTokenLimit / avgTokensPerItem) : this.config.maxBatchSize
+		const maxItemsByItemLimit =
+			avgTokensPerItem > 0 ? Math.floor(this.maxItemLimit / avgTokensPerItem) : this.config.maxBatchSize
 
 		// Use the more restrictive limit
-		const tokenLimitedSize = Math.min(maxItemsByTokens, maxItemsByItemLimit)
+		const tokenLimitedSize = Math.min(maxItemsByTokens, maxItemsByItemLimit, this.config.maxBatchSize)
 
-		// Apply confidence-based safety margin
-		const safetyMargin = 1 - tokenEstimate.confidence * 0.2 // 0-20% margin based on confidence
+		// Apply confidence-based safety margin (lower confidence = larger margin)
+		const safetyMargin = tokenEstimate.confidence < 0.7 ? 0.3 : tokenEstimate.confidence < 0.9 ? 0.2 : 0.1
 		const adjustedSize = Math.floor(tokenLimitedSize * (1 - safetyMargin))
 
 		return Math.max(this.config.minBatchSize, Math.min(this.config.maxBatchSize, adjustedSize))
@@ -362,7 +366,17 @@ export class AdaptiveBatchOptimizer {
 				this.totalProcessingTime > 0 ? (this.totalItemsProcessed * 1000) / this.totalProcessingTime : 0,
 			currentBatchSize:
 				this.performanceHistory.length > 0
-					? Math.round(this.performanceHistory[this.performanceHistory.length - 1].throughput * 2)
+					? Math.min(
+							Math.max(
+								this.config.minBatchSize,
+								Math.round(
+									(this.performanceHistory[this.performanceHistory.length - 1].throughput *
+										this.config.targetProcessingTime) /
+										1000,
+								),
+							),
+							this.config.maxBatchSize,
+						)
 					: this.config.minBatchSize,
 		}
 	}

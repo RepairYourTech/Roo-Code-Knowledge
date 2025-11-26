@@ -201,8 +201,6 @@ export default `
 
 ; Capture all method definitions
 (method) @definition.method_all
-; Capture all method definitions
-(method) @definition.method_all
 
 ; ===== TESTING FRAMEWORK PATTERNS FOR RUBY =====
 
@@ -274,7 +272,7 @@ export default `
 ; RSpec - include shared examples
 (call
   method: (identifier) @rspec.include_shared_method
-  (#match! @rspec.include_shared_method "^(include_examples|include_context|it_behaves_like)$")
+  (#match? @rspec.include_shared_method "^(include_examples|include_context|it_behaves_like)$")
   arguments: (argument_list
     (_) @rspec.include_shared_target)) @definition.rspec_include_shared
 
@@ -423,26 +421,26 @@ export default `
 ; Test time helpers
 (call
   method: (identifier) @test.time_method
-  (#match! @test.time_method "^(travel_to|travel_back|freeze_time|Timecop\\.travel|Timecop\\.freeze|Timecop\\.return)$")
+  (#match? @test.time_method "^(travel_to|travel_back|freeze_time|Timecop\\.travel|Timecop\\.freeze|Timecop\\.return)$")
   arguments: (argument_list
     (_) @test.time_value)) @definition.test_time_helper
 
 ; Capybara patterns
 (call
   method: (identifier) @test.capybara_method
-  (#match! @test.capybara_method "^(visit|page|click_on|fill_in|choose|check|uncheck|select|attach_file|have_content|have_text|have_title|have_current_path|have_selector|have_css|have_xpath|wait_for_ajax|wait_for_turbo|save_and_open_page|save_screenshot)$")
+  (#match? @test.capybara_method "^(visit|page|click_on|fill_in|choose|check|uncheck|select|attach_file|have_content|have_text|have_title|have_current_path|have_selector|have_css|have_xpath|wait_for_ajax|wait_for_turbo|save_and_open_page|save_screenshot)$")
   arguments: (argument_list)?) @definition.test_capybara
 
 ; Factory Bot patterns
 (call
   method: (identifier) @test.factory_bot_method
-  (#match! @test.factory_bot_method "^(FactoryBot\\.define|factory|create|build|build_stubbed|attributes_for|generate|trait|sequence|association)$")
+  (#match? @test.factory_bot_method "^(FactoryBot\\.define|factory|create|build|build_stubbed|attributes_for|generate|trait|sequence|association)$")
   arguments: (argument_list)?) @definition.test_factory_bot
 
 ; WebMock patterns
 (call
   method: (identifier) @test.webmock_method
-  (#match! @test.webmock_method "^(stub_request|stub_http_request|a_request|a_get|a_post|a_put|a_delete|a_patch|a_head|a_options|to_return|to_raise|with|with_headers|with_body|with_query|times|once|twice|at_least_once|at_most_once)$")
+  (#match? @test.webmock_method "^(stub_request|stub_http_request|a_request|a_get|a_post|a_put|a_delete|a_patch|a_head|a_options|to_return|to_raise|with|with_headers|with_body|with_query|times|once|twice|at_least_once|at_most_once)$")
   arguments: (argument_list)?) @definition.test_webmock
 
 `

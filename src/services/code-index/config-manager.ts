@@ -40,14 +40,11 @@ export class CodeIndexConfigManager {
 		// We skip strict validation on startup to avoid blocking initialization,
 		// but we log any issues found.
 		const config = this._readConfigurationFromStorage()
-		console.error("DEBUG: Constructor read config:", JSON.stringify(config, null, 2))
 		const validation = ConfigValidator.validateConfig(config)
-		console.error("DEBUG: Constructor validation:", validation.valid, validation.errors)
 
 		if (!validation.valid) {
 			console.error("Invalid initial configuration:", validation.errors)
 			// ... (rest of the block)
-			console.error("DEBUG: Applying default config due to invalid initial config")
 			this._applyConfiguration({
 				isConfigured: false,
 				embedderProvider: "openai",
@@ -76,7 +73,6 @@ export class CodeIndexConfigManager {
 	private _readConfigurationFromStorage(): CodeIndexConfig {
 		// Load configuration from storage
 		const rawGlobalState = this.contextProxy?.getGlobalState("codebaseIndexConfig")
-		console.error("DEBUG: rawGlobalState:", JSON.stringify(rawGlobalState, null, 2))
 		const codebaseIndexConfig = (rawGlobalState as any) ?? {
 			codebaseIndexEnabled: true,
 			codebaseIndexQdrantUrl: "http://localhost:6333",
@@ -182,7 +178,7 @@ export class CodeIndexConfigManager {
 			searchMinScore: codebaseIndexSearchMinScore,
 			searchMaxResults: codebaseIndexSearchMaxResults,
 			neo4jEnabled: neo4jEnabled ?? false,
-			neo4jUrl: neo4jUrl ?? "bolt://localhost:7687",
+			neo4jUrl: neo4jUri ?? "bolt://localhost:7687",
 			neo4jUsername: neo4jUsername ?? "neo4j",
 			neo4jPassword: neo4jPassword ?? "",
 			neo4jDatabase: "neo4j",
@@ -630,7 +626,7 @@ export class CodeIndexConfigManager {
 		// Only check Neo4j connection details if Neo4j is enabled
 		if (currentNeo4jEnabled) {
 			if (
-				prevNeo4jUrl !== currentNeo4jUri ||
+				prevNeo4jUrl !== currentNeo4jUrl ||
 				prevNeo4jUsername !== currentNeo4jUsername ||
 				prevNeo4jPassword !== currentNeo4jPassword ||
 				prevNeo4jDatabase !== currentNeo4jDatabase

@@ -84,11 +84,11 @@ export interface CallMetadata {
  * Used for TESTS/TESTED_BY relationships to track test coverage information
  */
 export interface TestRelationshipMetadata {
-	/** Confidence level of test detection (0-1) */
+	/** Confidence level of test detection (0.0-1.0) - higher values indicate more certain detection */
 	confidence: number
-	/** Method used to detect the test relationship */
+	/** Method used to detect the test relationship (e.g., 'naming-pattern', 'call-analysis', 'import-trace') */
 	detectionMethod: string
-	/** Test framework being used (jest, mocha, vitest, etc.) */
+	/** Test framework being used (jest, mocha, vitest, go-test, rust-test, etc.) */
 	testFramework?: string
 }
 

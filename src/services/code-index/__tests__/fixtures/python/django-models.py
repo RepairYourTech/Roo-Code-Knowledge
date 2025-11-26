@@ -142,7 +142,7 @@ class Post(TimeStampedModel):
     
     def increment_views(self) -> None:
         """Increment view count atomically"""
-        BlogPost.objects.filter(pk=self.pk).update(views_count=F('views_count') + 1)
+        Post.objects.filter(pk=self.pk).update(views_count=F('views_count') + 1)
         # Optionally refresh the instance if you need the updated value in memory
         self.refresh_from_db(fields=['views_count'])
     

@@ -156,10 +156,19 @@ export class CodeIndexOrchestrator {
 	 */
 	public cancelIndexing(): void {
 		this.log?.info("[CodeIndexOrchestrator] Cancelling active indexing operation")
+
+		// Cancel scanner first to prevent new files from being processed
 		this.scanner.cancel()
+
 		// Set _isProcessing to false immediately so the UI updates
 		// and subsequent operations know indexing is no longer active
+		const wasProcessing = this._isProcessing
 		this._isProcessing = false
+
+		// If we were processing, ensure any in-progress operations are properly terminated
+		if (wasProcessing) {
+			this.log?.info("[CodeIndexOrchestrator] Indexing cancelled, clearing processing state")
+		}
 	}
 
 	/**

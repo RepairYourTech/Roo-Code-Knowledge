@@ -102,7 +102,6 @@ export async function fetchWithRetry<T>(url: string, retries: number = MAX_RETRI
 			await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)))
 		}
 	}
-	throw new Error("Max retries exceeded")
 }
 
 // Default export

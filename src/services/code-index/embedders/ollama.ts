@@ -126,9 +126,11 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 
 			// Check for embedding count mismatch
 			if (embeddings.length !== texts.length) {
-				console.error(
+				const error = new Error(
 					`[CodeIndexOllamaEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${embeddings.length}`,
 				)
+				console.error(error.message)
+				throw error
 			}
 
 			return {

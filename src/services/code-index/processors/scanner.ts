@@ -133,10 +133,10 @@ export class DirectoryScanner implements IDirectoryScanner {
 		}
 
 		// Track the waiting relationship
-		if (!mutexWaiters.has(holdingFile)) {
-			mutexWaiters.set(holdingFile, new Set())
-		}
-		mutexWaiters.get(holdingFile)!.add(waitingFile)
+		const waiters = mutexWaiters.get(holdingFile) || new Set()
+		const updatedWaiters = new Set(waiters)
+		updatedWaiters.add(waitingFile)
+		mutexWaiters.set(holdingFile, updatedWaiters)
 
 		// Check for circular dependency (deadlock)
 		const visited = new Set<string>()
@@ -322,7 +322,9 @@ export class DirectoryScanner implements IDirectoryScanner {
 		// Calculate in-degrees
 		for (const [file, deps] of dependencies) {
 			for (const dep of deps) {
-				inDegree.set(dep, (inDegree.get(dep) || 0) + 1)
+				if (files.includes(dep)) {
+					inDegree.set(dep, (inDegree.get(dep) || 0) + 1)
+				}
 			}
 		}
 

@@ -2979,12 +2979,15 @@ export class CodeParser implements ICodeParser {
 				try {
 					// Create a temporary node for metadata extraction
 					const tempContent = chunkContent
-					const tempTree = this.loadedParsers[language]?.parser.parse(tempContent)
-					if (tempTree) {
-						const tempNode = tempTree.rootNode.descendantForIndex(0)
-						if (tempNode) {
-							symbolMetadata = extractSymbolMetadata(tempNode, tempContent) || undefined
-							documentation = symbolMetadata?.documentation
+					const parser = this.loadedParsers[language]?.parser
+					if (parser) {
+						const tempTree = parser.parse(tempContent)
+						if (tempTree) {
+							const tempNode = tempTree.rootNode.descendantForIndex(0)
+							if (tempNode) {
+								symbolMetadata = extractSymbolMetadata(tempNode, tempContent) || undefined
+								documentation = symbolMetadata?.documentation
+							}
 						}
 					}
 				} catch (error) {
@@ -2998,10 +3001,13 @@ export class CodeParser implements ICodeParser {
 
 			// Extract function calls from the chunk
 			try {
-				const tempTree = this.loadedParsers[language]?.parser.parse(chunkContent)
-				if (tempTree) {
-					const extractedCalls = this.extractCalls(tempTree.rootNode, filePath)
-					calls = extractedCalls.length > 0 ? extractedCalls : undefined
+				const parser = this.loadedParsers[language]?.parser
+				if (parser) {
+					const tempTree = parser.parse(chunkContent)
+					if (tempTree) {
+						const extractedCalls = this.extractCalls(tempTree.rootNode, filePath)
+						calls = extractedCalls.length > 0 ? extractedCalls : undefined
+					}
 				}
 			} catch (error) {
 				// Silently fail call extraction

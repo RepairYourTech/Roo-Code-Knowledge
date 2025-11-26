@@ -684,9 +684,6 @@ describe("CodeIndexManager - Neo4j Initialization and Error Handling", () => {
 				}),
 			}
 
-			// Clear mocks before first phase
-			vi.clearAllMocks()
-
 			// First initialize to create Neo4j service
 			await manager.initialize(mockContextProxy as any)
 			// Should not have called initialize since Neo4j is disabled
@@ -876,8 +873,11 @@ describe("CodeIndexManager - Neo4j Initialization and Error Handling", () => {
 
 			// Reset and reinitialize to simulate recovery
 			CodeIndexManager.disposeAll()
+
+			// Mock CodeIndexStateManager constructor for this test
+			vi.mocked(CodeIndexStateManager).mockImplementation(() => mockStateManager)
+
 			manager = CodeIndexManager.getInstance(mockContext)!
-			;(manager as any)._stateManager = mockStateManager
 
 			// Act again - should recover
 			await manager.initialize(mockContextProxy as any)

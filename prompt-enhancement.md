@@ -42,7 +42,7 @@ The `view` tool **without** `search_query_regex` should be used in the following
 The `codebase-retrieval` tool should be used in the following cases:
 
 - When you don't know which files contain the information you need
-- When you want to gather high level information about the task you are trying to accomplish
+- When you want to gather high-level information about the task you are trying to accomplish
 - When you want to gather information about the codebase in general
   Examples of good queries:
 - "Where is the function that handles user authentication?"

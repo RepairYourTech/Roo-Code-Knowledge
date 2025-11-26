@@ -16,7 +16,7 @@ export interface MetadataValidationOptions {
 	/** Maximum total size of serialized metadata */
 	maxMetadataSize?: number
 	/** Maximum length for individual string values */
-	maxStringLenth?: number
+	maxStringLength?: number
 	/** Maximum number of items in metadata arrays */
 	maxArrayLength?: number
 	/** Maximum nesting depth for objects in metadata */
@@ -64,7 +64,7 @@ export class MetadataValidationError extends Error {
  */
 interface InternalMetadataValidationOptions {
 	maxMetadataSize: number
-	maxStringLenth: number
+	maxStringLength: number
 	maxArrayLength: number
 	maxObjectDepth: number
 	validationEnabled: boolean
@@ -87,7 +87,7 @@ export class MetadataValidator {
 	constructor(options: MetadataValidationOptions = {}, errorLogger?: CodebaseIndexErrorLogger) {
 		this.options = {
 			maxMetadataSize: options.maxMetadataSize ?? MAX_METADATA_SIZE,
-			maxStringLenth: options.maxStringLenth ?? MAX_METADATA_STRING_LENGTH,
+			maxStringLength: options.maxStringLength ?? MAX_METADATA_STRING_LENGTH,
 			maxArrayLength: options.maxArrayLength ?? MAX_METADATA_ARRAY_LENGTH,
 			maxObjectDepth: options.maxObjectDepth ?? MAX_METADATA_OBJECT_DEPTH,
 			validationEnabled: options.validationEnabled ?? METADATA_VALIDATION_ENABLED,
@@ -340,17 +340,17 @@ export class MetadataValidator {
 	 * @returns The truncated string
 	 */
 	private truncateString(str: string, warnings: string[]): string {
-		if (str.length <= this.options.maxStringLenth) {
+		if (str.length <= this.options.maxStringLength) {
 			return str
 		}
 
 		this.logTransformation(
 			"warn",
-			`String truncated from ${str.length} to ${this.options.maxStringLenth} characters`,
+			`String truncated from ${str.length} to ${this.options.maxStringLength} characters`,
 		)
-		warnings.push(`String value was truncated from ${str.length} to ${this.options.maxStringLenth} characters`)
+		warnings.push(`String value was truncated from ${str.length} to ${this.options.maxStringLength} characters`)
 
-		return str.substring(0, this.options.maxStringLenth - 3) + "..."
+		return str.substring(0, this.options.maxStringLength - 3) + "..."
 	}
 
 	/**
@@ -363,18 +363,19 @@ export class MetadataValidator {
 	 * @returns The truncated array
 	 */
 	private truncateArray(arr: unknown[], depth: number, warnings: string[], visited: WeakSet<object>): unknown[] {
-		if (arr.length <= this.options.maxArrayLength) {
+		// Always return a sanitized array of consistent type
+		const limit = this.options.maxArrayLength
+
+		if (arr.length <= limit) {
 			return arr.map((item) => this.sanitizeValue(item, depth + 1, warnings, visited))
 		}
 
-		this.logTransformation("warn", `Array truncated from ${arr.length} to ${this.options.maxArrayLength} items`)
-		warnings.push(`Array was truncated from ${arr.length} to ${this.options.maxArrayLength} items`)
+		this.logTransformation("warn", `Array truncated from ${arr.length} to ${limit} items`)
+		warnings.push(`Array was truncated from ${arr.length} to ${limit} items`)
 
-		const truncated = arr.slice(0, this.options.maxArrayLength)
-		return [
-			...truncated.map((item) => this.sanitizeValue(item, depth + 1, warnings, visited)),
-			`... and ${arr.length - this.options.maxArrayLength} more items`,
-		]
+		// Return only the truncated items without mixing types
+		const truncated = arr.slice(0, limit)
+		return truncated.map((item) => this.sanitizeValue(item, depth + 1, warnings, visited))
 	}
 
 	/**

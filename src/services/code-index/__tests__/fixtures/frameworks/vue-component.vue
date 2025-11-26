@@ -88,7 +88,6 @@ const searchQuery = ref("")
 const currentPage = ref(1)
 const postsPerPage = 10
 const isDarkMode = ref(false)
-const loading = ref(false)
 const userLoading = ref(false)
 const postsLoading = ref(false)
 const userError = ref<string | null>(null)

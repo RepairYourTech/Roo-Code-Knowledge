@@ -255,6 +255,9 @@ export default `
 
 ; AssertJ - Fluent assertions
 (method_invocation
+  object: (method_invocation
+    name: (identifier) @assertj.assert_method
+    (#match? @assertj.assert_method "^(assertThat|assertThatThrownBy|assertThatCode|assertThatExceptionOfType|assertThatIOException|assertThatIllegalStateException)$"))
   name: (identifier) @assertj.fluent_method
   (#match? @assertj.fluent_method "^(isEqualTo|isNotEqualTo|isSameAs|isNotSameAs|isNull|isNotNull|isTrue|isFalse|isEqualToIgnoringCase|contains|doesNotContain|startsWith|endsWith|hasSize|isEmpty|isNotEmpty|containsExactly|containsExactlyInAnyOrder|containsOnlyOnce|doesNotContainAnyElementsOf|containsAll|doesNotContainNull|doesNotHaveDuplicates|hasOnlyOneElementSatisfying|hasSameSizeAs|hasSizeBetween|hasSizeGreaterThan|hasSizeGreaterThanOrEqualTo|hasSizeLessThan|hasSizeLessThanOrEqualTo|allMatch|anyMatch|noneMatch|satisfies|anyOf|noneOf)$"))
   arguments: (argument_list)?) @definition.assertj_fluent_assertion

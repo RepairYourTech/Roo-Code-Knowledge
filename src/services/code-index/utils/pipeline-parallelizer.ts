@@ -139,15 +139,21 @@ export class PipelineParallelizer<T, R> {
 
 		// Check if we can start more workers
 		while (this.activeWorkers.size < this.config.maxConcurrency && this.taskQueue.length > 0) {
-			const task = this.taskQueue.shift()
-			if (!task) break
+			// Find a task that's ready to execute (not scheduled for future retry)
+			const readyTaskIndex = this.taskQueue.findIndex(
+				(task) => task.attempts === 0 || !task.retryDelay || task.scheduledAt! <= Date.now(),
+			)
 
-			// Calculate retry delay if this is a retry
-			if (task.attempts > 0 && task.retryDelay) {
-				await new Promise((resolve) => setTimeout(resolve, task.retryDelay))
+			if (readyTaskIndex === -1) {
+				// No ready tasks available, but check if we need to reschedule delayed tasks
+				this.scheduleDelayedTasks()
+				break
 			}
 
-			// Start worker
+			const task = this.taskQueue.splice(readyTaskIndex, 1)[0]
+			if (!task) break
+
+			// Start worker immediately for ready tasks
 			const workerPromise = this.executeTask(task)
 			this.activeWorkers.set(task.id, {
 				worker: workerPromise,
@@ -167,6 +173,35 @@ export class PipelineParallelizer<T, R> {
 					this.handleTaskError(task, error)
 				})
 		}
+
+		// Schedule processing of delayed tasks
+		this.scheduleDelayedTasks()
+	}
+
+	/**
+	 * Schedule delayed tasks for future execution
+	 */
+	private scheduleDelayedTasks(): void {
+		if (this.isShutdown) {
+			return
+		}
+
+		const now = Date.now()
+		const delayedTasks = this.taskQueue.filter(
+			(task) => task.attempts > 0 && task.retryDelay && task.scheduledAt! > now,
+		)
+
+		if (delayedTasks.length === 0) {
+			return
+		}
+
+		// Find the next scheduled task and set a timer to reprocess the queue
+		const nextScheduledTime = Math.min(...delayedTasks.map((task) => task.scheduledAt!))
+		const delayUntilNext = Math.max(0, nextScheduledTime - now)
+
+		setTimeout(() => {
+			setImmediate(() => this.processQueue())
+		}, delayUntilNext)
 	}
 
 	/**
@@ -221,11 +256,12 @@ export class PipelineParallelizer<T, R> {
 		const shouldRetry = task.attempts < task.maxAttempts && this.isRetryableError(error)
 
 		if (shouldRetry) {
-			// Schedule retry
+			// Schedule retry with timestamp
 			const retryTask: QueueTask<T> = {
 				...task,
 				attempts: task.attempts,
 				retryDelay,
+				scheduledAt: Date.now() + retryDelay,
 			}
 
 			// Insert back into queue with priority

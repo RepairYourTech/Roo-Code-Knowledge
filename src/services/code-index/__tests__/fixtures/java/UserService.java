@@ -13,6 +13,7 @@ package com.example.service;
 
 import java.util.*;
 import java.time.LocalDateTime;
+import java.util.UUID;
 
 // Interface definition
 public interface Repository<T, ID> {
@@ -90,6 +91,7 @@ class User extends Entity {
 
     public void setPasswordHash(String passwordHash) {
         this.passwordHash = passwordHash;
+        touch();
     }
 
     public void addRole(String role) {
@@ -154,11 +156,18 @@ public class UserService {
         this.repository = repository;
     }
 
-    public static synchronized UserService getInstance(UserRepository repository) {
+    public static UserService getInstance() {
         if (instance == null) {
-            instance = new UserService(repository);
+            throw new IllegalStateException("UserService not initialized. Call initialize first.");
         }
         return instance;
+    }
+
+    public static synchronized void initialize(UserRepository repository) {
+        if (instance != null) {
+            throw new IllegalStateException("UserService already initialized.");
+        }
+        instance = new UserService(repository);
     }
 
     public User createUser(String email, String username) {

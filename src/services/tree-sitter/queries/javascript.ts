@@ -244,7 +244,7 @@ export default `
         (required_parameter
           pattern: (identifier) @test.done_param)))
   (#match? @test.promise_func "^(test|it)$")
-  (#eq? @test.done_param "done")) @definition.promise_test
+  (#match? @test.done_param "^done$")) @definition.promise_test
 
 ; Test timeout patterns
 (call_expression
@@ -752,9 +752,6 @@ export default `
   (#match? @fs.function "^(readFileSync|writeFileSync|existsSync|mkdirSync|readdirSync|statSync)$")
   arguments: (arguments
     (_) @fs.argument*)) @definition.build_fs_operation
-
-    (#eq? @express.env.object "process")
-    (#eq? @express.env.property "env"))) @definition.express_env
 
 ; Express.js async route handlers
 (function_declaration

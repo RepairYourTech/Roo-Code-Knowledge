@@ -1,6 +1,6 @@
 import { CodeParser } from "../parser"
 import * as path from "path"
-import { readFile } from "fs/promises"
+import { readFile, writeFile, unlink } from "fs/promises"
 
 describe("splitAtLogicalBoundaries", () => {
 	let parser: CodeParser
@@ -248,6 +248,3 @@ const result4 = finalFunction(result3, "last parameter")
 		}
 	})
 })
-
-// Helper functions for file operations
-import { writeFile, unlink } from "fs/promises"

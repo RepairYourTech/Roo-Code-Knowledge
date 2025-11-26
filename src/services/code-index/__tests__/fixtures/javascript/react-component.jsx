@@ -43,9 +43,12 @@ export class UserCard extends React.Component {
 	}
 
 	fetchUserData = async () => {
-		this.setState({ loading: true })
+		this.setState({ loading: true, error: null })
 		try {
 			const response = await fetch(`/api/users/${this.props.userId}`)
+			if (!response.ok) {
+				throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+			}
 			const data = await response.json()
 			this.setState({ user: data, loading: false })
 		} catch (error) {
@@ -58,10 +61,11 @@ export class UserCard extends React.Component {
 	}
 
 	render() {
-		const { user, isExpanded, loading } = this.state
+		const { user, isExpanded, loading, error } = this.state
 		const { className } = this.props
 
 		if (loading) return <div>Loading...</div>
+		if (error) return <div>Error: {error.message}</div>
 		if (!user) return null
 
 		return (

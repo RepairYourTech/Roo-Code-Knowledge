@@ -147,6 +147,7 @@ export default `
         name: (identifier) @jest.import
         (#match? @jest.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach|jest|jest\\.fn)$"))))
   source: (string
+    (string_fragment) @source
     (#match? @source "^['\"]@jest/globals['\"]$"))) @definition.jest_import
 
 ; Testing library imports - Vitest
@@ -157,6 +158,7 @@ export default `
         name: (identifier) @vitest.import
         (#match? @vitest.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach|vi|vi\\.fn)$"))))
   source: (string
+    (string_fragment) @source
     (#match? @source "^['\"]vitest['\"]$"))) @definition.vitest_import
 
 ; Testing library imports - Vitest globals
@@ -167,6 +169,7 @@ export default `
         name: (identifier) @vitest.global.import
         (#match? @vitest.global.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach)$"))))
   source: (string
+    (string_fragment) @source
     (#match? @source "^['\"]vitest/globals['\"]$"))) @definition.vitest_global_import
 
 ; Testing library imports - Chai
@@ -177,6 +180,7 @@ export default `
         name: (identifier) @chai.import
         (#match? @chai.import "^(expect|assert|should)$"))))
   source: (string
+    (string_fragment) @source
     (#match? @source "^['\"]chai['\"]$"))) @definition.chai_import
 
 ; Testing library imports - Sinon
@@ -187,6 +191,7 @@ export default `
         name: (identifier) @sinon.import
         (#match? @sinon.import "^(sinon|spy|stub|mock|fake|createSandbox)$"))))
   source: (string
+    (string_fragment) @source
     (#match? @source "^['\"]sinon['\"]$"))) @definition.sinon_import
 
 ; CommonJS test exports
@@ -220,7 +225,7 @@ export default `
     (arrow_function
       parameters: (formal_parameters
         (required_parameter
-          pattern: (identifier) @test.done_param)))
+          pattern: (identifier) @test.done_param)))))
   (#match? @test.promise_func "^(test|it)$")
   (#eq? @test.done_param "done")) @definition.promise_test
 
@@ -352,9 +357,10 @@ export default `
     (named_imports
       (import_specifier
         name: (identifier) @react.import
-        (#match? @react.import "^(React|Component|PureComponent|Fragment|StrictMode|Suspense|lazy|memo|forwardRef|useContext|useEffect|useState|useReducer|useCallback|useMemo|useRef|useImperativeHandle|useLayoutEffect|useDebugValue)$"))))
+        (#match? @react.import "^(React|Component|PureComponent|Fragment|StrictMode|Suspense|lazy|memo|forwardRef|useContext|useEffect|useState|useReducer|useCallback|useMemo|useRef|useImperativeHandle|useLayoutEffect|useDebugValue)$")))
   source: (string
-    (#match? @source "^['\"]react['\"]$"))) @definition.react_import
+    (string_fragment) @react.source
+    (#match? @react.source "^['\"]react['\"]$"))) @definition.react_import
 
 ; React hooks in .ts files
 (variable_declaration
@@ -517,7 +523,7 @@ export default `
 (expression_statement
   (string
     (string_fragment) @nextjs.client.directive
-    (#match? @nextjs.client.directive "^['\"]use client['\"]$"))) @definition.nextjs_client_component
+    (#match? @nextjs.client.directive "^[\"']use client[\"']$"))) @definition.nextjs_client_component
 
 ; ===== ANGULAR PATTERNS FOR TYPESCRIPT =====
 
@@ -756,7 +762,7 @@ export default `
   heritage: (class_heritage
     (extends_clause
       (type_identifier) @build.ts.plugin.extends
-      (#match? @build.ts.plugin.extends "^(Plugin|WebpackPlugin|VitePlugin|RollupPlugin|BabelPlugin|ESLintPlugin|JestTransformer|PostCSSPlugin|TailwindPlugin)$")))?)) @definition.build_tool_plugin_class
+      (#match? @build.ts.plugin.extends "^(Plugin|WebpackPlugin|VitePlugin|RollupPlugin|BabelPlugin|ESLintPlugin|JestTransformer|PostCSSPlugin|TailwindPlugin)$"))?)) @definition.build_tool_plugin_class
 
 ; Build tool configuration methods
 (method_declaration
@@ -945,7 +951,7 @@ export default `
 ; Angular Forms (Reactive Forms)
 (call_expression
   function: (identifier) @angular.form.builder
-  (#match? @angular.form.builder "^(FormGroup|FormControl|FormArray|FormBuilder|Validators)$"))) @definition.angular_reactive_forms
+  (#match? @angular.form.builder "^(FormGroup|FormControl|FormArray|FormBuilder|Validators)$")) @definition.angular_reactive_forms
 
 ; Angular Component inheritance
 (class_declaration
@@ -1064,7 +1070,7 @@ export default `
     (#eq? @express.error.method "use"))
   arguments: (arguments
     (arrow_function) @express.error.handler
-    (function_expression) @express.error.handler)
+    (function_expression) @express.error.handler))
   (#match? @express.error.handler "err.*req.*res.*next")) @definition.express_error_handler
 
 ; Express.js Router() creation

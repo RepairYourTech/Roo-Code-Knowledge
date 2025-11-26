@@ -10,7 +10,6 @@ import { HybridSearchService, HybridSearchResult } from "../hybrid-search-servic
 import { INeo4jService, CodeNode } from "../interfaces/neo4j-service"
 import { ILSPService } from "../interfaces/lsp-service"
 import { ExportInfo } from "../types/metadata"
-import vscode from "vscode"
 
 describe("Integration: Multi-Backend Search", () => {
 	let mockHybridSearchService: HybridSearchService

@@ -171,7 +171,7 @@ describe("DirectoryScanner - Circuit Breaker Pattern", () => {
 
 	afterEach(() => {
 		vi.clearAllMocks()
-		vi.unstubAllGlobals()
+		vi.useRealTimers()
 	})
 
 	describe("Circuit Breaker Functionality", () => {
@@ -540,11 +540,9 @@ describe("DirectoryScanner - Circuit Breaker Pattern", () => {
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
 			// Mock Date.now to control timing
-			const mockDateNow = vi
-				.fn()
-				.mockReturnValueOnce(1000000) // Start time
-				.mockReturnValueOnce(1035000) // After 35 seconds
-			vi.stubGlobal("Date", { now: mockDateNow })
+			const mockDateNow = vi.fn().mockReturnValue(1000000) // Fixed timestamp
+			vi.useFakeTimers()
+			vi.setSystemTime(mockDateNow())
 
 			// Act
 			await scannerWithSlowMutex.scanDirectory("/test")
@@ -554,7 +552,7 @@ describe("DirectoryScanner - Circuit Breaker Pattern", () => {
 				expect.stringContaining("Neo4j mutex acquisition took 35000ms for file: test/file1.js"),
 			)
 
-			vi.unstubAllGlobals()
+			vi.useRealTimers()
 			consoleWarnSpy.mockRestore()
 		})
 
@@ -617,7 +615,7 @@ describe("DirectoryScanner - Circuit Breaker Pattern", () => {
 				expect.stringContaining("Neo4j mutex release took 6000ms for file: test/file1.js"),
 			)
 
-			vi.unstubAllGlobals()
+			vi.useRealTimers()
 			consoleWarnSpy.mockRestore()
 		})
 	})

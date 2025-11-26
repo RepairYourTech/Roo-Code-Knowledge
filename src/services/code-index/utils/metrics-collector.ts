@@ -727,9 +727,16 @@ export class MetricsCollector {
 			return
 		}
 
+		// Filter batches that have valid duration values
+		const batchesWithDuration = recentBatches.filter(
+			(b) => b.duration !== undefined && b.duration !== null && b.duration > 0,
+		)
+		if (batchesWithDuration.length === 0) {
+			return
+		}
+
 		const averageBatchTime =
-			recentBatches.filter((b) => b.duration !== undefined).reduce((sum, b) => sum + (b.duration || 0), 0) /
-			recentBatches.length
+			batchesWithDuration.reduce((sum, b) => sum + b.duration!, 0) / batchesWithDuration.length
 
 		this.progressMetrics.estimatedTimeRemaining = Math.ceil(
 			(remainingBatches * averageBatchTime) / 1000, // convert to seconds

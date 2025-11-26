@@ -1,14 +1,14 @@
 #!/usr/bin/env tsx
 /**
  * Analyze Test Fixtures Script
- * 
+ *
  * This script analyzes the test fixtures to gather baseline statistics
  * that will be used for performance benchmarking.
  */
 
-import * as fs from 'fs'
-import * as path from 'path'
-import * as os from 'os'
+import * as fs from "fs"
+import * as path from "path"
+import * as os from "os"
 
 interface FileStats {
 	path: string
@@ -42,82 +42,111 @@ interface AnalysisResult {
 		languages: number
 	}
 	byLanguage: Record<string, LanguageStats>
-	byCategory: Record<string, {
-		files: number
-		lines: number
-	}>
+	byCategory: Record<
+		string,
+		{
+			files: number
+			lines: number
+		}
+	>
 	files: FileStats[]
 }
 
 const LANGUAGE_MAP: Record<string, string> = {
-	'.ts': 'TypeScript',
-	'.tsx': 'TypeScript',
-	'.js': 'JavaScript',
-	'.jsx': 'JavaScript',
-	'.py': 'Python',
-	'.java': 'Java',
-	'.go': 'Go',
-	'.rs': 'Rust',
-	'.vue': 'Vue',
+	".ts": "TypeScript",
+	".tsx": "TypeScript",
+	".js": "JavaScript",
+	".jsx": "JavaScript",
+	".py": "Python",
+	".java": "Java",
+	".go": "Go",
+	".rs": "Rust",
+	".vue": "Vue",
 }
 
 function getLanguage(filePath: string): string {
 	const ext = path.extname(filePath)
-	return LANGUAGE_MAP[ext] || 'Unknown'
+	return LANGUAGE_MAP[ext] || "Unknown"
 }
 
 function getCategory(filePath: string): string {
 	const parts = filePath.split(path.sep)
-	const fixturesIndex = parts.indexOf('fixtures')
+	const fixturesIndex = parts.indexOf("fixtures")
 	if (fixturesIndex >= 0 && fixturesIndex < parts.length - 1) {
 		return parts[fixturesIndex + 1]
 	}
-	return 'other'
+	return "other"
 }
 
 function analyzeFile(filePath: string): FileStats {
-	const content = fs.readFileSync(filePath, 'utf-8')
-	const lines = content.split('\n').length
-	const size = fs.statSync(filePath).size
-	const characters = content.length
-	
-	return {
-		path: filePath,
-		language: getLanguage(filePath),
-		lines,
-		size,
-		characters,
+	try {
+		const content = fs.readFileSync(filePath, "utf-8")
+		const lines = content.split(/\r?\n/).length
+		const size = fs.statSync(filePath).size
+		const characters = content.length
+
+		return {
+			path: filePath,
+			language: getLanguage(filePath),
+			lines,
+			size,
+			characters,
+		}
+	} catch (error) {
+		console.error(`Error analyzing file ${filePath}:`, error.message)
+		throw new Error(`Failed to analyze file ${filePath}: ${error.message}`)
 	}
 }
 
 function getFixtureFiles(fixturesDir: string): string[] {
 	const files: string[] = []
-	
+
 	function walk(dir: string) {
-		const entries = fs.readdirSync(dir, { withFileTypes: true })
-		for (const entry of entries) {
-			const fullPath = path.join(dir, entry.name)
-			if (entry.isDirectory()) {
-				walk(fullPath)
-			} else if (entry.isFile() && !entry.name.endsWith('.md')) {
-				files.push(fullPath)
+		try {
+			const entries = fs.readdirSync(dir, { withFileTypes: true })
+			for (const entry of entries) {
+				try {
+					const fullPath = path.join(dir, entry.name)
+					if (entry.isDirectory()) {
+						walk(fullPath)
+					} else if (entry.isFile() && !entry.name.endsWith(".md")) {
+						files.push(fullPath)
+					}
+				} catch (entryError) {
+					console.warn(`Warning: Skipping entry ${entry.name} in ${dir}: ${entryError.message}`)
+					// Continue with other entries
+				}
 			}
+		} catch (error) {
+			console.warn(`Warning: Cannot read directory ${dir}: ${error.message}`)
+			// Skip this directory and continue
 		}
 	}
-	
+
 	walk(fixturesDir)
 	return files
 }
 
 function analyzeFixtures(): AnalysisResult {
-	const fixturesDir = path.join(__dirname, '..', 'src', 'services', 'code-index', '__tests__', 'fixtures')
+	const fixturesDir = path.join(__dirname, "..", "src", "services", "code-index", "__tests__", "fixtures")
+
+	// Check if fixtures directory exists
+	if (!fs.existsSync(fixturesDir)) {
+		throw new Error(`Fixtures directory not found: ${fixturesDir}`)
+	}
+
+	const stat = fs.statSync(fixturesDir)
+	if (!stat.isDirectory()) {
+		throw new Error(`Fixtures path is not a directory: ${fixturesDir}`)
+	}
+
 	const files = getFixtureFiles(fixturesDir)
-	
+
 	const fileStats = files.map(analyzeFile)
-	
+
 	const byLanguage: Record<string, LanguageStats> = {}
 	const byCategory: Record<string, { files: number; lines: number }> = {}
-	
+
 	for (const stat of fileStats) {
 		// By language
 		if (!byLanguage[stat.language]) {
@@ -131,7 +160,7 @@ function analyzeFixtures(): AnalysisResult {
 		byLanguage[stat.language].files++
 		byLanguage[stat.language].lines += stat.lines
 		byLanguage[stat.language].size += stat.size
-		
+
 		// By category
 		const category = getCategory(stat.path)
 		if (!byCategory[category]) {
@@ -140,16 +169,16 @@ function analyzeFixtures(): AnalysisResult {
 		byCategory[category].files++
 		byCategory[category].lines += stat.lines
 	}
-	
+
 	// Calculate averages
 	for (const lang in byLanguage) {
 		byLanguage[lang].avgLinesPerFile = Math.round(byLanguage[lang].lines / byLanguage[lang].files)
 	}
-	
+
 	const totalLines = fileStats.reduce((sum, f) => sum + f.lines, 0)
 	const totalSize = fileStats.reduce((sum, f) => sum + f.size, 0)
 	const totalCharacters = fileStats.reduce((sum, f) => sum + f.characters, 0)
-	
+
 	return {
 		timestamp: new Date().toISOString(),
 		systemInfo: {
@@ -172,7 +201,23 @@ function analyzeFixtures(): AnalysisResult {
 	}
 }
 
-// Run analysis
-const result = analyzeFixtures()
-console.log(JSON.stringify(result, null, 2))
+// Add unhandled rejection handler
+process.on("unhandledRejection", (reason, promise) => {
+	console.error("Unhandled Rejection at:", promise, "reason:", reason)
+	process.exit(1)
+})
 
+// Run analysis with error handling
+async function main() {
+	try {
+		const result = analyzeFixtures()
+		console.log(JSON.stringify(result, null, 2))
+		process.exit(0)
+	} catch (error) {
+		console.error("Error during fixture analysis:", error.message)
+		console.error(error.stack)
+		process.exit(1)
+	}
+}
+
+main()

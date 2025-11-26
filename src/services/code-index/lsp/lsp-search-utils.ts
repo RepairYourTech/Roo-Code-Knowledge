@@ -117,7 +117,11 @@ export function filterLSPResultsByPattern(
 		}
 
 		if (filePattern) {
-			const regex = new RegExp(filePattern.replace(/\*/g, ".*"))
+			// Escape special regex characters and replace wildcards safely
+			const escapedPattern = filePattern
+				.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars
+				.replace(/\\\*/g, ".*") // Convert escaped wildcards back to regex pattern
+			const regex = new RegExp(`^${escapedPattern}$`)
 			if (!regex.test(filePath)) {
 				return false
 			}
@@ -131,8 +135,8 @@ export function filterLSPResultsByPattern(
  * Ranks and limits LSP results
  */
 export function rankLSPResults(results: HybridSearchResult[], maxResults?: number): HybridSearchResult[] {
-	// Sort by score descending
-	const sorted = results.sort((a, b) => b.score - a.score)
+	// Sort by score descending without mutating the original array
+	const sorted = [...results].sort((a, b) => b.score - a.score)
 
 	// Apply limit if specified
 	if (maxResults && maxResults > 0) {

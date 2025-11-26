@@ -61,7 +61,7 @@ export function useLocalStorage<T>(key: string, initialValue: T): [T, (value: T)
 			console.error(error)
 			setStoredValue(initialValue)
 		}
-	}, [key, initialValue])
+	}, [key])
 
 	const setValue = useCallback(
 		(value: T) => {
@@ -91,6 +91,11 @@ export function useFetch<T>(url: string) {
 			try {
 				setLoading(true)
 				const response = await fetch(url)
+
+				if (!response.ok) {
+					throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+				}
+
 				const json = await response.json()
 
 				if (!cancelled) {

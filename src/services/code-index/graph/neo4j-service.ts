@@ -439,17 +439,23 @@ export class Neo4jService implements INeo4jService {
 	private metadataValidator?: MetadataValidator
 	private skipValidation: boolean = false
 
-	constructor(config: Neo4jConfig, errorLogger?: CodebaseIndexErrorLogger, logger?: Logger) {
+	constructor(
+		config: Neo4jConfig,
+		errorLogger?: CodebaseIndexErrorLogger,
+		logger?: Logger,
+		outputChannel?: vscode.OutputChannel,
+	) {
 		this.log = logger
 		this.config = this.validateAndEnhanceConfig(config)
 		this.errorLogger = errorLogger
+		this.outputChannel = outputChannel
 		this.metrics.uptime = Date.now()
 
 		// Initialize metadata validator with config from EnhancedNeo4jConfig
 		this.metadataValidator = new MetadataValidator(
 			{
 				maxMetadataSize: this.config.maxMetadataSize,
-				maxStringLenth: this.config.maxMetadataStringLength,
+				maxStringLength: this.config.maxMetadataStringLength,
 				maxArrayLength: this.config.maxMetadataArrayLength,
 				maxObjectDepth: this.config.maxMetadataObjectDepth,
 				validationEnabled: this.config.metadataValidationEnabled,
@@ -997,8 +1003,8 @@ export class Neo4jService implements INeo4jService {
 			new Promise<never>((_, reject) => {
 				setTimeout(() => {
 					this.metrics.timeoutErrors++
-					reject(new Error(`Query timeout after ${timeoutMs}ms: ${operation}`))
-				}, timeoutMs)
+					reject(new Error(`Query timeout after ${finalTimeout}ms: ${operation}`))
+				}, finalTimeout)
 			}),
 		])
 	}
@@ -2024,15 +2030,43 @@ export class Neo4jService implements INeo4jService {
 					continue
 				}
 
-				// Sanitize relationship type to be a valid Cypher identifier
-				const sanitizedType = type.replace(/[^a-zA-Z0-9_]/g, "_")
+				// Validate and sanitize relationship type to be a valid Cypher identifier
+				if (!type || typeof type !== "string") {
+					console.warn(`[Neo4jService] Invalid relationship type: ${type}, skipping relationship`)
+					continue
+				}
+
+				// Check if type starts with a letter and contains only valid characters
+				if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(type)) {
+					const sanitizedType = type.replace(/[^a-zA-Z0-9_]/g, "_")
+
+					// Ensure sanitized type starts with a letter
+					const finalType = sanitizedType.replace(/^[^a-zA-Z]+/, "")
+
+					if (!finalType || finalType.length === 0) {
+						console.warn(
+							`[Neo4jService] Relationship type '${type}' cannot be sanitized to valid Cypher identifier, skipping`,
+						)
+						continue
+					}
+
+					console.warn(`[Neo4jService] Relationship type '${type}' sanitized to '${finalType}'`)
+					type = finalType
+				}
+
+				// Ensure type doesn't exceed Neo4j limits (max 100,000 characters for identifiers)
+				if (type.length > 1000) {
+					// Reasonable limit for practical use
+					console.warn(`[Neo4jService] Relationship type '${type.substring(0, 50)}...' too long, truncating`)
+					type = type.substring(0, 1000)
+				}
 
 				await tx.run(
 					`
 						UNWIND $relationships AS rel
 						MATCH (from:CodeNode {id: rel.fromId})
 						MATCH (to:CodeNode {id: rel.toId})
-						MERGE (from)-[r:${sanitizedType}]->(to)
+						MERGE (from)-[r:${type}]->(to)
 						SET r += rel.metadata
 					`,
 					{

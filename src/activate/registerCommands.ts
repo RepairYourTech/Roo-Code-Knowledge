@@ -591,7 +591,13 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 				manager.outputChannel.appendLine(`Failed to save diagnostics: ${errorMessage}`)
 
 				if (manager.outputChannel) {
-					vscode.window.showErrorMessage(`Failed to save diagnostics: ${errorMessage}`, "Show Output")
+					const action = await vscode.window.showErrorMessage(
+						`Failed to save diagnostics: ${errorMessage}`,
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						manager.outputChannel.show(true)
+					}
 				}
 			}
 		} catch (error) {

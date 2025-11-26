@@ -64,9 +64,11 @@ export class MistralEmbedder implements IEmbedder {
 
 			// Check for embedding count mismatch
 			if (result.embeddings.length !== texts.length) {
-				console.error(
+				const error = new Error(
 					`[MistralEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${result.embeddings.length}`,
 				)
+				console.error(error.message)
+				throw error
 			}
 
 			return result

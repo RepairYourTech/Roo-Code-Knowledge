@@ -82,13 +82,12 @@ export default `
 
 ; Test functions - standard Rust testing
 (function_item
+  (attribute_item
+    (attribute
+      (identifier) @rust.test_attr
+      (#eq? @rust.test_attr "test")))
   name: (identifier) @rust.test_func_name
-  (#match? @rust.test_func_name "^test_.*$")
-  body: (block
-    (attribute_item
-      (attribute
-        (identifier) @rust.test_attr
-        (#eq? @rust.test_attr "test"))))) @definition.rust_test_function
+  (#match? @rust.test_func_name "^test_.*$")) @definition.rust_test_function
 
 ; Test functions with test attribute
 (function_item
@@ -191,8 +190,9 @@ export default `
 ; Test result types
 (call_expression
   function: (identifier) @rust.result_func
-  (#match? @rust.result_func "^(Ok|Err|Some|None)$"))
-  (tree_sitter::tree_sitter::token_tree) @rust.result_args) @definition.rust_test_result
+  (#match? @rust.result_func "^(Ok|Err|Some|None)$")
+  arguments: (argument_list
+    (_) @rust.result_args)) @definition.rust_test_result
 
 ; Testing imports
 (use_declaration
@@ -236,7 +236,7 @@ export default `
 ; Test constants
 (const_item
   name: (identifier) @rust.test_const_name
-  (#match! @rust.test_const_name "^(TEST_|MOCK_|FAKE_|STUB_).*")
+  (#match? @rust.test_const_name "^(TEST_|MOCK_|FAKE_|STUB_).*")
   value: (_) @rust.test_const_value) @definition.rust_test_constant
 
 ; Async test functions
@@ -280,13 +280,13 @@ export default `
 (attribute_item
   (attribute
     (identifier) @rust.test_derive
-    (#match! @rust.test_derive "^(derive|cfg|test|ignore|should_panic|bench)$"))
+    (#match? @rust.test_derive "^(derive|cfg|test|ignore|should_panic|bench)$"))
   (token_tree) @rust.test_derive_args)) @definition.rust_test_attribute
 
 ; Test trait implementations
 (impl_item
   trait: (type_identifier) @rust.test_trait_name
-  (#match! @rust.test_trait_name ".*(Test|Mock|Fixture|Helper).*")
+  (#match? @rust.test_trait_name ".*(Test|Mock|Fixture|Helper).*")
   type: (type_identifier) @rust.test_impl_type
   body: (declaration_list
     (function_item
@@ -295,13 +295,13 @@ export default `
 ; Test error handling
 (call_expression
   function: (identifier) @rust.error_macro
-  (#match! @rust.error_macro "^(panic!|unreachable!|todo!|unimplemented!)$")
+  (#match? @rust.error_macro "^(panic!|unreachable!|todo!|unimplemented!)$")
   (tree_sitter::tree_sitter::token_tree) @rust.error_args) @definition.rust_test_error_handling
 
 ; Test logging and debugging
 (call_expression
   function: (identifier) @rust.debug_macro
-  (#match! @rust.debug_macro "^(println!|eprintln!|dbg!|debug!|info!|warn!|error!)$")
+  (#match? @rust.debug_macro "^(println!|eprintln!|dbg!|debug!|info!|warn!|error!)$")
   (tree_sitter::tree_sitter::token_tree) @rust.debug_args) @definition.rust_test_debugging
 
 ; Test file patterns (detect test files)
@@ -310,11 +310,11 @@ export default `
   (attribute_item
     (attribute
       (identifier) @rust.cfg_test_file_attr
-      (#eq! @rust.cfg_test_file_attr "cfg")
+      (#eq? @rust.cfg_test_file_attr "cfg")
       (tree_sitter::tree_sitter::attribute_item
         (attribute
           (token_tree
             (identifier) @rust.test_file_cfg
-            (#eq! @rust.test_file_cfg "test")))))) @definition.rust_test_file
+            (#eq? @rust.test_file_cfg "test")))))) @definition.rust_test_file
 
 `

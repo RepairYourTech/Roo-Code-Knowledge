@@ -118,7 +118,7 @@ export default `${typescriptQuery}
   heritage: (class_heritage
     (extends_clause
       type: (type_identifier) @react.component
-      (#match? @react.component "^(Component|PureComponent)$"))))) @definition.react_class_component
+      (#match? @react.component "^(Component|PureComponent)$")))) @definition.react_class_component
 
 ; Class Components extending React.PureComponent
 (class_declaration
@@ -129,7 +129,7 @@ export default `${typescriptQuery}
         object: (identifier) @react.library
         property: (property_identifier) @react.component
         (#match? @react.library "React")
-        (#match? @react.component "^(Component|PureComponent)$"))))) @definition.react_class_component_full
+        (#match? @react.component "^(Component|PureComponent)$")))) @definition.react_class_component_full
 
 ; Class Components with render method returning JSX
 (class_declaration
@@ -533,7 +533,7 @@ export default `${typescriptQuery}
     (#match? @nextjs.metadata.function "generateMetadata")
     return_type: (type_annotation
       (type_identifier) @nextjs.metadata.type
-      (#match? @nextjs.metadata.type "Metadata"))))) @definition.nextjs_generate_metadata
+      (#match? @nextjs.metadata.type "Metadata")))) @definition.nextjs_generate_metadata
 
 ; Next.js Loading Components - App Router
 (export_statement
@@ -552,7 +552,7 @@ export default `${typescriptQuery}
     parameters: (formal_parameters
       (required_parameter
         pattern: (object_pattern)
-        type: (type_annotation)))))) @definition.nextjs_error_component
+        type: (type_annotation))))) @definition.nextjs_error_component
 
 ; Next.js Not Found Components - App Router
 (export_statement
@@ -625,47 +625,47 @@ export default `${typescriptQuery}
 ; Next.js useRouter Hook Usage
 (call_expression
   function: (identifier) @nextjs.hook
-  (#match? @nextjs.hook "useRouter"))) @definition.nextjs_use_router
+  (#match? @nextjs.hook "useRouter")) @definition.nextjs_use_router
 
 ; Next.js usePathname Hook Usage
 (call_expression
   function: (identifier) @nextjs.hook
-  (#match? @nextjs.hook "usePathname"))) @definition.nextjs_use_pathname
+  (#match? @nextjs.hook "usePathname")) @definition.nextjs_use_pathname
 
 ; Next.js useSearchParams Hook Usage
 (call_expression
   function: (identifier) @nextjs.hook
-  (#match? @nextjs.hook "useSearchParams"))) @definition.nextjs_use_search_params
+  (#match? @nextjs.hook "useSearchParams")) @definition.nextjs_use_search_params
 
 ; Next.js redirect Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "redirect"))) @definition.nextjs_redirect
+  (#match? @nextjs.function "redirect")) @definition.nextjs_redirect
 
 ; Next.js notFound Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "notFound"))) @definition.nextjs_not_found
+  (#match? @nextjs.function "notFound")) @definition.nextjs_not_found
 
 ; Next.js revalidatePath Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "revalidatePath"))) @definition.nextjs_revalidate_path
+  (#match? @nextjs.function "revalidatePath")) @definition.nextjs_revalidate_path
 
 ; Next.js revalidateTag Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "revalidateTag"))) @definition.nextjs_revalidate_tag
+  (#match? @nextjs.function "revalidateTag")) @definition.nextjs_revalidate_tag
 
 ; Next.js cookies Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "cookies"))) @definition.nextjs_cookies
+  (#match? @nextjs.function "cookies")) @definition.nextjs_cookies
 
 ; Next.js headers Function Usage
 (call_expression
   function: (identifier) @nextjs.function
-  (#match? @nextjs.function "headers"))) @definition.nextjs_headers
+  (#match? @nextjs.function "headers")) @definition.nextjs_headers
 
 ; Next.js Static Site Generation (SSG) Patterns
 (export_statement

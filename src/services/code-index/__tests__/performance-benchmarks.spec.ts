@@ -171,7 +171,7 @@ describe("Performance Benchmarks", () => {
 
 			console.log(`\n📊 Result Merging & Deduplication (150 results, 50 duplicates): ${time.toFixed(3)}ms`)
 
-			// Merging and deduplication should be fast (< 10ms)
+			// Merging and deduplication should be fast (< 100ms)
 			expect(time).toBeLessThan(100)
 		})
 
@@ -189,7 +189,7 @@ describe("Performance Benchmarks", () => {
 
 			console.log(`\n📊 Large Result Set Processing (1000 results): ${time.toFixed(3)}ms`)
 
-			// Should handle large result sets efficiently (< 50ms)
+			// Should handle large result sets efficiently (< 100ms)
 			expect(time).toBeLessThan(100)
 		})
 	})

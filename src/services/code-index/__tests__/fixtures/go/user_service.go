@@ -12,7 +12,10 @@
 package service
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -126,10 +129,12 @@ func (r *UserRepository) FindByID(id string) (*User, error) {
 func (r *UserRepository) FindAll() ([]*User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	users := make([]*User, 0, len(r.users))
 	for _, user := range r.users {
-		users = append(users, user)
+		// Create a copy to avoid exposing internal state
+		userCopy := *user
+		users = append(users, &userCopy)
 	}
 	return users, nil
 }
@@ -178,6 +183,12 @@ func (s *UserService) GetUser(id string) (*User, error) {
 
 // Helper function
 func generateID() string {
-	return "user-" + time.Now().Format("20060102150405")
+	// Generate a cryptographically secure random ID to prevent collisions
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		// Fallback to time-based if crypto rand fails
+		return "user-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	}
+	return "user-" + hex.EncodeToString(bytes)
 }
 

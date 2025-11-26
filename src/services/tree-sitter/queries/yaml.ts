@@ -30,13 +30,13 @@ export default `
 ; GitHub Actions specific patterns
 (block_mapping_pair
   key: (flow_node) @github.action.key
-  (#match? @github.action.key "^(runs|steps|uses|with|if|env|name)$")
+  (#match? @github.action.key "^(runs|steps|uses|with|if|env|name)$"))
   value: (_) @github.action.value)) @definition.github_action
 
 ; Kubernetes/Docker configurations
 (block_mapping_pair
   key: (flow_node) @k8s.key
-  (#match? @k8s.key "^(apiVersion|kind|metadata|spec|containers|volumes|services|deployments|configmaps|secrets)$")
+  (#match? @k8s.key "^(apiVersion|kind|metadata|spec|containers|volumes|services|deployments|configmaps|secrets)$"))
   value: (_) @k8s.value)) @definition.kubernetes_config
 
 ; Build tool configurations

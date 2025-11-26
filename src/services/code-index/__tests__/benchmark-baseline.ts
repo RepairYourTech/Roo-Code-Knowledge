@@ -99,14 +99,6 @@ function formatMemory(bytes: number): string {
 }
 
 /**
- * Count lines in a file
- */
-function countLines(filePath: string): number {
-	const content = fs.readFileSync(filePath, "utf-8")
-	return content.split("\n").length
-}
-
-/**
  * Get all test fixture files
  */
 function getFixtureFiles(fixturesDir: string): string[] {

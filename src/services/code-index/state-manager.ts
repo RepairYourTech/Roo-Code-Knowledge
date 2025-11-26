@@ -504,9 +504,8 @@ export class CodeIndexStateManager {
 				// Don't fail the entire system, just mark as degraded
 				if (this._systemStatus === "Indexing") {
 					const suffix = " (Graph indexing degraded)"
-					if (!this._statusMessage.includes(suffix)) {
-						this._statusMessage = this._statusMessage + suffix
-					}
+					// Remove any existing degradation suffix and add the new one
+					this._statusMessage = this._statusMessage.replace(/\s*\(.*indexing.*degraded.*\)/, "") + suffix
 				}
 			}
 
