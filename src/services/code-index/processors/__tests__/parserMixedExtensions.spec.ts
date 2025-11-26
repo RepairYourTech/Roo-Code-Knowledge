@@ -19,9 +19,6 @@ describe("CodeParser with mixed supported and unsupported extensions", () => {
 				content: "console.log('hello');",
 			})
 
-			// If we get here, the function handled the file gracefully
-			expect(true).toBe(true)
-
 			// Results should be an array (even if empty due to missing WASM files)
 			expect(Array.isArray(results)).toBe(true)
 		} catch (error) {

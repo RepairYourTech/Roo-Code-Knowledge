@@ -66,7 +66,7 @@ export function getWasmDirectory(): string {
 			logger.debug(`[getWasmDirectory] Current __dirname: ${currentDir}`, "WasmDirectory")
 
 			// If we are in src/services/tree-sitter, we can try to go up
-			if (currentDir.includes("services/tree-sitter")) {
+			if (currentDir.includes(`services${path.sep}tree-sitter`) || currentDir.includes("services/tree-sitter")) {
 				// Try to find the root of the extension
 				// This is highly dependent on the build structure
 				// Assuming standard structure: .../dist/services/tree-sitter or .../src/services/tree-sitter

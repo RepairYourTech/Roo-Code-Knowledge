@@ -32,8 +32,8 @@ export class QualityMetricsService implements IQualityMetricsService {
 	private metricsCache: Map<string, any> = new Map()
 	private readonly CACHE_SIZE_LIMIT = 500
 	private readonly CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes
-	private languageParsers: LanguageParser = {}
-	private pendingParserLoads: Map<string, Promise<LanguageParser>> = new Map()
+	private languageParsers: { [key: string]: LanguageParser } = {}
+	private pendingParserLoads: Map<string, Promise<{ [key: string]: LanguageParser }>> = new Map()
 	private reachabilityAnalyzer: ReachabilityAnalyzer
 
 	constructor(private neo4jService: INeo4jService | null) {

@@ -73,7 +73,8 @@ function getCategory(filePath: string): string {
 	const parts = filePath.split(path.sep)
 	const fixturesIndex = parts.indexOf("fixtures")
 	if (fixturesIndex >= 0 && fixturesIndex < parts.length - 1) {
-		return parts[fixturesIndex + 1]
+		const category = parts[fixturesIndex + 1]
+		return category || "other"
 	}
 	return "other"
 }
@@ -160,9 +161,12 @@ function analyzeFixtures(): AnalysisResult {
 				avgLinesPerFile: 0,
 			}
 		}
-		byLanguage[stat.language].files++
-		byLanguage[stat.language].lines += stat.lines
-		byLanguage[stat.language].size += stat.size
+		const langStat = byLanguage[stat.language]
+		if (langStat) {
+			langStat.files++
+			langStat.lines += stat.lines
+			langStat.size += stat.size
+		}
 
 		// By category
 		const category = getCategory(stat.path)
@@ -175,7 +179,10 @@ function analyzeFixtures(): AnalysisResult {
 
 	// Calculate averages
 	for (const lang in byLanguage) {
-		byLanguage[lang].avgLinesPerFile = Math.round(byLanguage[lang].lines / byLanguage[lang].files)
+		const langStat = byLanguage[lang]
+		if (langStat && langStat.files > 0) {
+			langStat.avgLinesPerFile = Math.round(langStat.lines / langStat.files)
+		}
 	}
 
 	const totalLines = fileStats.reduce((sum, f) => sum + f.lines, 0)

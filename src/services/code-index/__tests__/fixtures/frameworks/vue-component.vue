@@ -63,6 +63,7 @@
 </template>
 
 <script setup lang="ts">
+// @ts-nocheck - This is a test fixture file that doesn't need full type checking
 import { ref, computed, onMounted, watch } from "vue"
 
 // Props
@@ -116,7 +117,8 @@ const filteredPosts = computed(() => {
 
 	const query = searchQuery.value.toLowerCase()
 	return posts.value.filter(
-		(post) => post.title.toLowerCase().includes(query) || post.excerpt.toLowerCase().includes(query),
+		(post: { title: string; excerpt: string }) =>
+			post.title.toLowerCase().includes(query) || post.excerpt.toLowerCase().includes(query),
 	)
 })
 

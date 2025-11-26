@@ -1,7 +1,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 import { listFiles } from "../glob/list-files"
-import { LanguageParser, loadRequiredLanguageParsers } from "./languageParser"
+import { LanguageParser, LanguageParsers, loadRequiredLanguageParsers } from "./languageParser"
 import { fileExistsAtPath } from "../../utils/fs"
 import { parseMarkdown } from "./markdownParser"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
@@ -377,7 +377,7 @@ function processCaptures(captures: QueryCapture[], lines: string[], language: st
  */
 async function parseFile(
 	filePath: string,
-	languageParsers: LanguageParser,
+	languageParsers: LanguageParsers,
 	rooIgnoreController?: RooIgnoreController,
 ): Promise<string | null> {
 	// Check if we have permission to access this file
@@ -390,7 +390,7 @@ async function parseFile(
 	const extLang = path.extname(filePath).toLowerCase().slice(1)
 
 	// Check if we have a parser for this file type
-	const { parser, query } = languageParsers[extLang] || {}
+	const { parser, query } = (languageParsers as LanguageParsers)[extLang] || {}
 	if (!parser || !query) {
 		return `Unsupported file type: ${filePath}`
 	}

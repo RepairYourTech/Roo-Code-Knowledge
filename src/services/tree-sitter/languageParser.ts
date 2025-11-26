@@ -1,200 +1,89 @@
 import * as path from "path"
-import * as fs from "fs"
-import { Parser as ParserT, Language as LanguageT, Query as QueryT } from "web-tree-sitter"
-import { logger } from "../shared/logger"
-import { MetricsCollector } from "../code-index/utils/metrics-collector"
+import * as vscode from "vscode"
 import { getWasmDirectory } from "./get-wasm-directory"
 
-// Helper function to check if we're in development mode
-const isDevelopment = process.env.NODE_ENV === "development"
-
-// Helper function to check strict WASM loading mode
-function getStrictWasmLoading(): boolean {
-	return (
-		process.env.ROO_CODE_STRICT_WASM_LOADING === "true" ||
-		(isDevelopment && process.env.ROO_CODE_STRICT_WASM_LOADING !== "false")
-	)
+// Define MetricsCollector interface
+interface MetricsCollector {
+	recordParserMetric?: (
+		extension: string,
+		status:
+			| "loadAttempt"
+			| "loadSuccess"
+			| "loadFailure"
+			| "parseAttempt"
+			| "parseSuccess"
+			| "parseFailed"
+			| "captures"
+			| "fallback",
+		count?: number,
+		error?: string,
+	) => void
 }
-import {
-	javascriptQuery,
-	typescriptQuery,
-	tsxQuery,
-	pythonQuery,
-	rustQuery,
-	goQuery,
-	cppQuery,
-	cQuery,
-	csharpQuery,
-	rubyQuery,
-	javaQuery,
-	phpQuery,
-	htmlQuery,
-	swiftQuery,
-	kotlinQuery,
-	cssQuery,
-	ocamlQuery,
-	solidityQuery,
-	tomlQuery,
-	xmlQuery,
-	yamlQuery,
-	vueQuery,
-	luaQuery,
-	systemrdlQuery,
-	tlaPlusQuery,
-	zigQuery,
-	embeddedTemplateQuery,
-	elispQuery,
-	elixirQuery,
-	scalaQuery,
-} from "./queries"
 
 export interface LanguageParser {
-	[key: string]: {
-		parser: ParserT
-		query: QueryT
-		language: LanguageT
-	}
+	parser: any
+	query: any
+	language: any
+}
+
+// Type for indexed collection of language parsers
+export interface LanguageParsers {
+	[key: string]: LanguageParser
+}
+
+let hasRunDiagnostics = false
+let languageParserMap: { [key: string]: LanguageParser } = {}
+
+function getStrictWasmLoading(): boolean {
+	const config = vscode.workspace.getConfiguration("roo-code")
+	return config.get("treeSitterStrictWasmLoading", false)
 }
 
 async function loadLanguage(langName: string, sourceDirectory?: string) {
-	const baseDir = sourceDirectory || getWasmDirectory()
-	const wasmPath = path.join(baseDir, `tree-sitter-${langName}.wasm`)
-
-	const strictWasmLoading = getStrictWasmLoading()
-
-	// Log the full WASM path before attempting to load
-	logger.debug(`Attempting to load language WASM: ${wasmPath}`, "LanguageParser")
-
-	// Check if WASM file exists before attempting to load it
-	if (!fs.existsSync(wasmPath)) {
-		const errorMessage = `WASM file not found: ${wasmPath}`
-		const downloadInstructions =
-			"Run 'Download Tree-sitter WASM Files' command or execute 'pnpm download-wasms' to fix this issue"
-
-		logger.error(errorMessage, "LanguageParser")
-
-		// Add prominent warning with download instructions
-		if (isDevelopment) {
-			logger.error(`🚨 DEVELOPMENT MODE: Missing WASM file detected!`, "LanguageParser")
-			logger.error(`   ${downloadInstructions}`, "LanguageParser")
-			logger.error(`   WASM directory: ${baseDir}`, "LanguageParser")
-		} else {
-			logger.warn(`${downloadInstructions}`, "LanguageParser")
-		}
-
-		if (strictWasmLoading) {
-			throw new Error(`${errorMessage}. ${downloadInstructions}`)
-		} else {
-			logger.warn(
-				`Graceful degradation: Skipping language ${langName} due to missing WASM file. ${downloadInstructions}`,
-				"LanguageParser",
-			)
-			return null // Return null to indicate language couldn't be loaded
-		}
-	}
-
 	try {
-		const { Language } = require("web-tree-sitter")
-		const language = await Language.load(wasmPath)
-		logger.debug(`Successfully loaded language: ${langName}`, "LanguageParser")
-		return language
-	} catch (error) {
-		const errorMessage = `Failed to load language ${langName}: ${error instanceof Error ? error.message : error}`
-		const downloadInstructions =
-			"Run 'Download Tree-sitter WASM Files' command or execute 'pnpm download-wasms' to fix this issue"
+		const wasmDirectory = getWasmDirectory()
+		const { Parser } = require("web-tree-sitter")
 
-		logger.error(errorMessage, "LanguageParser")
+		// For development or when sourceDirectory is provided, try to load from local path
+		if (process.env.NODE_ENV === "development" || sourceDirectory) {
+			const localPath = sourceDirectory || wasmDirectory
+			const languagePath = path.join(localPath, `${langName}.wasm`)
 
-		// Add download instructions for loading errors too
-		if (isDevelopment) {
-			logger.error(`🚨 DEVELOPMENT MODE: WASM loading error detected!`, "LanguageParser")
-			logger.error(`   ${downloadInstructions}`, "LanguageParser")
-			logger.error(`   WASM path: ${wasmPath}`, "LanguageParser")
-		} else {
-			logger.warn(`${downloadInstructions}`, "LanguageParser")
+			try {
+				const language = await Parser.Language.load(languagePath)
+				return language
+			} catch (error) {
+				// Fall back to node_modules if local loading fails
+				console.warn(`Failed to load ${langName}.wasm from ${languagePath}:`, error)
+			}
 		}
 
-		if (strictWasmLoading) {
-			throw new Error(`${errorMessage}. ${downloadInstructions}`)
-		} else {
-			logger.warn(
-				`Graceful degradation: Skipping language ${langName} due to loading error. ${downloadInstructions}`,
-				"LanguageParser",
+		// Try loading from node_modules
+		try {
+			const packagePath = require.resolve(
+				`@tree-sitter-grammars/tree-sitter-${langName}/tree-sitter-${langName}.wasm`,
 			)
-			return null // Return null to indicate language couldn't be loaded
+			const language = await Parser.Language.load(packagePath)
+			return language
+		} catch (error) {
+			// Try alternative package name
+			const altPackagePath = require.resolve(`tree-sitter-${langName}/tree-sitter-${langName}.wasm`)
+			const language = await Parser.Language.load(altPackagePath)
+			return language
 		}
+	} catch (error) {
+		console.error(`Failed to load language ${langName}:`, error)
+		return null
 	}
 }
 
-let isParserInitialized = false
-let hasRunDiagnostics = false
-let languageParserMap: LanguageParser = {}
-
-/**
- * Verifies that all required WASM files exist in the specified directory
- * @param sourceDirectory Directory to check for WASM files
- */
-function verifyWasmFiles(sourceDirectory?: string): void {
-	const baseDir = sourceDirectory || getWasmDirectory()
-	logger.debug(`Verifying WASM files in directory: ${baseDir}`, "LanguageParser")
-
-	try {
-		const files = fs.readdirSync(baseDir)
-		const wasmFiles = files.filter((file) => file.endsWith(".wasm"))
-
-		if (wasmFiles.length === 0) {
-			logger.warn(`No WASM files found in ${baseDir}`, "LanguageParser")
-		} else {
-			logger.debug(`Found ${wasmFiles.length} WASM files: ${wasmFiles.join(", ")}`, "LanguageParser")
-		}
-	} catch (error) {
-		logger.error(
-			`Error reading directory ${baseDir}: ${error instanceof Error ? error.message : error}`,
-			"LanguageParser",
-		)
-	}
-}
-
-/**
- * Diagnostic function to check WASM setup and return a report
- * @param sourceDirectory Directory to check for WASM files
- * @returns Diagnostic report with WASM file status
- */
-function diagnoseWasmSetup(sourceDirectory?: string) {
-	const baseDir = sourceDirectory || getWasmDirectory()
-	const report: {
-		wasmDirectory: string
-		mainWasmExists: boolean
-		languageWasmsFound: string[]
-		missingWasms: string[]
-	} = {
-		wasmDirectory: baseDir,
-		mainWasmExists: false,
-		languageWasmsFound: [],
-		missingWasms: [],
-	}
-
-	logger.debug(`Running WASM diagnostics in directory: ${baseDir}`, "LanguageParser")
-
-	try {
-		const files = fs.readdirSync(baseDir)
-		const allWasmFiles = files.filter((file) => file.endsWith(".wasm"))
-
-		// Check for main tree-sitter.wasm
-		report.mainWasmExists = files.includes("tree-sitter.wasm")
-
-		// Find language-specific WASM files
-		report.languageWasmsFound = allWasmFiles.filter(
-			(file) => file !== "tree-sitter.wasm" && file.startsWith("tree-sitter-"),
-		)
-
-		// List all WASM files found
-		logger.debug(`All WASM files found: ${allWasmFiles.join(", ")}`, "LanguageParser")
-		logger.debug(`Main tree-sitter.wasm exists: ${report.mainWasmExists}`, "LanguageParser")
-		logger.debug(`Language WASM files found: ${report.languageWasmsFound.join(", ")}`, "LanguageParser")
-
-		// Check for expected language WASMs that might be missing
-		const expectedLanguages = [
+function diagnoseWasmSetup(_sourceDirectory?: string) {
+	const report = {
+		wasmDirectoryExists: false,
+		wasmDirectory: getWasmDirectory(),
+		wasmFiles: [] as string[],
+		missingWasms: [] as string[],
+		expectedLanguages: [
 			"javascript",
 			"typescript",
 			"tsx",
@@ -207,10 +96,10 @@ function diagnoseWasmSetup(sourceDirectory?: string) {
 			"ruby",
 			"java",
 			"php",
-			"html",
 			"swift",
 			"kotlin",
 			"css",
+			"html",
 			"ocaml",
 			"scala",
 			"solidity",
@@ -222,1322 +111,405 @@ function diagnoseWasmSetup(sourceDirectory?: string) {
 			"systemrdl",
 			"tlaplus",
 			"zig",
-			"embedded_template",
+			"ejs",
+			"erb",
 			"elisp",
 			"elixir",
-		]
-
-		expectedLanguages.forEach((lang) => {
-			const expectedFile = `tree-sitter-${lang}.wasm`
-			if (!allWasmFiles.includes(expectedFile)) {
-				report.missingWasms.push(expectedFile)
-			}
-		})
-
-		if (report.missingWasms.length > 0) {
-			logger.warn(`Missing expected WASM files: ${report.missingWasms.join(", ")}`, "LanguageParser")
-		} else {
-			logger.debug(`All expected language WASM files are present`, "LanguageParser")
-		}
-	} catch (error) {
-		logger.error(
-			`Error during WASM diagnostics: ${error instanceof Error ? error.message : error}`,
-			"LanguageParser",
-		)
+		],
 	}
 
-	logger.debug(`WASM diagnostics complete`, "LanguageParser")
+	try {
+		const fs = require("fs")
+
+		// Check if WASM directory exists
+		try {
+			const stats = fs.statSync(report.wasmDirectory)
+			report.wasmDirectoryExists = stats.isDirectory()
+		} catch (error) {
+			report.wasmDirectoryExists = false
+		}
+
+		// List existing WASM files
+		if (report.wasmDirectoryExists) {
+			try {
+				report.wasmFiles = fs.readdirSync(report.wasmDirectory).filter((file: string) => file.endsWith(".wasm"))
+			} catch (error) {
+				report.wasmFiles = []
+			}
+		}
+
+		// Check for missing WASM files
+		if (report.wasmDirectoryExists) {
+			report.expectedLanguages.forEach((lang) => {
+				const expectedFile = `${lang}.wasm`
+				if (!report.wasmFiles.includes(expectedFile)) {
+					report.missingWasms.push(expectedFile)
+				}
+			})
+		}
+
+		// Additional diagnostic info
+		try {
+			const webTreeSitterPath = require.resolve("web-tree-sitter")
+			report.wasmFiles.push(`web-tree-sitter found at: ${webTreeSitterPath}`)
+		} catch (error) {
+			report.missingWasms.push("web-tree-sitter package not found")
+		}
+	} catch (error) {
+		report.missingWasms.push(`Error during diagnosis: ${error}`)
+	}
+
 	return report
 }
 
-/*
-Using node bindings for tree-sitter is problematic in vscode extensions
-because of incompatibility with electron. Going the .wasm route has the
-advantage of not having to build for multiple architectures.
-
-We use web-tree-sitter and tree-sitter-wasms which provides auto-updating
-prebuilt WASM binaries for tree-sitter's language parsers.
-
-This function loads WASM modules for relevant language parsers based on input files:
-1. Extracts unique file extensions
-2. Maps extensions to language names
-3. Loads corresponding WASM files (containing grammar rules)
-4. Uses WASM modules to initialize tree-sitter parsers
-
-This approach optimizes performance by loading only necessary parsers once for all relevant files.
-
-Sources:
-- https://github.com/tree-sitter/node-tree-sitter/issues/169
-- https://github.com/tree-sitter/node-tree-sitter/issues/168
-- https://github.com/Gregoor/tree-sitter-wasms/blob/main/README.md
-- https://github.com/tree-sitter/tree-sitter/blob/master/lib/binding_web/README.md
-- https://github.com/tree-sitter/tree-sitter/blob/master/lib/binding_web/test/query-test.js
-*/
 export async function loadRequiredLanguageParsers(
 	filesToParse: string[],
 	sourceDirectory?: string,
-	metricsCollector?: MetricsCollector,
-) {
-	const { Parser, Query } = require("web-tree-sitter")
+	_metricsCollector?: MetricsCollector,
+): Promise<{ [key: string]: LanguageParser }> {
+	const { Parser } = require("web-tree-sitter")
 
 	const strictWasmLoading = getStrictWasmLoading()
 
 	// Run diagnostics once before initializing parsers
 	if (!hasRunDiagnostics) {
-		const diagnostics = diagnoseWasmSetup(getWasmDirectory())
-
 		// If critical WASM files are missing, handle based on strict mode
-		if (!diagnostics.mainWasmExists) {
-			const downloadInstructions =
-				"Run 'Download Tree-sitter WASM Files' command or execute 'pnpm download-wasms' to fix this issue"
-			const errorMessage = `Critical setup error: tree-sitter.wasm not found in ${diagnostics.wasmDirectory}. ${downloadInstructions}`
+		const downloadInstructions = `Missing tree-sitter WASM files in ${getWasmDirectory()}.
+Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WASM Files' to install them.`
 
-			logger.error(errorMessage, "LanguageParser")
-
-			// Add prominent development warnings
-			if (isDevelopment) {
-				logger.error(`🚨 DEVELOPMENT MODE: Critical WASM files missing!`, "LanguageParser")
-				logger.error(`   ${downloadInstructions}`, "LanguageParser")
-				logger.error(`   WASM directory: ${diagnostics.wasmDirectory}`, "LanguageParser")
-				logger.error(`   Missing files: ${diagnostics.missingWasms.join(", ")}`, "LanguageParser")
-			} else {
-				logger.warn(downloadInstructions, "LanguageParser")
-			}
-
-			if (strictWasmLoading) {
-				// In strict mode, throw an error to fail fast
-				throw new Error(errorMessage)
-			} else {
-				// In non-strict mode, log a warning and return empty parsers for graceful degradation
-				logger.warn(
-					`Graceful degradation: Operating without tree-sitter parsers due to missing WASM files. ${downloadInstructions}`,
-					"LanguageParser",
-				)
-				hasRunDiagnostics = true
-				return {} // Return empty LanguageParser map
-			}
+		if (strictWasmLoading) {
+			throw new Error(`Strict mode enabled. ${downloadInstructions}`)
+		} else {
+			console.warn(downloadInstructions)
 		}
 
 		hasRunDiagnostics = true
 	}
 
-	if (!isParserInitialized) {
-		try {
-			await Parser.init({
-				locateFile(scriptName: string, scriptDirectory: string) {
-					const wasmPath = path.join(getWasmDirectory(), "tree-sitter.wasm")
-					logger.debug(`Locating tree-sitter.wasm at ${wasmPath}`, "LanguageParser")
-					return wasmPath
-				},
-			})
-			isParserInitialized = true
-			logger.info("Parser initialized successfully - tree-sitter.wasm loaded", "LanguageParser")
-		} catch (error) {
-			const downloadInstructions =
-				"Run 'Download Tree-sitter WASM Files' command or execute 'pnpm download-wasms' to fix this issue"
-			const errorMessage = `Error initializing parser: ${error instanceof Error ? error.message : error}. ${downloadInstructions}`
+	// Extract unique extensions from files to parse
+	const extensionsToLoad = new Set(filesToParse.map((file) => path.extname(file).toLowerCase().slice(1)))
+	const parsers: { [key: string]: LanguageParser } = {}
 
-			logger.error(errorMessage, "LanguageParser")
-
-			// Add development-specific error details
-			if (isDevelopment) {
-				logger.error(`🚨 DEVELOPMENT MODE: Parser initialization failed!`, "LanguageParser")
-				logger.error(`   ${downloadInstructions}`, "LanguageParser")
-				logger.error(
-					`   Attempted WASM path: ${path.join(getWasmDirectory(), "tree-sitter.wasm")}`,
-					"LanguageParser",
-				)
-			}
-
-			throw new Error(errorMessage)
-		}
+	// Map file extensions to language names
+	const extensionToLanguage: { [key: string]: string } = {
+		js: "javascript",
+		jsx: "javascript",
+		json: "javascript",
+		ts: "typescript",
+		tsx: "tsx",
+		py: "python",
+		rs: "rust",
+		go: "go",
+		cpp: "cpp",
+		hpp: "cpp",
+		c: "c",
+		h: "c",
+		cs: "c_sharp",
+		rb: "ruby",
+		java: "java",
+		php: "php",
+		swift: "swift",
+		kt: "kotlin",
+		kts: "kotlin",
+		css: "css",
+		html: "html",
+		ml: "ocaml",
+		mli: "ocaml",
+		scala: "scala",
+		sol: "solidity",
+		toml: "toml",
+		xml: "xml",
+		yaml: "yaml",
+		yml: "yaml",
+		vue: "vue",
+		lua: "lua",
+		rdl: "systemrdl",
+		tla: "tlaplus",
+		zig: "zig",
+		ejs: "ejs",
+		erb: "erb",
+		el: "elisp",
+		ex: "elixir",
+		exs: "elixir",
 	}
 
-	const extensionsToLoad = new Set(filesToParse.map((file) => path.extname(file).toLowerCase().slice(1)))
-	const parsers: LanguageParser = {}
+	// Initialize Parser once
+	await Parser.init({
+		locateFile: (scriptName: string, _scriptDirectory: string) => {
+			return path.join(getWasmDirectory(), scriptName)
+		},
+	})
 
-	// Log which extensions are being loaded
-	logger.info(`Loading parsers for extensions: ${Array.from(extensionsToLoad).join(", ")}`, "LanguageParser")
-
+	// Load language parsers based on file extensions
 	for (const ext of Array.from(extensionsToLoad)) {
-		let language: LanguageT | null = null
-		let query: QueryT | null = null
-		let parserKey = ext // Default to using extension as key
+		const parserKey = extensionToLanguage[ext] || ext
+
+		// Skip if already loaded
+		if (languageParserMap[parserKey]) {
+			parsers[parserKey] = languageParserMap[parserKey]
+			continue
+		}
 
 		try {
-			// Log before attempting to load each language
-			logger.debug(`Loading parser for extension: ${ext}`, "LanguageParser")
-
-			// Record parser load attempt if metrics collector is provided
-			metricsCollector?.recordParserMetric(ext, "loadAttempt")
-
-			switch (ext) {
-				case "js":
-				case "jsx":
-				case "json":
-					language = await loadLanguage("javascript", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${javascriptQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, javascriptQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(
-							ext,
-							"loadFailure",
-							1,
-							"Failed to load javascript language",
-						)
-					}
-					break
-				case "ts":
-					language = await loadLanguage("typescript", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${typescriptQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, typescriptQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(
-							ext,
-							"loadFailure",
-							1,
-							"Failed to load typescript language",
-						)
-					}
-					break
-				case "tsx":
-					language = await loadLanguage("tsx", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${tsxQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, tsxQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load tsx language")
-					}
-					break
-				case "py":
-					language = await loadLanguage("python", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${pythonQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, pythonQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load python language")
-					}
-					break
-				case "rs":
-					language = await loadLanguage("rust", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${rustQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, rustQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load rust language")
-					}
-					break
-				case "go":
-					language = await loadLanguage("go", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${goQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, goQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load go language")
-					}
-					break
-				case "cpp":
-				case "hpp":
-					language = await loadLanguage("cpp", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${cppQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, cppQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load cpp language")
-					}
-					break
-				case "c":
-				case "h":
-					language = await loadLanguage("c", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${cQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, cQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load c language")
-					}
-					break
-				case "cs":
-					language = await loadLanguage("c_sharp", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${csharpQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, csharpQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load c_sharp language")
-					}
-					break
-				case "rb":
-					language = await loadLanguage("ruby", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${rubyQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, rubyQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load ruby language")
-					}
-					break
-				case "java":
-					language = await loadLanguage("java", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${javaQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, javaQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load java language")
-					}
-					break
-				case "php":
-					language = await loadLanguage("php", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${phpQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, phpQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load php language")
-					}
-					break
-				case "swift":
-					language = await loadLanguage("swift", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${swiftQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, swiftQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load swift language")
-					}
-					break
-				case "kt":
-				case "kts":
-					language = await loadLanguage("kotlin", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${kotlinQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, kotlinQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load kotlin language")
-					}
-					break
-				case "css":
-					language = await loadLanguage("css", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${cssQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, cssQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load css language")
-					}
-					break
-				case "html":
-					language = await loadLanguage("html", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${htmlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, htmlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load html language")
-					}
-					break
-				case "ml":
-				case "mli":
-					language = await loadLanguage("ocaml", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${ocamlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, ocamlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load ocaml language")
-					}
-					break
-				case "scala":
-					language = await loadLanguage("scala", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${scalaQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, scalaQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load scala language")
-					}
-					break
-				case "sol":
-					language = await loadLanguage("solidity", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${solidityQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, solidityQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load solidity language")
-					}
-					break
-				case "toml":
-					language = await loadLanguage("toml", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${tomlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, tomlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load toml language")
-					}
-					break
-				case "xml":
-					language = await loadLanguage("xml", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${xmlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, xmlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load xml language")
-					}
-					break
-				case "yaml":
-				case "yml":
-					language = await loadLanguage("yaml", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${yamlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, yamlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load yaml language")
-					}
-					break
-				case "vue":
-					language = await loadLanguage("vue", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${vueQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, vueQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load vue language")
-					}
-					break
-				case "lua":
-					language = await loadLanguage("lua", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${luaQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, luaQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load lua language")
-					}
-					break
-				case "rdl":
-					language = await loadLanguage("systemrdl", sourceDirectory)
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${systemrdlQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, systemrdlQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load systemrdl language")
-					}
-					break
-				case "tla":
-					language = await loadLanguage("tlaplus", getWasmDirectory())
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${tlaPlusQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, tlaPlusQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load tlaplus language")
-					}
-					break
-				case "zig":
-					language = await loadLanguage("zig", getWasmDirectory())
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${zigQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, zigQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load zig language")
-					}
-					break
-				case "ejs":
-				case "erb":
-					parserKey = "embedded_template" // Use same key for both extensions.
-					language = await loadLanguage("embedded_template", getWasmDirectory())
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${parserKey}: ${embeddedTemplateQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, embeddedTemplateQuery)
-							logger.debug(
-								`Successfully created query for ${parserKey} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${parserKey}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(parserKey, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(
-							parserKey,
-							"loadFailure",
-							1,
-							"Failed to load embedded_template language",
-						)
-					}
-					break
-				case "el":
-					language = await loadLanguage("elisp", getWasmDirectory())
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${elispQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, elispQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load elisp language")
-					}
-					break
-				case "ex":
-				case "exs":
-					language = await loadLanguage("elixir", getWasmDirectory())
-					if (language) {
-						try {
-							logger.debug(
-								`Creating query for ${ext}: ${elixirQuery.length} chars, attempting to parse...`,
-								"LanguageParser",
-							)
-							query = new Query(language, elixirQuery)
-							logger.debug(
-								`Successfully created query for ${ext} with ${query!.patternCount} patterns`,
-								"LanguageParser",
-							)
-						} catch (queryError) {
-							logger.error(
-								`Query creation failed for ${ext}: ${queryError instanceof Error ? queryError.message : queryError}`,
-								"LanguageParser",
-							)
-							throw queryError
-						}
-						metricsCollector?.recordParserMetric(ext, "loadSuccess")
-					} else {
-						metricsCollector?.recordParserMetric(ext, "loadFailure", 1, "Failed to load elixir language")
-					}
-					break
-				default:
-					logger.warn(`Unsupported language extension: ${ext}. Skipping parser creation.`, "LanguageParser")
-					continue // Skip to the next extension without adding to parsers
-			}
-
-			// Skip if language couldn't be loaded (graceful degradation)
-			if (!language || !query) {
-				logger.warn(
-					`Graceful degradation: Skipping parser for extension '${ext}' due to missing language or query`,
-					"LanguageParser",
-				)
-				continue
+			const language = await loadLanguage(parserKey, sourceDirectory)
+			if (!language) {
+				if (strictWasmLoading) {
+					throw new Error(`Failed to load language: ${parserKey}`)
+				} else {
+					console.warn(`Failed to load language: ${parserKey}`)
+					continue
+				}
 			}
 
 			const parser = new Parser()
 			parser.setLanguage(language)
+
+			// Create basic query for each language
+			let query
+			try {
+				switch (ext) {
+					case "json":
+						query = language.query("(object (_) @pair)")
+						break
+					case "ts":
+					case "tsx":
+						query = language.query(`
+							(function_declaration name: (identifier) @function-name)
+							(class_declaration name: (identifier) @class-name)
+							(interface_declaration name: (identifier) @interface-name)
+						`)
+						break
+					case "py":
+						query = language.query(`
+							(function_definition name: (identifier) @function-name)
+							(class_definition name: (identifier) @class-name)
+						`)
+						break
+					case "rs":
+						query = language.query(`
+							(function_item name: (identifier) @function-name)
+							(struct_item name: (type_identifier) @struct-name)
+							(enum_item name: (type_identifier) @enum-name)
+						`)
+						break
+					case "go":
+						query = language.query(`
+							(function_declaration name: (identifier) @function-name)
+							(struct_type name: (type_identifier) @struct-name)
+							(interface_type name: (type_identifier) @interface-name)
+						`)
+						break
+					case "cpp":
+					case "hpp":
+						query = language.query(`
+							(function_definition name: (identifier) @function-name)
+							(class_specifier name: (type_identifier) @class-name)
+							(struct_specifier name: (type_identifier) @struct-name)
+						`)
+						break
+					case "c":
+					case "h":
+						query = language.query(`
+							(function_definition name: (identifier) @function-name)
+							(struct_specifier name: (type_identifier) @struct-name)
+						`)
+						break
+					case "cs":
+						query = language.query(`
+							(method_declaration name: (identifier) @method-name)
+							(class_declaration name: (identifier) @class-name)
+							(interface_declaration name: (identifier) @interface-name)
+						`)
+						break
+					case "rb":
+						query = language.query(`
+							(method name: (identifier) @method-name)
+							(class name: (constant) @class-name)
+							(module name: (constant) @module-name)
+						`)
+						break
+					case "java":
+						query = language.query(`
+							(method_declaration name: (identifier) @method-name)
+							(class_declaration name: (identifier) @class-name)
+							(interface_declaration name: (identifier) @interface-name)
+						`)
+						break
+					case "php":
+						query = language.query(`
+							(function_definition name: (name) @function-name)
+							(class_declaration name: (name) @class-name)
+							(interface_declaration name: (name) @interface-name)
+						`)
+						break
+					case "swift":
+						query = language.query(`
+							(function_declaration name: (identifier) @function-name)
+							(class_declaration name: (identifier) @class-name)
+							(protocol_declaration name: (identifier) @protocol-name)
+						`)
+						break
+					case "kt":
+					case "kts":
+						query = language.query(`
+							(function_declaration name: (simple_identifier) @function-name)
+							(class_declaration name: (simple_identifier) @class-name)
+							(interface_declaration name: (simple_identifier) @interface-name)
+						`)
+						break
+					case "css":
+						query = language.query(`
+							(rule_set selector: (selectors) @selector)
+							(at_rule) @at-rule
+						`)
+						break
+					case "html":
+						query = language.query(`
+							(element) @element
+							(attribute) @attribute
+						`)
+						break
+					case "ml":
+					case "mli":
+						query = language.query(`
+							(value_definition name: (lower_case_identifier) @function-name)
+							(type_definition name: (type_constructor) @type-name)
+						`)
+						break
+					case "scala":
+						query = language.query(`
+							(function_definition name: (identifier) @function-name)
+							(class_definition name: (identifier) @class-name)
+							(trait_definition name: (identifier) @trait-name)
+						`)
+						break
+					case "sol":
+						query = language.query(`
+							(function_definition name: (identifier) @function-name)
+							(contract_definition name: (identifier) @contract-name)
+							(interface_definition name: (identifier) @interface-name)
+						`)
+						break
+					case "toml":
+						query = language.query(`
+							(pair key: (bare_key) @key)
+							(table (bare_key) @table-name)
+						`)
+						break
+					case "xml":
+						query = language.query(`
+							(element) @element
+							(attribute (attribute_name) @attribute-name)
+						`)
+						break
+					case "yaml":
+					case "yml":
+						query = language.query(`
+							(block_mapping_pair key: (flow_node) @key)
+							(block_node (block_mapping) @mapping)
+						`)
+						break
+					case "vue":
+						query = language.query(`
+							(element) @element
+							(start_tag (tag_name) @tag-name)
+						`)
+						break
+					case "lua":
+						query = language.query(`
+							(function_declaration name: (identifier) @function-name)
+							(local_variable_declaration (variable_list (identifier) @variable-name))
+						`)
+						break
+					case "rdl":
+						query = language.query(`
+							(signal_declaration name: (identifier) @signal-name)
+							(property_declaration name: (identifier) @property-name)
+						`)
+						break
+					case "tla":
+						query = language.query(`
+							(definition name: (identifier) @definition-name)
+							(module_definition name: (identifier) @module-name)
+						`)
+						break
+					case "zig":
+						query = language.query(`
+							(fn_proto name: (identifier) @function-name)
+							(struct_decl name: (identifier) @struct-name)
+						`)
+						break
+					case "erb":
+						query = language.query(`
+							(erb_directive) @directive
+							(erb_statement) @statement
+							(erb_expression) @expression
+						`)
+						break
+					case "el":
+						query = language.query(`
+							(defun name: (symbol) @function-name)
+							(defvar name: (symbol) @variable-name)
+						`)
+						break
+					case "exs":
+						query = language.query(`
+							(function name: (identifier) @function-name)
+							(defmodule name: (alias) @module-name)
+						`)
+						break
+					default:
+						// Create a generic query for unknown languages
+						query = language.query(`
+							(identifier) @identifier
+							(string_literal) @string
+							(comment) @comment
+						`)
+				}
+			} catch (queryError) {
+				console.warn(`Failed to create query for ${parserKey}:`, queryError)
+				// Create a minimal fallback query
+				try {
+					query = language.query(`(identifier) @identifier`)
+				} catch (fallbackError) {
+					console.warn(`Failed to create fallback query for ${parserKey}:`, fallbackError)
+					// Continue without a query
+					query = null
+				}
+			}
+
+			parser.setLanguage(language)
 			parsers[parserKey] = { parser, query, language }
 			languageParserMap[parserKey] = { parser, query, language }
 
-			// Add query validation diagnostics
-			logger.debug(`Query for ${parserKey} has ${query!.patternCount} patterns`, "LanguageParser")
-			logger.debug(`Query capture names: ${query!.captureNames.join(", ")}`, "LanguageParser")
-
-			// Add a test parse of a simple code snippet to verify the query works
-			try {
-				let testCode = ""
-				switch (parserKey) {
-					case "js":
-					case "jsx":
-					case "json":
-						testCode = "function test() { return true; }"
-						break
-					case "ts":
-					case "tsx":
-						testCode = "function test(): boolean { return true; }"
-						break
-					case "py":
-						testCode = "def test():\n    return True"
-						break
-					case "rs":
-						testCode = "fn test() -> bool { true }"
-						break
-					case "go":
-						testCode = "func test() bool { return true }"
-						break
-					case "cpp":
-					case "hpp":
-					case "c":
-					case "h":
-						testCode = "bool test() { return true; }"
-						break
-					case "cs":
-						testCode = "bool Test() { return true; }"
-						break
-					case "rb":
-						testCode = "def test\n  true\nend"
-						break
-					case "java":
-						testCode = "boolean test() { return true; }"
-						break
-					case "php":
-						testCode = "<?php function test() { return true; } ?>"
-						break
-					case "swift":
-						testCode = "func test() -> Bool { return true }"
-						break
-					case "kt":
-					case "kts":
-						testCode = "fun test(): Boolean { return true }"
-						break
-					case "css":
-						testCode = ".test { color: red; }"
-						break
-					case "html":
-						testCode = '<div class="test">Test</div>'
-						break
-					case "ml":
-					case "mli":
-						testCode = "let test = true"
-						break
-					case "scala":
-						testCode = "def test: Boolean = true"
-						break
-					case "sol":
-						testCode = "function test() public returns (bool) { return true; }"
-						break
-					case "toml":
-						testCode = "[test]\nkey = true"
-						break
-					case "xml":
-						testCode = '<test attr="true"></test>'
-						break
-					case "yaml":
-					case "yml":
-						testCode = "test:\n  key: true"
-						break
-					case "vue":
-						testCode = "<template><div>Test</div></template>"
-						break
-					case "lua":
-						testCode = "function test() return true end"
-						break
-					case "rdl":
-						testCode = "test { }"
-						break
-					case "tla":
-						testCode = "Test == TRUE"
-						break
-					case "zig":
-						testCode = "fn test() bool { return true; }"
-						break
-					case "embedded_template":
-						testCode = "<%= test %>"
-						break
-					case "el":
-						testCode = "(defun test () t)"
-						break
-					case "ex":
-					case "exs":
-						testCode = "def test, do: true"
-						break
-					default:
-						testCode = "test"
-						break
-				}
-
-				const testTree = parser.parse(testCode)
-				const testMatches = query!.matches(testTree)
-				logger.debug(
-					`Query test for ${parserKey}: parsed ${testCode.length} chars, found ${testMatches.length} matches`,
-					"LanguageParser",
-				)
-
-				// Add AST Node Type Validation
-				// Extract node types from query patterns
-				const extractPatternsFromQuery = (queryString: string): string[] => {
-					// Use regex to extract node types from query patterns
-					// Match patterns like "(identifier) @name" or "(function_declaration) @function"
-					const nodeTypePattern = /\(([^@)\s]+)/g
-					const matches = []
-					let match
-
-					// Known S-expression directives and predicates to skip
-					const knownDirectives = new Set([
-						"match?",
-						"eq?",
-						"not-eq?",
-						"any?",
-						"not-any?",
-						"is?",
-						"not-is?",
-						"is-not?",
-						"set!",
-						"set!-dirty",
-						"lua-match?",
-						"pred!",
-					])
-
-					while ((match = nodeTypePattern.exec(queryString)) !== null) {
-						const candidate = match[1]
-
-						// Skip tokens that start with # (predicates)
-						if (candidate.startsWith("#")) {
-							continue
+			// Test the parser on a simple snippet to ensure it works
+			if (query && query !== null) {
+				try {
+					const testCode = getTestCodeForLanguage(parserKey)
+					if (testCode) {
+						const testTree = parser.parse(testCode)
+						if (query) {
+							query.captures(testTree.rootNode)
 						}
-
-						// Skip known directives
-						if (knownDirectives.has(candidate)) {
-							continue
-						}
-
-						matches.push(candidate)
+						// If there are no captures, it might be fine depending on the test code
 					}
-					return Array.from(new Set(matches)) // Remove duplicates
+				} catch (testError) {
+					console.warn(`Parser test failed for ${parserKey}, but continuing:`, testError)
 				}
-
-				// Get the query string based on the language
-				let queryString = ""
-				switch (parserKey) {
-					case "js":
-					case "jsx":
-					case "json":
-						queryString = javascriptQuery
-						break
-					case "ts":
-						queryString = typescriptQuery
-						break
-					case "tsx":
-						queryString = tsxQuery
-						break
-					case "py":
-						queryString = pythonQuery
-						break
-					case "rs":
-						queryString = rustQuery
-						break
-					case "go":
-						queryString = goQuery
-						break
-					case "cpp":
-					case "hpp":
-						queryString = cppQuery
-						break
-					case "c":
-					case "h":
-						queryString = cQuery
-						break
-					case "cs":
-						queryString = csharpQuery
-						break
-					case "rb":
-						queryString = rubyQuery
-						break
-					case "java":
-						queryString = javaQuery
-						break
-					case "php":
-						queryString = phpQuery
-						break
-					case "swift":
-						queryString = swiftQuery
-						break
-					case "kt":
-					case "kts":
-						queryString = kotlinQuery
-						break
-					case "css":
-						queryString = cssQuery
-						break
-					case "html":
-						queryString = htmlQuery
-						break
-					case "ml":
-					case "mli":
-						queryString = ocamlQuery
-						break
-					case "scala":
-						queryString = scalaQuery // Use proper Scala query
-						break
-					case "sol":
-						queryString = solidityQuery
-						break
-					case "toml":
-						queryString = tomlQuery
-						break
-					case "xml":
-						queryString = xmlQuery
-						break
-					case "yaml":
-					case "yml":
-						queryString = yamlQuery
-						break
-					case "vue":
-						queryString = vueQuery
-						break
-					case "lua":
-						queryString = luaQuery
-						break
-					case "rdl":
-						queryString = systemrdlQuery
-						break
-					case "tla":
-						queryString = tlaPlusQuery
-						break
-					case "zig":
-						queryString = zigQuery
-						break
-					case "embedded_template":
-						queryString = embeddedTemplateQuery
-						break
-					case "el":
-						queryString = elispQuery
-						break
-					case "ex":
-					case "exs":
-						queryString = elixirQuery
-						break
-					default:
-						queryString = ""
-						break
-				}
-
-				// Parse the test code snippet and extract all node types
-				const nodeTypesInAST = new Set<string>()
-				const nodeTypeCounts = new Map<string, number>()
-
-				const traverseAST = (node: any, depth: number = 0) => {
-					// Guard against pathological trees with a recursion depth cap
-					// This assumes the small testCode snippets defined in the switch above
-					const MAX_RECURSION_DEPTH = 1000
-					if (depth > MAX_RECURSION_DEPTH) {
-						logger.warn(
-							`Maximum recursion depth (${MAX_RECURSION_DEPTH}) exceeded during AST traversal. Skipping deeper nodes.`,
-							"LanguageParser",
-						)
-						return
-					}
-
-					nodeTypesInAST.add(node.type)
-					nodeTypeCounts.set(node.type, (nodeTypeCounts.get(node.type) || 0) + 1)
-					node.children.forEach((child: any) => traverseAST(child, depth + 1))
-				}
-				traverseAST(testTree.rootNode)
-
-				// Compare query patterns against actual node types
-				const queryPatterns = extractPatternsFromQuery(queryString)
-				const missingNodeTypes = queryPatterns.filter((pattern) => !nodeTypesInAST.has(pattern))
-
-				if (missingNodeTypes.length > 0) {
-					// Note: "missing node types" are heuristic and may include non-critical patterns
-					// This doesn't necessarily indicate a hard failure, as some patterns might only match
-					// in specific code contexts not covered by our simple test snippets
-					logger.warn(
-						`Query for ${parserKey} references node types not found in test AST: ${missingNodeTypes.join(", ")}`,
-						"LanguageParser",
-					)
-				}
-
-				// Log the top 10 most common node types found in the test parse
-				const sortedNodeTypes = Array.from(nodeTypeCounts.entries())
-					.sort((a, b) => b[1] - a[1])
-					.slice(0, 10)
-
-				logger.debug(
-					`Top 10 most common node types in test AST for ${parserKey}: ${sortedNodeTypes.map(([type, count]) => `${type} (${count})`).join(", ")}`,
-					"LanguageParser",
-				)
-				logger.debug(
-					`Node types in test AST for ${parserKey}: ${Array.from(nodeTypesInAST).join(", ")}`,
-					"LanguageParser",
-				)
-			} catch (testError) {
-				logger.warn(
-					`Query test failed for ${parserKey}: ${testError instanceof Error ? testError.message : testError}`,
-					"LanguageParser",
-				)
 			}
-
-			// Log successful parser creation
-			logger.debug(`Successfully created parser for: ${parserKey}`, "LanguageParser")
 		} catch (error) {
-			// Determine which specific operation failed based on the error and current state
-			let failedOperation = "unknown operation"
-			if (!language) {
-				failedOperation = "language loading"
-			} else if (!query) {
-				failedOperation = "query creation"
-			} else {
-				failedOperation = "parser initialization"
-			}
-
-			const errorMessage = `Failed to load parser for extension '${ext}' during ${failedOperation}: ${error instanceof Error ? error.message : error}`
-			logger.error(errorMessage, "LanguageParser")
-
-			// Add additional context about the failure
-			if (!language) {
-				logger.error(
-					`Language loading failed for ${ext}. This may indicate missing WASM files or incompatible language module.`,
-					"LanguageParser",
-				)
-			} else if (!query) {
-				logger.error(
-					`Query creation failed for ${ext}. This may indicate syntax errors in the query or incompatible query patterns.`,
-					"LanguageParser",
-				)
-			} else {
-				logger.error(
-					`Parser initialization failed for ${ext}. This may indicate issues with parser setup or language binding.`,
-					"LanguageParser",
-				)
-			}
-
-			// Record parser load failure if metrics collector is provided
-			metricsCollector?.recordParserMetric(ext, "loadFailure", 1, errorMessage)
-
-			const strictWasmLoading = getStrictWasmLoading()
+			console.error(`Failed to load parser for ${parserKey}:`, error)
 			if (strictWasmLoading) {
-				throw new Error(errorMessage)
-			} else {
-				logger.warn(
-					`Graceful degradation: Continuing without parser for extension '${ext}' due to ${failedOperation} failure`,
-					"LanguageParser",
-				)
-				continue // Continue to the next extension instead of throwing
+				throw error
 			}
+			// Continue to the next extension instead of throwing
+			continue
 		}
 	}
 
-	// Log summary of loaded parsers
+	// Log loaded parsers for debugging
 	const loadedParserKeys = Object.keys(parsers)
-	logger.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`, "LanguageParser")
+	console.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`)
 
 	// Final strict-mode check: ensure at least one parser was loaded when we had input files to process
 	if (strictWasmLoading && filesToParse.length > 0 && Object.keys(parsers).length === 0) {
@@ -1551,6 +523,37 @@ Fix: Run 'pnpm download-wasms' or VSCode command 'Download Tree-sitter WASM File
 	}
 
 	return parsers
+}
+
+function getTestCodeForLanguage(parserKey: string): string {
+	const testCases: { [key: string]: string } = {
+		javascript: "function test() { return true; }",
+		typescript: "function test(): boolean { return true; }",
+		python: "def test():\n    return True",
+		rust: "fn test() -> bool { true }",
+		go: "func test() bool { return true }",
+		cpp: "bool test() { return true; }",
+		c: "bool test() { return true; }",
+		c_sharp: "bool Test() { return true; }",
+		ruby: "def test\n  true\nend",
+		java: "boolean test() { return true; }",
+		php: "function test() { return true; }",
+		swift: "func test() -> Bool { return true }",
+		kotlin: "fun test(): Boolean = true",
+		css: ".test { color: red; }",
+		html: '<div class="test">Test</div>',
+		ocaml: "let test = true",
+		scala: "def test: Boolean = true",
+		solidity: "function test() public pure returns (bool) { return true; }",
+		toml: '[test]\nkey = "value"',
+		xml: "<test>content</test>",
+		yaml: "test: true",
+		lua: "function test() return true end",
+		el: "(defun test () t)",
+		elixir: "def test, do: true end",
+	}
+
+	return testCases[parserKey] || ""
 }
 
 /**

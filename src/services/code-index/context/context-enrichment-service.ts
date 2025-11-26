@@ -759,7 +759,7 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 		try {
 			// Load language parser for this file
 			const languageParsers = await loadRequiredLanguageParsers([filePath], getWasmDirectory())
-			const parserInfo = languageParsers[ext]
+			const parserInfo = languageParsers?.[ext]
 
 			if (!parserInfo) {
 				return { headerComments: [], purposeComments: [], todoComments: [] }

@@ -3,7 +3,7 @@ import { createHash } from "crypto"
 import * as path from "path"
 import * as vscode from "vscode"
 import { Node } from "web-tree-sitter"
-import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
+import { LanguageParser, LanguageParsers, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
 import { MetricsCollector } from "../utils/metrics-collector"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
@@ -40,8 +40,8 @@ import { logger } from "../../shared/logger"
  * Implementation of the code parser interface
  */
 export class CodeParser implements ICodeParser {
-	private loadedParsers: LanguageParser = {}
-	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
+	private loadedParsers: LanguageParsers = {}
+	private pendingLoads: Map<string, Promise<LanguageParsers>> = new Map()
 	private lspService?: ILSPService
 	private metricsCollector?: MetricsCollector
 	// Markdown files are now supported using the custom markdown parser
@@ -534,8 +534,8 @@ export class CodeParser implements ICodeParser {
 				const rootChildren = tree.rootNode.children.slice(0, 10)
 				logger.debug(
 					`Root node children types: ${rootChildren
-						.filter((c) => c !== null)
-						.map((c) => c!.type)
+						.filter((c: any) => c !== null)
+						.map((c: any) => c!.type)
 						.join(", ")}`,
 					"CodeParser",
 				)
@@ -683,7 +683,9 @@ export class CodeParser implements ICodeParser {
 
 			// Add comparison: Expected node types in query vs Found node types in tree
 			if (language.query && language.query.captureNames && tree && tree.rootNode) {
-				const expectedNodeTypes = language.query.captureNames.filter((name) => !name.startsWith("@")).join(", ")
+				const expectedNodeTypes = language.query.captureNames
+					.filter((name: string) => !name.startsWith("@"))
+					.join(", ")
 				const actualNodeTypes = new Set<string>()
 				const collectActualTypes = (node: Node) => {
 					actualNodeTypes.add(node.type)

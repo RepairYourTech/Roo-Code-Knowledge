@@ -71,6 +71,7 @@ async function downloadFile(url: string, destPath: string): Promise<void> {
 
 		const request = https.get(url, (response) => {
 			if (response.statusCode !== 200) {
+				file.close()
 				reject(new Error(`HTTP ${response.statusCode}: ${response.statusMessage} for ${url}`))
 				return
 			}
