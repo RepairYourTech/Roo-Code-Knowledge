@@ -281,10 +281,10 @@ export class PipelineParallelizer<T, R> {
 	private isRetryableError(error: Error): boolean {
 		// Network errors, timeouts, and temporary failures are retryable
 		const retryablePatterns = [
-			/ECONNRESET/,
-			/ETIMEDOUT/,
-			/ENOTFOUND/,
-			/ECONNREFUSED/,
+			/ECONNRESET/i,
+			/ETIMEDOUT/i,
+			/ENOTFOUND/i,
+			/ECONNREFUSED/i,
 			/network/i,
 			/timeout/i,
 			/rate limit/i,
@@ -292,7 +292,8 @@ export class PipelineParallelizer<T, R> {
 			/busy/i,
 		]
 
-		const errorMessage = error.message.toLowerCase()
+		// Safely access error.message and convert to lowercase
+		const errorMessage = (error.message || "").toLowerCase()
 		return retryablePatterns.some((pattern) => pattern.test(errorMessage))
 	}
 

@@ -5,21 +5,23 @@ import { ScopeType, UnreachableReason } from "../interfaces/reachability"
 // Mock Node class for testing
 class MockNode {
 	public type: string
+	public name: string
 	public startPosition: { row: number; column: number }
 	public endPosition: { row: number; column: number }
 	public text: string
 	public children: MockNode[] = []
 
-	constructor(type: string, text: string = "", startLine: number = 0) {
+	constructor(type: string, text: string = "", startLine: number = 0, name: string = "") {
 		this.type = type
+		this.name = name
 		this.text = text
 		this.startPosition = { row: startLine, column: 0 }
 		this.endPosition = { row: startLine, column: text.length }
 	}
 
 	childForFieldName(fieldName: string): MockNode | null {
-		// Simple mock implementation
-		return this.children[0] || null
+		// Find the child matching the requested fieldName
+		return this.children.find((child) => child.name === fieldName) || null
 	}
 }
 

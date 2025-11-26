@@ -101,51 +101,58 @@ export default `
 
 ; ===== TESTING FRAMEWORK PATTERNS FOR JAVASCRIPT =====
 
-; Jest/Vitest/Mocha - Test suite and test case patterns
+; Jest/Vitest - test suite definitions
 (call_expression
   function: (identifier) @test.func_name
+  (#match? @test.func_name "^(describe|describe\\\.only|describe\\\.skip|test|it|it\\\.only|it\\\.skip|test\\\.only|test\\\.skip)$")
   arguments: (arguments
-    (string) @test.description
-    [(arrow_function) (function_expression)] @test.callback)
-  (#match? @test.func_name "^(describe|describe\\.only|describe\\.skip|test|it|it\\.only|it\\.skip|test\\.only|test\\.skip)$")) @definition.test_suite
+    (string) @test.suite_name
+    (arrow_function) @test.suite_body
+    (function_expression) @test.suite_body)) @definition.test_suite
 
-; Nested test suites
+; Jest/Vitest - nested test suites
 (call_expression
   function: (identifier) @test.nested_func
+  (#match? @test.nested_func "^(describe|context|suite)$")
   arguments: (arguments
-    (string) @test.nested_description
-    [(arrow_function) (function_expression)] @test.nested_callback)
-  (#match? @test.nested_func "^(describe|context|suite)$")) @definition.nested_test_suite
+    (string) @test.nested_name
+    (arrow_function) @test.nested_body
+    (function_expression) @test.nested_body)) @definition.nested_test_suite
 
-; Test hooks - before/after patterns
+; Jest/Vitest - test hooks
 (call_expression
   function: (identifier) @test.hook_func
+  (#match? @test.hook_func "^(beforeAll|beforeEach|afterAll|afterEach|setup|teardown)$")
   arguments: (arguments
-    [(arrow_function) (function_expression)] @test.hook_callback)
-  (#match? @test.hook_func "^(beforeAll|beforeEach|afterAll|afterEach|setup|teardown)$")) @definition.test_hook
+    (arrow_function) @test.hook_body
+    (function_expression) @test.hook_body)) @definition.test_hook
 
-; Jest/Vitest - expect patterns
+; Jest/Vitest - test cases
 (call_expression
-  function: (identifier) @test.expect_func
-  (#eq? @test.expect_func "expect")
+  function: (identifier) @test.case_func
+  (#match? @test.case_func "^(it|test|expect)$")
   arguments: (arguments
-    (_) @test.expect_value)) @definition.test_expect
+    (string) @test.case_name
+    (arrow_function) @test.case_body
+    (function_expression) @test.case_body)) @definition.test_case
 
-; Jest/Vitest - matcher patterns
+; Jest/Vitest - assertion matchers
 (call_expression
   function: (member_expression
-    object: (call_expression
-      function: (identifier) @test.matcher_expect
-      (#eq? @test.matcher_expect "expect"))
+    object: (identifier) @test.expect_obj
+    (#eq? @test.expect_obj "expect")
     property: (property_identifier) @test.matcher)
   arguments: (arguments
     (_) @test.matcher_value)
   (#match? @test.matcher "^(toBe|toEqual|toStrictEqual|toMatch|toMatchObject|toContain|toHaveLength|toBeGreaterThan|toBeLessThan|toBeGreaterThanOrEqual|toBeLessThanOrEqual|toBeDefined|toBeUndefined|toBeNull|toBeTruthy|toBeFalsy|toThrow|toThrowError|resolves|rejects|not)$")) @definition.test_matcher
 
-; Jest/Vitest - mock patterns
+; Jest/Vitest - mock patterns (fixed to use member_expression structure)
 (call_expression
-  function: (identifier) @test.mock_func
-  (#match? @test.mock_func "^(jest|vi)\\.fn$")
+  function: (member_expression
+    object: (identifier) @test.mock_obj
+    (#match? @test.mock_obj "^(jest|vi)$")
+    property: (property_identifier) @test.mock_func
+    (#eq? @test.mock_func "fn"))
   arguments: (arguments)?) @definition.test_mock
 
 (call_expression
@@ -159,15 +166,16 @@ export default `
 (call_expression
   function: (member_expression
     object: (call_expression
-      function: (identifier) @test.mock_impl_obj
-      (#match? @test.mock_impl_obj "^(jest|vi)\\.fn$")
-      arguments: (arguments))
-    property: (property_identifier) @test.mock_impl_method
-    (#match? @test.mock_impl_method "^(mockReturnValue|mockResolvedValue|mockImplementation|mockResolvedValueOnce|mockReturnValueOnce)$"))
+      function: (member_expression
+        object: (identifier) @test.mock_impl_obj
+        (#match? @test.mock_impl_obj "^(jest|vi)\\\.fn$")
+        property: (property_identifier) @test.mock_impl_method))
+    property: (property_identifier) @test.mock_impl_ret)
+  (#match? @test.mock_impl_ret "^(mockReturnValue|mockResolvedValue|mockImplementation|mockResolvedValueOnce|mockReturnValueOnce)$")
   arguments: (arguments
     (_) @test.mock_impl_value)) @definition.test_mock_implementation
 
-; Testing library requires - Jest
+; Jest/Vitest - require/requireActual patterns
 (variable_declaration
   (variable_declarator
     name: (identifier) @jest.require.name
@@ -175,214 +183,92 @@ export default `
       function: (identifier) @jest.require.func
       (#eq? @jest.require.func "require")
       arguments: (arguments
-        (string
-          (#match? @jest.require.source "^['\"](@jest/globals|jest)['\"]$")))))) @definition.jest_require
+        (string) @jest.require.source
+        (#match? @jest.require.source "^['\"](@jest/globals|jest)['\"]$"))))) @definition.jest_require
 
-; Testing library requires - Vitest
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @vitest.require.name
-    value: (call_expression
-      function: (identifier) @vitest.require.func
-      (#eq? @vitest.require.func "require")
-      arguments: (arguments
-        (string
-          (#match? @vitest.require.source "^['\"]vitest['\"]$")))))) @definition.vitest_require
+; Jest/Vitest - import patterns
+(import_statement
+  source: (string) @jest.import.source
+  (#match? @jest.import.source "^['\"](@jest/globals|jest)['\"]$")) @definition.jest_import
 
-; Testing library requires - Chai
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @chai.require.name
-    value: (call_expression
-      function: (identifier) @chai.require.func
-      (#eq? @chai.require.func "require")
-      arguments: (arguments
-        (string
-          (#match? @chai.require.source "^['\"]chai['\"]$")))))) @definition.chai_require
+; Jest/Vitest - test file patterns (file-based detection)
+(import_statement
+  source: (string) @test.file_name
+  (#match? @test.file_name "\\\\.test\\\\\\.(js|jsx|ts|tsx|mjs)$")) @definition.test_file_import
 
-; Testing library requires - Sinon
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @sinon.require.name
-    value: (call_expression
-      function: (identifier) @sinon.require.func
-      (#eq? @sinon.require.func "require")
-      arguments: (arguments
-        (string
-          (#match? @sinon.require.source "^['\"]sinon['\"]$")))))) @definition.sinon_require
+(import_statement
+  source: (string) @test.spec_file_name
+  (#match? @test.spec_file_name "\\\\.spec\\\\\\.(js|jsx|ts|tsx|mjs)$")) @definition.test_spec_file_import
 
-; CommonJS test exports
-(assignment_expression
-  left: (member_expression
-    object: (identifier) @test.exports_obj
-    property: (property_identifier) @test.exports_prop)
-  right: [(arrow_function) (function_expression)] @test.exports_func
-  (#eq? @test.exports_obj "exports")
-  (#match? @test.exports_prop "^(test|tests)$")) @definition.commonjs_test_export
-
-; Test file patterns - detect test files by naming conventions
+; Testing utilities
 (call_expression
-  function: (identifier) @test.file_func
-  (#match? @test.file_func "^(describe|test|it|suite)$")) @definition.test_file_indicator
+  function: (member_expression
+    object: (identifier) @test.util_obj
+    (#match? @test.util_obj "^(expect|assert|should)$")
+    property: (property_identifier) @test.util_method)) @definition.test_utility
+
+; Test doubles/spies
+(call_expression
+  function: (member_expression
+    object: (identifier) @test.spy_obj
+    (#match? @test.spy_obj "^(sinon|jest|vi)$")
+    property: (property_identifier) @test.spy_method)
+  (#match? @test.spy_method "^(spy|createStubInstance|stub|fake)$")) @definition.test_spy
 
 ; Async test patterns
 (call_expression
-  function: (identifier) @test.async_func
-  arguments: (arguments
-    (string) @test.async_description
-    (arrow_function
-      async: "async") @test.async_callback)
-  (#match? @test.async_func "^(test|it|describe)$")) @definition.async_test
+  function: (member_expression
+    object: (identifier) @test.async_obj
+    property: (property_identifier) @test.async_method)
+  (#match? @test.async_method "^(await|async|done)$")) @definition.test_async
 
-; Promise-based test patterns
-(call_expression
-  function: (identifier) @test.promise_func
-  arguments: (arguments
-    (string) @test.promise_description
-    (arrow_function
-      parameters: (formal_parameters
-        (required_parameter
-          pattern: (identifier) @test.done_param)))
-  (#match? @test.promise_func "^(test|it)$")
-  (#match? @test.done_param "^done$")) @definition.promise_test
-
-; Test timeout patterns
+; Promise-based test assertions
 (call_expression
   function: (member_expression
     object: (call_expression
-      function: (identifier) @test.timeout_obj
-      (#match? @test.timeout_obj "^(test|it|describe)$"))
-    property: (property_identifier) @test.timeout_method
-    (#eq? @test.timeout_method "timeout"))
+      function: (identifier) @test.promise_func
+      (#eq? @test.promise_func "expect")
+      arguments: (arguments
+        (_) @test.promise_value))
+    property: (property_identifier) @test.promise_method
+    (#match? @test.promise_method "^(resolves|rejects)$")) 
   arguments: (arguments
-    (number) @test.timeout_value)) @definition.test_timeout
+    (_) @test.promise_matcher)) @definition.test_promise_assertion
 
-; Test skip/only patterns
-(call_expression
-  function: (member_expression
-    object: (identifier) @test.skip_obj
-    (#match? @test.skip_obj "^(test|it|describe)$")
-    property: (property_identifier) @test.skip_method
-    (#match? @test.skip_method "^(skip|only)$"))
-  arguments: (arguments
-    (string) @test.skip_description
-    [(arrow_function) (function_expression)] @test.skip_callback)) @definition.test_modifier
+; ===== EXPRESS.JS PATTERNS =====
 
-; Test environment detection
-(call_expression
-  function: (member_expression
-    object: (identifier) @test.env_obj
-    (#eq? @test.env_obj "process")
-    property: (property_identifier) @test.env_prop
-    (#eq? @test.env_prop "env"))) @definition.test_environment
-
-; Test configuration patterns
-(assignment_expression
-  left: (identifier) @test.config_name
-  (#match? @test.config_name "^(jestConfig|vitestConfig|testConfig)$")
-  right: (object) @test.config_value) @definition.test_config
-
-; Custom matchers
-(call_expression
-  function: (member_expression
-    object: (identifier) @test.custom_matcher_obj
-    (#match? @test.custom_matcher_obj "^(expect|assert)$")
-    property: (property_identifier) @test.custom_matcher)
-  arguments: (arguments
-    (_) @test.custom_matcher_value)) @definition.custom_matcher
-
-; Test utilities and helpers
-(call_expression
-  function: (identifier) @test.util_func
-  (#match? @test.util_func "^(render|screen|fireEvent|userEvent|waitFor|act)$")) @definition.test_utility
-
-; ===== EXPRESS.JS PATTERNS FOR JAVASCRIPT =====
-
-; Express.js imports in .js files
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @express.import
-        (#match? @express.import "^(express|Request|Response|NextFunction|Application|Router|RequestHandler|ErrorRequestHandler)$"))))
-  source: (string
-    (#match? @source "^['\"]express['\"]$"))) @definition.express_import
-
-; Express.js require statements
+; Express.js app creation
 (variable_declaration
   (variable_declarator
-    name: (identifier) @express.require.name
+    name: (identifier) @express.app.name
     value: (call_expression
-      function: (identifier) @express.require.function
-      (#eq? @express.require.function "require")
-      arguments: (arguments
-        (string
-          (#match? @express.require.source "^['\"]express['\"]$")))))) @definition.express_require
+      function: (identifier) @express.app.func
+      (#eq? @express.app.func "express")))) @definition.express_app
 
-; Express.js application creation
-(call_expression
-  function: (identifier) @express.app.function
-  (#eq? @express.app.function "express")) @definition.express_app
-
-; Express.js route handlers - app.get(), app.post(), etc.
+; Express.js route definitions
 (call_expression
   function: (member_expression
     object: (identifier) @express.app.object
-    property: (property_identifier) @express.route.method
     (#eq? @express.app.object "app")
-    (#match? @express.route.method "^(get|post|put|delete|patch|head|options|all|use)$"))
-  arguments: (arguments
-    (string) @express.route.path
-    [(arrow_function) (function_expression) (identifier)] @express.route.handler)) @definition.express_route
-
-; Express.js router route handlers - router.get(), router.post(), etc.
-(call_expression
-  function: (member_expression
-    object: (identifier) @express.router.object
     property: (property_identifier) @express.route.method
-    (#eq? @express.router.object "router")
     (#match? @express.route.method "^(get|post|put|delete|patch|head|options|all|use)$"))
   arguments: (arguments
     (string) @express.route.path
-    [(arrow_function) (function_expression) (identifier)] @express.route.handler)) @definition.express_router_route
+    (arrow_function) @express.route.handler
+    (function_expression) @express.route.handler)) @definition.express_route
 
-; Express.js middleware - app.use()
+; Express.js middleware patterns
 (call_expression
   function: (member_expression
     object: (identifier) @express.app.object
-    property: (property_identifier) @express.middleware.method
     (#eq? @express.app.object "app")
-    (#eq? @express.middleware.method "use"))
-  arguments: (arguments
-    [(string) @express.middleware.path
-     (identifier) @express.middleware.handler
-     (member_expression) @express.middleware.handler
-     (arrow_function) @express.middleware.handler
-     (function_expression) @express.middleware.handler])) @definition.express_middleware
-
-; Express.js router middleware - router.use()
-(call_expression
-  function: (member_expression
-    object: (identifier) @express.router.object
     property: (property_identifier) @express.middleware.method
-    (#eq? @express.router.object "router")
     (#eq? @express.middleware.method "use"))
   arguments: (arguments
-    [(string) @express.middleware.path
-     (identifier) @express.middleware.handler
-     (member_expression) @express.middleware.handler
-     (arrow_function) @express.middleware.handler
-     (function_expression) @express.middleware.handler])) @definition.express_router_middleware
-
-; Express.js server startup - listen()
-(call_expression
-  function: (member_expression
-    object: (identifier) @express.server.object
-    property: (property_identifier) @express.server.method
-    (#eq? @express.server.method "listen"))
-  arguments: (arguments
-    [(number) (string) (identifier)] @express.server.port
-    [(identifier) (arrow_function) (function_expression)]? @express.server.callback)) @definition.express_server
+    (string)? @express.middleware.path
+    (identifier) @express.middleware.handler
+    (arrow_function) @express.middleware.handler
+    (function_expression) @express.middleware.handler)) @definition.express_middleware
 
 ; Express.js route chaining
 (call_expression
@@ -432,16 +318,16 @@ export default `
       name: (identifier) @express.export.name
       value: [(arrow_function) (function_expression)]))) @definition.express_route_export
 
-; Express.js middleware function exports
+; Express.js middleware function exports (fixed to use parameter nodes)
 (export_statement
   declaration: (function_declaration
     name: (identifier) @express.middleware.export.name
     parameters: (formal_parameters
-      (required_parameter
+      (parameter
         pattern: (identifier) @express.middleware.req)
-      (required_parameter
+      (parameter
         pattern: (identifier) @express.middleware.res)
-      (required_parameter
+      (parameter
         pattern: (identifier) @express.middleware.next)))) @definition.express_middleware_export
 
 ; Express.js route parameter extraction
@@ -660,7 +546,7 @@ export default `
 (object
   (pair
     key: (property_identifier) @tsconfig.key
-    (#match? @tsconfig.key "^(target|module|lib|allowJs|checkJs|jsx|declaration|declarationMap|sourceMap|outFile|outDir|rootDir|composite|tsBuildInfoFile|removeComments|noEmit|importHelpers|downlevelIteration|isolatedModules|strict|noImplicitAny|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitThis|alwaysStrict|noUnusedLocals|noUnusedParameters|exactOptionalPropertyTypes|noImplicitReturns|noFallthroughCasesInSwitch|noUncheckedIndexedAccess|noImplicitOverride|noPropertyAccessFromIndexSignature|noUncheckedIndexedAccess|allowUnusedLabels|allowUnreachableCode|moduleResolution|baseUrl|paths|rootDirs|typeRoots|types|allowSyntheticDefaultImports|esModuleInterop|preserveSymlinks|allowUmdGlobalAccess|moduleSuffixes|resolveJsonModule|isolatedModules|skipLibCheck|forceConsistentCasingInFileNames|emitDecoratorMetadata|experimentalDecorators|emitDecoratorMetadata|experimentalDecorators|jsxFactory|jsxFragmentFactory|jsxImportSource|reactNamespace|useDefineForClassFields|newLine|noEmitHelpers|importHelpers|downlevelIteration|isolatedModules|strict|noImplicitAny|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitThis|alwaysStrict|noUnusedLocals|noUnusedParameters|exactOptionalPropertyTypes|noImplicitReturns|noFallthroughCasesInSwitch|noUncheckedIndexedAccess|noImplicitOverride|noPropertyAccessFromIndexSignature|noUncheckedIndexedAccess|allowUnusedLabels|allowUnreachableCode|moduleResolution|baseUrl|paths|rootDirs|typeRoots|types|allowSyntheticDefaultImports|esModuleInterop|preserveSymlinks|allowUmdGlobalAccess|moduleSuffixes|resolveJsonModule|isolatedModules|skipLibCheck|forceConsistentCasingInFileNames)$")
+    (#match? @tsconfig.key "^(target|module|lib|allowJs|checkJs|jsx|declaration|declarationMap|sourceMap|outFile|outDir|rootDir|composite|tsBuildInfoFile|removeComments|noEmit|importHelpers|downlevelIteration|isolatedModules|strict|noImplicitAny|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitThis|alwaysStrict|noUnusedLocals|noUnusedParameters|exactOptionalPropertyTypes|noImplicitReturns|noFallthroughCasesInSwitch|noUncheckedIndexedAccess|noImplicitOverride|noPropertyAccessFromIndexSignature|allowUnusedLabels|allowUnreachableCode|moduleResolution|baseUrl|paths|rootDirs|typeRoots|types|allowSyntheticDefaultImports|esModuleInterop|preserveSymlinks|allowUmdGlobalAccess|moduleSuffixes|resolveJsonModule|isolatedModules|skipLibCheck|forceConsistentCasingInFileNames|emitDecoratorMetadata|experimentalDecorators|jsxFactory|jsxFragmentFactory|jsxImportSource|reactNamespace|useDefineForClassFields|newLine|noEmitHelpers|importHelpers)$")
     value: (_) @tsconfig.value)) @definition.tsconfig_properties
 
 ; Jest configuration exports
@@ -717,7 +603,7 @@ export default `
       (#eq? @build.require.func "require")
       arguments: (arguments
         (string) @build.require.source
-        (#match? @build.require.source "^(webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-loader|babel-loader|css-loader|style-loader|file-loader|url-loader|html-webpack-plugin|mini-css-extract-plugin|clean-webpack-plugin|copy-webpack-plugin|dotenv-webpack|webpack-dev-server|webpack-merge|webpack-bundle-analyzer|@babel/core|@babel/preset-env|@babel/preset-react|@babel/preset-typescript|eslint|prettier|jest|postcss|tailwindcss)$")))))) @definition.build_tool_require
+        (#match? @build.require.source "^(webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-loader|babel-loader|css-loader|style-loader|file-loader|url-loader|html-webpack-plugin|mini-css-extract-plugin|clean-webpack-plugin|copy-webpack-plugin|dotenv-webpack|webpack-dev-server|webpack-merge|webpack-bundle-analyzer|@babel/core|@babel/preset-env|@babel/preset-react|@babel/preset-typescript|eslint|prettier|jest|postcss|tailwindcss)$"))))) @definition.build_tool_require
 
 ; Build tool imports
 (import_statement
@@ -782,4 +668,5 @@ export default `
         name: (property_identifier) @name) @definition.method))
   (#not-eq? @name "constructor")
 )
+
 `

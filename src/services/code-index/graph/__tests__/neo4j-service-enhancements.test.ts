@@ -1142,7 +1142,7 @@ describe("Neo4jService - Enhanced Features", () => {
 
 			// Act
 			try {
-				await neo4jService.upsertNode({
+				await service.upsertNode({
 					id: "test-node",
 					type: "function",
 					name: "testFunction",

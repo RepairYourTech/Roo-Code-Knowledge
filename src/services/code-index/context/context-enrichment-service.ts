@@ -773,19 +773,8 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 			const commentQueryString = this.getCommentQuery(ext)
 			let captures: QueryCapture[] = []
 
-			if (commentQueryString) {
-				// Use the comment-specific query if available
-				// Get Language from web-tree-sitter module and create query
-				const { Language } = require("web-tree-sitter")
-				// The parser's language is already set, we need to load it to create a new query
-				// Since we already have the parser configured, we can create the query from the parserInfo
-				// For now, skip custom comment queries since we don't have direct access to Language
-				// Fall back to existing query
-				if (existingQuery) {
-					captures = tree ? existingQuery.captures(tree.rootNode) : []
-				}
-			} else if (existingQuery) {
-				// Fall back to the existing query if no comment query is available
+			if (existingQuery) {
+				// Always use the existing query when available
 				captures = tree ? existingQuery.captures(tree.rootNode) : []
 			}
 
@@ -872,7 +861,6 @@ export class ContextEnrichmentService implements IContextEnrichmentService {
 	 * @returns CommentAnalysis with categorized comments
 	 */
 	private processCommentCaptures(captures: QueryCapture[], content: string): CommentAnalysis {
-		const lines = content.split("\n")
 		const headerComments: string[] = []
 		const purposeComments: string[] = []
 		const todoComments: string[] = []

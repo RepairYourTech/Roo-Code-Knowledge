@@ -40,19 +40,27 @@ export class UserCard extends React.Component {
 
 	componentWillUnmount() {
 		console.log("UserCard unmounting")
+		if (this._fetchController) {
+			this._fetchController.abort()
+		}
 	}
 
 	fetchUserData = async () => {
 		this.setState({ loading: true, error: null })
+		this._fetchController = new AbortController()
 		try {
-			const response = await fetch(`/api/users/${this.props.userId}`)
+			const response = await fetch(`/api/users/${this.props.userId}`, {
+				signal: this._fetchController.signal,
+			})
 			if (!response.ok) {
 				throw new Error(`HTTP ${response.status}: ${response.statusText}`)
 			}
 			const data = await response.json()
 			this.setState({ user: data, loading: false })
 		} catch (error) {
-			this.setState({ error, loading: false })
+			if (!this._fetchController.signal.aborted) {
+				this.setState({ error, loading: false })
+			}
 		}
 	}
 
@@ -109,7 +117,7 @@ export function UserList({ users, onUserSelect }) {
 					user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
 					user.email.toLowerCase().includes(searchTerm.toLowerCase()),
 			)
-			.sort((a, b) => a[sortBy].localeCompare(b[sortBy]))
+			.sort((a, b) => (a[sortBy] ?? "").toString().localeCompare((b[sortBy] ?? "").toString()))
 	}, [users, searchTerm, sortBy])
 
 	const handleSearch = useCallback((e) => {

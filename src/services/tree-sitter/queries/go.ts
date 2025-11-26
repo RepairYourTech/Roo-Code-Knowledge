@@ -73,10 +73,10 @@ export default `
           (#eq? @go.fuzz_type "F")))))
   (#match? @go.fuzz_func_name "^Fuzz.*$")) @definition.go_fuzz_function
 
-; Test helper functions
+; Test helper functions (removed "init" to avoid matching package init() functions)
 (function_declaration
   name: (identifier) @go.test_helper_name
-  (#match? @go.test_helper_name "^(setup|teardown|cleanup|init|prepare|newMock|newFake|newTest).*")) @definition.go_test_helper
+  (#match? @go.test_helper_name "^(setup|teardown|cleanup|prepare|newMock|newFake|newTest).*")) @definition.go_test_helper
 
 ; TestMain function
 (function_declaration
@@ -102,7 +102,7 @@ export default `
 (import_declaration
   (import_spec
     path: (interpreted_string_literal) @go.test_import_path
-    (#match? @go.test_import_path "^.*/testing$"))) @definition.go_testing_subpackage_import
+    (#match? @go.test_import_path ".*/testing$"))) @definition.go_testing_subpackage_import
 
 ; Test methods requiring arguments
 (call_expression
@@ -129,20 +129,12 @@ export default `
     (#match? @go.tb_method "^(Log|Logf|Error|Errorf|Fatal|Fatalf|Skip|Skipf|Fail|FailNow|Helper|Run|Parallel|TempDir|Setenv|Cleanup)$"))
   arguments: (argument_list)?) @definition.go_testing_interface_method
 
-; Test table-driven tests
+; Test table-driven tests (simplified and broadened pattern)
 (composite_literal
-  type: (slice_type
-    element: (struct_type))
+  type: (_) @go.test_data_type
   body: (expression_list
     (composite_literal
-      type: (struct_type) @go.test_struct_type
-      body: (field_declaration_list
-        (field_declaration
-          name: (field_identifier) @go.test_field_name
-          type: (_) @go.test_field_type)*
-        (field_declaration
-          name: (field_identifier) @go.test_case_name
-          value: (identifier) @go.test_case_value))*))) @go.test_table_entry) @definition.go_table_driven_test
+      type: (struct_type) @go.test_case_struct))) @definition.go_table_driven_test
 
 ; Subtests
 (call_expression
@@ -172,14 +164,14 @@ export default `
   (type_spec
     name: (type_identifier) @go.interface_name
     type: (interface_type) @go.interface_def
-    (#match? @go.interface_name ".*(Interface|Mocker|Faker).*"))) @definition.go_test_interface
+    (#match? @go.interface_name ".*(?:Interface|Mocker|Faker).*"))) @definition.go_test_interface
 
 ; Test data structures
 (type_declaration
   (type_spec
     name: (type_identifier) @go.test_data_name
     type: (struct_type)
-    (#match? @go.test_data_name ".*(TestData|TestCase|TestScenario|TestFixtures).*"))) @definition.go_test_data_struct
+    (#match? @go.test_data_name ".*(?:TestData|TestCase|TestScenario|TestFixtures).*"))) @definition.go_test_data_struct
 
 ; Test constants
 (const_declaration
@@ -243,7 +235,7 @@ export default `
 ; Test configuration
 (function_declaration
   name: (identifier) @go.test_config_name
-  (#match? @go.test_config_name "^(init|setup|configure|initTest|setupTest)$")) @definition.go_test_configuration
+  (#match? @go.test_config_name "^(setup|configure|initTest|setupTest)$")) @definition.go_test_configuration
 
 ; Test environment variables
 (call_expression

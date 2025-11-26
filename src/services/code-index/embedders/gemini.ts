@@ -59,23 +59,29 @@ export class GeminiEmbedder implements IEmbedder {
 		const modelToUse = model || this.modelId
 
 		// Log method entry
-		console.log(
-			`[GeminiEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
-		)
+		if (this.outputChannel) {
+			this.outputChannel.appendLine(
+				`[GeminiEmbedder] createEmbeddings ENTRY: Received ${texts.length} texts to embed with model ${modelToUse}`,
+			)
+		}
 
 		try {
 			const result = await this.openAICompatibleEmbedder.createEmbeddings(texts, modelToUse)
 
 			// Log final verification
-			console.log(
-				`[GeminiEmbedder] createEmbeddings EXIT: Generated ${result.embeddings.length} embeddings from ${texts.length} input texts`,
-			)
+			if (this.outputChannel) {
+				this.outputChannel.appendLine(
+					`[GeminiEmbedder] createEmbeddings EXIT: Generated ${result.embeddings.length} embeddings from ${texts.length} input texts`,
+				)
+			}
 
 			// Check for embedding count mismatch
 			if (result.embeddings.length !== texts.length) {
-				console.error(
-					`[GeminiEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${result.embeddings.length}`,
-				)
+				const errorMsg = `[GeminiEmbedder] CRITICAL: Embedding count mismatch! Input: ${texts.length}, Output: ${result.embeddings.length}`
+				if (this.outputChannel) {
+					this.outputChannel.appendLine(`ERROR: ${errorMsg}`)
+					this.outputChannel.show(true)
+				}
 			}
 
 			return result

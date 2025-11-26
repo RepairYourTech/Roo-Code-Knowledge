@@ -117,18 +117,97 @@ export function filterLSPResultsByPattern(
 		}
 
 		if (filePattern) {
-			// Escape special regex characters and replace wildcards safely
-			const escapedPattern = filePattern
-				.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") // Escape special regex chars
-				.replace(/\\\*/g, ".*") // Convert escaped wildcards back to regex pattern
-			const regex = new RegExp(`^${escapedPattern}$`)
-			if (!regex.test(filePath)) {
+			// Validate and constrain the file pattern to prevent ReDoS
+			if (!isValidFilePattern(filePattern)) {
+				return false
+			}
+
+			// Use safe glob matching instead of RegExp
+			if (!matchFilePattern(filePattern, filePath)) {
 				return false
 			}
 		}
 
 		return true
 	})
+}
+
+/**
+ * Validates a file pattern to prevent ReDoS attacks
+ * @param pattern The file pattern to validate
+ * @returns true if the pattern is safe, false otherwise
+ */
+function isValidFilePattern(pattern: string): boolean {
+	// Reject empty patterns
+	if (!pattern || pattern.trim().length === 0) {
+		return false
+	}
+
+	// Enforce maximum pattern length to prevent catastrophic backtracking
+	const MAX_PATTERN_LENGTH = 1000
+	if (pattern.length > MAX_PATTERN_LENGTH) {
+		return false
+	}
+
+	// Only allow safe characters: alphanumeric, dots, slashes, underscores, hyphens, and wildcards
+	const safePattern = /^[a-zA-Z0-9._/\\*-]*$/
+	if (!safePattern.test(pattern)) {
+		return false
+	}
+
+	// Prevent patterns with too many wildcards that could cause performance issues
+	const wildcardCount = (pattern.match(/\*/g) || []).length
+	if (wildcardCount > 10) {
+		return false
+	}
+
+	return true
+}
+
+/**
+ * Safely matches a file pattern against a file path
+ * Uses simple string matching instead of RegExp to avoid ReDoS
+ * @param pattern The file pattern (supports * wildcards)
+ * @param filePath The file path to match against
+ * @returns true if the pattern matches, false otherwise
+ */
+function matchFilePattern(pattern: string, filePath: string): boolean {
+	try {
+		// Convert the glob pattern to a simple matching algorithm
+		const patternParts = pattern.split("*")
+		let filePathIndex = 0
+
+		for (let i = 0; i < patternParts.length; i++) {
+			const part = patternParts[i]
+
+			if (part === "") {
+				// Empty part means wildcard at start/end or consecutive wildcards
+				continue
+			}
+
+			// Find the part in the remaining file path
+			const foundIndex = filePath.indexOf(part, filePathIndex)
+			if (foundIndex === -1) {
+				return false
+			}
+
+			// Special handling for first and last parts
+			if (i === 0 && foundIndex !== 0) {
+				return false
+			}
+
+			if (i === patternParts.length - 1 && foundIndex + part.length !== filePath.length) {
+				return false
+			}
+
+			filePathIndex = foundIndex + part.length
+		}
+
+		return true
+	} catch (error) {
+		// If any error occurs during matching, reject the pattern
+		return false
+	}
 }
 
 /**

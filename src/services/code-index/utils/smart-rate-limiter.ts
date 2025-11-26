@@ -111,7 +111,7 @@ export class SmartRateLimiter {
 		const bucket = this.tokenBuckets.get(provider)
 
 		if (!state || !bucket) {
-			return { canProceed: true, reason: "Provider not initialized" }
+			return { canProceed: false, reason: "Provider not initialized" }
 		}
 
 		const now = Date.now()
@@ -153,13 +153,20 @@ export class SmartRateLimiter {
 			}
 		}
 
-		// Apply jitter to prevent thundering herd
-		const jitter = Math.random() * this.config.jitterFactor * this.config.windowDurationMs
+		// Calculate minimum inter-request interval from maxRequestsPerWindow and windowDurationMs
+		const minInterRequestIntervalMs =
+			this.config.maxRequestsPerWindow > 0
+				? this.config.windowDurationMs / this.config.maxRequestsPerWindow
+				: this.config.windowDurationMs
+
+		// Apply jitter to prevent thundering herd - use small fraction of min inter-request interval
+		const jitter = Math.random() * this.config.jitterFactor * minInterRequestIntervalMs
+		const clampedJitter = Math.min(jitter, minInterRequestIntervalMs) // Ensure jitter never exceeds min interval
 
 		return {
 			canProceed: true,
-			waitTime: jitter > 0 ? jitter : undefined,
-			reason: jitter > 0 ? `Applied jitter: ${Math.ceil(jitter)}ms` : undefined,
+			waitTime: clampedJitter > 0 ? clampedJitter : undefined,
+			reason: clampedJitter > 0 ? `Applied jitter: ${Math.ceil(clampedJitter)}ms` : undefined,
 		}
 	}
 
@@ -195,7 +202,6 @@ export class SmartRateLimiter {
 
 		// Update token bucket
 		bucket.tokens -= tokens
-		bucket.lastRefillTime = now
 
 		// Update window statistics
 		this.updateWindowStats(provider, now)

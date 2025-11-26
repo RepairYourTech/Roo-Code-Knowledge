@@ -121,7 +121,7 @@ export default `
 ; JUnit 5 - Test class patterns
 (class_declaration
   name: (identifier) @junit.test_class_name
-  (#match? @junit.test_class_name ".*Test.*$")) @definition.junit_test_class
+  (#match? @junit.test_class_name "^.*Tests?$")) @definition.junit_test_class
 
 ; JUnit 5 - Test class with annotations
 (class_declaration
@@ -149,7 +149,7 @@ export default `
   modifiers: (modifiers
     (marker_annotation
       name: (identifier) @junit4.test_annotation
-      (#match? @junit4.test_annotation "^(Test|org\\.junit\\.Test)$")))) @definition.junit4_test_method
+      (#match? @junit4.test_annotation "^(Test|org\\\\.junit\\\\.Test)$")))) @definition.junit4_test_method
 
 ; JUnit 4 - Before/After annotations
 (method_declaration
@@ -157,12 +157,12 @@ export default `
   modifiers: (modifiers
     (marker_annotation
       name: (identifier) @junit4.lifecycle_annotation
-      (#match? @junit4.lifecycle_annotation "^(Before|After|BeforeClass|AfterClass|org\\.junit\\.Before|org\\.junit\\.After|org\\.junit\\.BeforeClass|org\\.junit\\.AfterClass)$")))) @definition.junit4_lifecycle_method
+      (#match? @junit4.lifecycle_annotation "^(Before|After|BeforeClass|AfterClass|org\\\\.junit\\\\.Before|org\\\\.junit\\\\.After|org\\\\.junit\\\\.BeforeClass|org\\\\.junit\\\\.AfterClass)$")))) @definition.junit4_lifecycle_method
 
 ; JUnit 4 - Test class patterns
 (class_declaration
   name: (identifier) @junit4.test_class_name
-  (#match? @junit4.test_class_name ".*Test.*$")) @definition.junit4_test_class
+  (#match? @junit4.test_class_name "^.*Tests?$")) @definition.junit4_test_class
 
 ; TestNG - Test method patterns
 (method_declaration
@@ -204,7 +204,7 @@ export default `
 ; TestNG - Test class patterns
 (class_declaration
   name: (identifier) @testng.test_class_name
-  (#match? @testng.test_class_name ".*Test.*$")) @definition.testng_test_class
+  (#match? @testng.test_class_name "^.*Tests?$")) @definition.testng_test_class
 
 ; TestNG - Configuration annotations
 (class_declaration
@@ -227,7 +227,7 @@ export default `
 (method_invocation
   name: (identifier) @mockito.mock_method
   (#match? @mockito.mock_method "^(mock|spy|when|verify|times|never|atLeastOnce|atMost|atLeast|doReturn|doThrow|doAnswer|doNothing|doCallRealMethod)$")
-  (argument_list)?) @definition.mockito_mock_method
+  arguments: (argument_list)?) @definition.mockito_mock_method
 
 ; Mockito - Verification patterns
 (method_invocation
@@ -244,7 +244,7 @@ export default `
 ; Hamcrest - Matcher patterns
 (method_invocation
   name: (identifier) @hamcrest.matcher_method
-  (#match? @hamcrest.matcher_method "^(equalTo|is|not|anyOf|allOf|hasItem|hasItems|containsInAnyOrder|containsInRelativeOrder|containsString|startsWithString|endsWithString|instanceOf|sameInstance|anything|nullValue|notNullValue|greaterThan|greaterThanOrEqualTo|lessThan|lessThanOrEqualTo|closeTo)$"))
+  (#match? @hamcrest.matcher_method "^(equalTo|is|not|anyOf|allOf|hasItem|hasItems|containsInAnyOrder|containsInRelativeOrder|containsString|startsWithString|endsWithString|instanceOf|sameInstance|anything|nullValue|notNullValue|greaterThan|greaterThanOrEqualTo|lessThan|lessThanOrEqualTo|closeTo)$")
   arguments: (argument_list)?) @definition.hamcrest_matcher
 
 ; AssertJ - Assertion patterns
@@ -265,32 +265,32 @@ export default `
 ; Test imports - JUnit
 (import_declaration
   name: (scoped_identifier) @junit.import_name
-  (#match? @junit.import_name "^(org\\.junit\\.jupiter\\.api|org\\.junit\\.jupiter\\.params|org\\.junit\\.jupiter\\.engine|org\\.junit\\.Test|org\\.junit\\.Before|org\\.junit\\.After|org\\.junit\\.BeforeClass|org\\.junit\\.AfterClass)$")) @definition.junit_import
+  (#match? @junit.import_name "^(org\\\\.junit\\\\.jupiter\\\\.api|org\\\\.junit\\\\.jupiter\\\\.params|org\\\\.junit\\\\.jupiter\\\\.engine|org\\\\.junit\\\\.Test|org\\\\.junit\\\\.Before|org\\\\.junit\\\\.After|org\\\\.junit\\\\.BeforeClass|org\\\\.junit\\\\.AfterClass)$")) @definition.junit_import
 
 ; Test imports - TestNG
 (import_declaration
   name: (scoped_identifier) @testng.import_name
-  (#match? @testng.import_name "^(org\\.testng\\.annotations|org\\.testng\\.asserts|org\\.testng\\.DataProvider)$")) @definition.testng_import
+  (#match? @testng.import_name "^(org\\\\.testng\\\\.annotations|org\\\\.testng\\\\.asserts|org\\\\.testng\\\\.DataProvider)$")) @definition.testng_import
 
 ; Test imports - Mockito
 (import_declaration
   name: (scoped_identifier) @mockito.import_name
-  (#match? @mockito.import_name "^(org\\.mockito|org\\.mockito\\.Mockito|org\\.mockito\\.Captor|org\\.mockito\\.InjectMocks|org\\.mockito\\.Mock|org\\.mockito\\.Spy)$")) @definition.mockito_import
+  (#match? @mockito.import_name "^(org\\\\.mockito|org\\\\.mockito\\\\.Mockito|org\\\\.mockito\\\\.Captor|org\\\\.mockito\\\\.InjectMocks|org\\\\.mockito\\\\.Mock|org\\\\.mockito\\\\.Spy)$")) @definition.mockito_import
 
 ; Test imports - Hamcrest
 (import_declaration
   name: (scoped_identifier) @hamcrest.import_name
-  (#match? @hamcrest.import_name "^(org\\.hamcrest|org\\.hamcrest\\.core|org\\.hamcrest\\.text|org\\.hamcrest\\.collection|org\\.hamcrest\\.number)$")) @definition.hamcrest_import
+  (#match? @hamcrest.import_name "^(org\\\\.hamcrest|org\\\\.hamcrest\\\\.core|org\\\\.hamcrest\\\\.text|org\\\\.hamcrest\\\\.collection|org\\\\.hamcrest\\\\.number)$")) @definition.hamcrest_import
 
 ; Test imports - AssertJ
 (import_declaration
   name: (scoped_identifier) @assertj.import_name
-  (#match? @assertj.import_name "^(org\\.assertj\\.core|org\\.assertj\\.core\\.api)$")) @definition.assertj_import
+  (#match? @assertj.import_name "^(org\\\\.assertj\\\\.core|org\\\\.assertj\\\\.core\\\\.api)$")) @definition.assertj_import
 
 ; Test runner patterns - JUnit Platform
 (class_declaration
   name: (identifier) @junit.runner_class_name
-  (#match? @junit.runner_class_name ".*Suite.*$")
+  (#match? @junit.runner_class_name "^.*Suite.*$")
   modifiers: (modifiers
     (marker_annotation
       name: (identifier) @junit.suite_annotation
@@ -299,16 +299,16 @@ export default `
 ; Test configuration classes
 (class_declaration
   name: (identifier) @test.config_class_name
-  (#match? @test.config_class_name ".*(Config|Configuration|TestConfig).*$")) @definition.test_configuration_class
+  (#match? @test.config_class_name "^(?:Config|Configuration|TestConfig).*$")) @definition.test_configuration_class
 
 ; Test data classes
 (class_declaration
   name: (identifier) @test.data_class_name
-  (#match? @test.data_class_name ".*(TestData|TestFixtures|TestDataBuilder).*$")) @definition.test_data_class
+  (#match? @test.data_class_name "^(?:TestData|TestFixtures|TestDataBuilder).*$")) @definition.test_data_class
 
 ; Test utility classes
 (class_declaration
   name: (identifier) @test.util_class_name
-  (#match? @test.util_class_name ".*(TestUtil|TestHelper|TestUtils).*$")) @definition.test_utility_class
+  (#match? @test.util_class_name "^(?:TestUtil|TestHelper|TestUtils).*$")) @definition.test_utility_class
 
 `

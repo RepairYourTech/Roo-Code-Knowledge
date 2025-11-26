@@ -70,9 +70,8 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 			: texts
 
 		// Log prefix application
-		console.log(
-			`[CodeIndexOllamaEmbedder] Applied query prefix to ${processedTexts.filter((t) => t.startsWith(queryPrefix || "")).length}/${processedTexts.length} texts`,
-		)
+		const appliedCount = queryPrefix ? processedTexts.filter((t) => t.startsWith(queryPrefix)).length : 0
+		console.log(`[CodeIndexOllamaEmbedder] Applied query prefix to ${appliedCount}/${processedTexts.length} texts`)
 
 		try {
 			// Note: Standard Ollama API uses 'prompt' for single text, not 'input' for array.

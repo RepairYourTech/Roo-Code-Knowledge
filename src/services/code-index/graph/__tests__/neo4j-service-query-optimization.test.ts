@@ -264,7 +264,17 @@ describe("Neo4jService Query Optimization and Security", () => {
 
 			const consoleWarnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
 
-			await neo4jService.executeQuery("MATCH (n) RETURN n")
+			// Use fake timers
+			vi.useFakeTimers()
+
+			// Capture the promise returned by executeQuery
+			const queryPromise = neo4jService.executeQuery("MATCH (n) RETURN n")
+
+			// Advance timers by the mock delay
+			vi.advanceTimersByTime(1500)
+
+			// Wait for the captured promise to resolve
+			await queryPromise
 
 			expect(consoleWarnSpy).toHaveBeenCalledWith(
 				expect.stringContaining("Slow query detected"),
@@ -272,6 +282,8 @@ describe("Neo4jService Query Optimization and Security", () => {
 				expect.stringContaining("executeQuery"),
 			)
 
+			// Restore timers and console spy
+			vi.useRealTimers()
 			consoleWarnSpy.mockRestore()
 		})
 

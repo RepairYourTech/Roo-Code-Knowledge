@@ -8830,8 +8830,10 @@ function extractBuildLoaders(node: Node, text: string): BuildToolLoader[] {
 			const loaderMatches = loadersText.match(/["']([^"']+)["']?/g)
 			if (loaderMatches) {
 				for (const loaderMatch of loaderMatches) {
+					// Remove surrounding quotes from the loader name
+					const loaderName = loaderMatch.replace(/^["']|["']$/g, "")
 					loaders.push({
-						name: loaderMatch[1],
+						name: loaderName,
 						loaderType: "module",
 					})
 				}
@@ -8881,7 +8883,9 @@ function extractSourcePaths(node: Node, text: string): string[] {
 			const pathMatches = pathsText.match(/["']([^"']+)["']?/g)
 			if (pathMatches) {
 				for (const pathMatch of pathMatches) {
-					sourcePaths.push(pathMatch[1])
+					// Remove surrounding quotes from the path
+					const pathName = pathMatch.replace(/^[\"']|[\"']$/g, "")
+					sourcePaths.push(pathName)
 				}
 			}
 		}

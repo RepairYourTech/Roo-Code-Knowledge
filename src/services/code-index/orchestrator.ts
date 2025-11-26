@@ -149,7 +149,7 @@ export class CodeIndexOrchestrator {
 		}
 	}
 
-	private readonly log?: Logger
+	private log?: Logger
 
 	/**
 	 * Cancel any active indexing operation

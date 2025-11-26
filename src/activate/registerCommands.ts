@@ -354,16 +354,13 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 					outputCh.appendLine(
 						"[Diagnostic] Neo4j service could not be created. Neo4j is disabled or misconfigured.",
 					)
-					vscode.window
-						.showErrorMessage(
-							"Neo4j service could not be created. Please check Neo4j settings and ensure it's enabled.",
-							"Show Output",
-						)
-						.then((action) => {
-							if (action === "Show Output") {
-								outputCh.show()
-							}
-						})
+					const action = await vscode.window.showErrorMessage(
+						"Neo4j service could not be created. Please check Neo4j settings and ensure it's enabled.",
+						"Show Output",
+					)
+					if (action === "Show Output") {
+						outputCh.show()
+					}
 					return
 				}
 

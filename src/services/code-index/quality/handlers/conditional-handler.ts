@@ -33,15 +33,34 @@ export class ConditionalHandler extends BaseControlFlowHandler implements ICondi
 	 * Process if/else statements with branch-specific reachability
 	 */
 	processConditional(node: Node, context: IReachabilityContext): void {
+		// Capture initial reachability once before processing any branches
+		const initialReachability = context.getCurrentReachability()
+
 		// Create branch contexts for if and else branches
 		const ifBranch: BranchContext = {
 			id: `if_${this.getLineNumber(node)}`,
-			isReachable: context.getCurrentReachability(),
+			isReachable: initialReachability,
 			condition: this.getChildNode(node, "condition")?.text,
 			parentNode: node,
 		}
 
+		const alternativeNode = this.getChildNode(node, "alternative")
+		let elseBranch: BranchContext | null = null
+
+		if (alternativeNode) {
+			elseBranch = {
+				id: `else_${this.getLineNumber(node)}`,
+				isReachable: initialReachability,
+				condition: "else",
+				parentNode: node,
+			}
+		}
+
+		// Add branch contexts before processing
 		context.addBranchContext(ifBranch)
+		if (elseBranch) {
+			context.addBranchContext(elseBranch)
+		}
 
 		// Enter conditional scope
 		context.enterScope(ScopeType.CONDITIONAL, node)
@@ -53,18 +72,7 @@ export class ConditionalHandler extends BaseControlFlowHandler implements ICondi
 		}
 
 		// Process else branch if present
-		const alternativeNode = this.getChildNode(node, "alternative")
-		let elseBranch: BranchContext | null = null
-
-		if (alternativeNode) {
-			elseBranch = {
-				id: `else_${this.getLineNumber(node)}`,
-				isReachable: context.getCurrentReachability(),
-				condition: "else",
-				parentNode: node,
-			}
-
-			context.addBranchContext(elseBranch)
+		if (alternativeNode && elseBranch) {
 			this.processBranch(alternativeNode, context, elseBranch)
 		}
 
@@ -86,9 +94,6 @@ export class ConditionalHandler extends BaseControlFlowHandler implements ICondi
 	 * Process a single branch with its own reachability context
 	 */
 	private processBranch(node: Node, context: IReachabilityContext, branch: BranchContext): void {
-		// Save current reachability state
-		const wasReachable = context.getCurrentReachability()
-
 		// Process the branch
 		for (const child of node.children || []) {
 			if (child) {

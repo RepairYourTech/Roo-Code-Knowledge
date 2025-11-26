@@ -156,7 +156,7 @@ public class UserService {
         this.repository = repository;
     }
 
-    public static UserService getInstance() {
+    public static synchronized UserService getInstance() {
         if (instance == null) {
             throw new IllegalStateException("UserService not initialized. Call initialize first.");
         }

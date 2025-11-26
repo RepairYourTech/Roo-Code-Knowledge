@@ -93,15 +93,20 @@ export function createApiClient(baseUrl: string): ApiClient {
 
 // Export async function
 export async function fetchWithRetry<T>(url: string, retries: number = MAX_RETRIES): Promise<T> {
+	let lastError: Error = new Error("Unknown error occurred")
 	for (let i = 0; i < retries; i++) {
 		try {
 			const response = await fetch(url)
 			return await response.json()
 		} catch (error) {
-			if (i === retries - 1) throw error
+			lastError = error as Error
+			if (i === retries - 1) throw lastError
 			await new Promise((resolve) => setTimeout(resolve, 1000 * (i + 1)))
 		}
 	}
+
+	// This should never be reached due to the logic above, but ensures Promise<T> is always returned
+	throw new Error(`Failed to fetch ${url} after ${retries} attempts`)
 }
 
 // Default export

@@ -427,14 +427,16 @@ export class CodeIndexManager {
 			const wasUserInitiated = this.getIndexingWasUserInitiatedOnClose()
 			const isActivelyIndexing = this._orchestrator.state === "Indexing"
 			const shouldPreserveFlag = wasUserInitiated && isActivelyIndexing
-			this.setIndexingWasUserInitiatedOnClose(shouldPreserveFlag)
+
+			// Fire-and-forget async operation with proper error handling
+			void this.setIndexingWasUserInitiatedOnClose(shouldPreserveFlag)
 
 			this.stopWatcher()
 		}
 
-		// Close Neo4j connection on dispose
+		// Close Neo4j connection on dispose - fire-and-forget with proper error handling
 		if (this._neo4jService) {
-			this._neo4jService
+			void this._neo4jService
 				.close()
 				.then(() => {
 					this._logger.info("[CodeIndexManager] Neo4j connection closed (dispose)")

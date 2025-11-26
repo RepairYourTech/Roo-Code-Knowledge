@@ -1,11 +1,10 @@
 /**
  * Test fixture: Go structs, interfaces, and methods
- * 
+ *
  * Tests:
  * - Struct definitions
  * - Interfaces
  * - Methods
- * - Goroutines and channels
  * - Error handling
  */
 
@@ -117,7 +116,7 @@ func NewUserRepository() *UserRepository {
 func (r *UserRepository) FindByID(id string) (*User, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	user, exists := r.users[id]
 	if !exists {
 		return nil, errors.New("user not found")
@@ -132,8 +131,11 @@ func (r *UserRepository) FindAll() ([]*User, error) {
 
 	users := make([]*User, 0, len(r.users))
 	for _, user := range r.users {
-		// Create a copy to avoid exposing internal state
+		// Create a deep copy to avoid exposing internal state
 		userCopy := *user
+		// Deep copy the Roles slice
+		userCopy.Roles = make([]string, len(user.Roles))
+		copy(userCopy.Roles, user.Roles)
 		users = append(users, &userCopy)
 	}
 	return users, nil
@@ -143,7 +145,7 @@ func (r *UserRepository) FindAll() ([]*User, error) {
 func (r *UserRepository) Save(user *User) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	r.users[user.ID] = user
 	return nil
 }
@@ -152,7 +154,7 @@ func (r *UserRepository) Save(user *User) error {
 func (r *UserRepository) Delete(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	
+
 	delete(r.users, id)
 	return nil
 }
@@ -191,4 +193,3 @@ func generateID() string {
 	}
 	return "user-" + hex.EncodeToString(bytes)
 }
-

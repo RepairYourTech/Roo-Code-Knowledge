@@ -345,7 +345,6 @@ async function runBenchmark(): Promise<BenchmarkResult> {
 if (require.main === module) {
 	runBenchmark()
 		.then((result) => {
-			console.log("\n✅ Benchmark complete!")
 			console.log(JSON.stringify(result, null, 2))
 		})
 		.catch((error) => {

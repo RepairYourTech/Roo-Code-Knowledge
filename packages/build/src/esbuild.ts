@@ -139,7 +139,7 @@ export function copyWasms(srcDir: string, distDir: string): boolean {
 			dirName: "web-tree-sitter",
 			pattern: "tree-sitter.wasm",
 			destination: "services/tree-sitter",
-			isOptional: true, // web-tree-sitter can be optional as a fallback
+			isOptional: false, // web-tree-sitter is the required core runtime (provides tree-sitter.js and tree-sitter.wasm)
 		},
 		{
 			dirName: "tiktoken",

@@ -30,22 +30,30 @@
 			<section class="user-posts">
 				<h2>Recent Posts ({{ filteredPosts.length }})</h2>
 
-				<input v-model="searchQuery" type="text" placeholder="Search posts..." class="search-input" />
+				<!-- Posts loading state -->
+				<div v-if="postsLoading" class="loading">Loading posts...</div>
 
-				<ul class="post-list">
-					<li v-for="post in paginatedPosts" :key="post.id" class="post-item" @click="selectPost(post)">
-						<h3>{{ post.title }}</h3>
-						<p>{{ post.excerpt }}</p>
-						<span class="post-date">{{ formatDate(post.createdAt) }}</span>
-					</li>
-				</ul>
+				<!-- Posts error state -->
+				<div v-else-if="postsError" class="error">Error: {{ postsError }}</div>
 
-				<div class="pagination">
-					<button @click="previousPage" :disabled="currentPage === 1 || totalPages === 0">Previous</button>
-					<span v-if="totalPages > 0">Page {{ currentPage }} of {{ totalPages }}</span>
-					<span v-else>No results</span>
-					<button @click="nextPage" :disabled="currentPage === totalPages || totalPages === 0">Next</button>
-				</div>
+				<!-- Posts content -->
+				<template v-else>
+					<input v-model="searchQuery" type="text" placeholder="Search posts..." class="search-input" />
+	<ul class="post-list">
+		<li v-for="post in paginatedPosts" :key="post.id" class="post-item" @click="selectPost(post)">
+			<h3>{{ post.title }}</h3>
+			<p>{{ post.excerpt }}</p>
+			<span class="post-date">{{ formatDate(post.createdAt) }}</span>
+		</li>
+	</ul>
+
+	<div class="pagination">
+		<button @click="previousPage" :disabled="currentPage === 1 || totalPages === 0">Previous</button>
+		<span v-if="totalPages > 0">Page {{ currentPage }} of {{ totalPages }}</span>
+		<span v-else>No results</span>
+		<button @click="nextPage" :disabled="currentPage === totalPages || totalPages === 0">Next</button>
+	</div>
+	</template>
 			</section>
 		</template>
 

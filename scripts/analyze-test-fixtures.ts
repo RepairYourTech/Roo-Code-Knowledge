@@ -93,8 +93,9 @@ function analyzeFile(filePath: string): FileStats {
 			characters,
 		}
 	} catch (error) {
-		console.error(`Error analyzing file ${filePath}:`, error.message)
-		throw new Error(`Failed to analyze file ${filePath}: ${error.message}`)
+		const msg = error instanceof Error ? error.message : String(error)
+		console.error(`Error analyzing file ${filePath}:`, msg)
+		throw new Error(`Failed to analyze file ${filePath}: ${msg}`)
 	}
 }
 
@@ -113,12 +114,14 @@ function getFixtureFiles(fixturesDir: string): string[] {
 						files.push(fullPath)
 					}
 				} catch (entryError) {
-					console.warn(`Warning: Skipping entry ${entry.name} in ${dir}: ${entryError.message}`)
+					const msg = entryError instanceof Error ? entryError.message : String(entryError)
+					console.warn(`Warning: Skipping entry ${entry.name} in ${dir}: ${msg}`)
 					// Continue with other entries
 				}
 			}
 		} catch (error) {
-			console.warn(`Warning: Cannot read directory ${dir}: ${error.message}`)
+			const msg = error instanceof Error ? error.message : String(error)
+			console.warn(`Warning: Cannot read directory ${dir}: ${msg}`)
 			// Skip this directory and continue
 		}
 	}
@@ -214,8 +217,11 @@ async function main() {
 		console.log(JSON.stringify(result, null, 2))
 		process.exit(0)
 	} catch (error) {
-		console.error("Error during fixture analysis:", error.message)
-		console.error(error.stack)
+		const msg = error instanceof Error ? error.message : String(error)
+		console.error("Error during fixture analysis:", msg)
+		if (error instanceof Error) {
+			console.error(error.stack)
+		}
 		process.exit(1)
 	}
 }

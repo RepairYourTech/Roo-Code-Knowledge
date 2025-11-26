@@ -113,7 +113,7 @@ export default `
 ; xUnit - Test classes
 (class_declaration
   name: (identifier) @xunit.test_class_name
-  (#match? @xunit.test_class_name ".*Test.*$")) @definition.xunit_test_class
+  (#match? @xunit.test_class_name "^.*Tests?$")) @definition.xunit_test_class
 
 ; xUnit - Collection fixtures
 (class_declaration
@@ -271,79 +271,79 @@ export default `
 ; Test imports - xUnit
 (using_directive
   name: (qualified_name) @xunit.import_name
-  (#match? @xunit.import_name "^(Xunit|Xunit\\.Runner|Xunit\\.Abstractions|Xunit\\.Extensions)$")) @definition.xunit_import
+  (#match? @xunit.import_name "^(Xunit|Xunit\\\\.Runner|Xunit\\\\.Abstractions|Xunit\\\\.Extensions)$")) @definition.xunit_import
 
 ; Test imports - NUnit
 (using_directive
   name: (qualified_name) @nunit.import_name
-  (#match? @nunit.import_name "^(NUnit|NUnit\\.Framework|NUnit\\.Framework\\.Interfaces|NUnit\\.Framework\\.Internal)$")) @definition.nunit_import
+  (#match? @nunit.import_name "^(NUnit|NUnit\\\\.Framework|NUnit\\\\.Framework\\\\.Interfaces|NUnit\\\\.Framework\\\\.Internal)$")) @definition.nunit_import
 
 ; Test imports - MSTest
 (using_directive
   name: (qualified_name) @mstest.import_name
-  (#match? @mstest.import_name "^(Microsoft\\.VisualStudio\\.TestTools|Microsoft\\.VisualStudio\\.TestTools\\.UnitTesting|Microsoft\\.VisualStudio\\.TestTools\\.Data)$")) @definition.mstest_import
+  (#match? @mstest.import_name "^(Microsoft\\\\.VisualStudio\\\\.TestTools|Microsoft\\\\.VisualStudio\\\\.TestTools\\\\.UnitTesting|Microsoft\\\\.VisualStudio\\\\.TestTools\\\\.Data)$")) @definition.mstest_import
 
 ; Test imports - FluentAssertions
 (using_directive
   name: (qualified_name) @fluent.import_name
-  (#match? @fluent.import_name "^(FluentAssertions|FluentAssertions\\.Extensions|FluentAssertions\\.Execution)$")) @definition.fluent_import
+  (#match? @fluent.import_name "^(FluentAssertions|FluentAssertions\\\\.Extensions|FluentAssertions\\\\.Execution)$")) @definition.fluent_import
 
 ; Test imports - Shouldly
 (using_directive
   name: (qualified_name) @shouldly.import_name
-  (#match? @shouldly.import_name "^(Shouldly|Shouldly\\.Assertions)$")) @definition.shouldly_import
+  (#match? @shouldly.import_name "^(Shouldly|Shouldly\\\\.Assertions)$")) @definition.shouldly_import
 
 ; Test imports - Moq
 (using_directive
   name: (qualified_name) @moq.import_name
-  (#match? @moq.import_name "^(Moq|Moq\\.Mock)$")) @definition.moq_import
+  (#match? @moq.import_name "^(Moq|Moq\\\\.Mock)$")) @definition.moq_import
 
 ; Test imports - NSubstitute
 (using_directive
   name: (qualified_name) @nsubstitute.import_name
-  (#match? @nsubstitute.import_name "^(NSubstitute|NSubstitute\\.Extensions)$")) @definition.nsubstitute_import
+  (#match? @nsubstitute.import_name "^(NSubstitute|NSubstitute\\\\.Extensions)$")) @definition.nsubstitute_import
 
 ; Test configuration classes
 (class_declaration
   name: (identifier) @test.config_class_name
-  (#match? @test.config_class_name ".*(Config|Configuration|Setup|Fixture).*$")) @definition.test_configuration_class
+  (#match? @test.config_class_name ".*(?:Config|Configuration|Setup|Fixture).*$")) @definition.test_configuration_class
 
 ; Test data classes
 (class_declaration
   name: (identifier) @test.data_class_name
-  (#match? @test.data_class_name ".*(TestData|TestCase|TestFixtures|TestDataBuilder).*$")) @definition.test_data_class
+  (#match? @test.data_class_name ".*(?:TestData|TestCase|TestFixtures|TestDataBuilder).*$")) @definition.test_data_class
 
 ; Test helper classes
 (class_declaration
   name: (identifier) @test.helper_class_name
-  (#match? @test.helper_class_name ".*(TestUtil|TestHelper|TestUtils|TestBase).*$")) @definition.test_helper_class
+  (#match? @test.helper_class_name ".*(?:TestUtil|TestHelper|TestUtils|TestBase).*$")) @definition.test_helper_class
 
 ; Test interfaces
 (interface_declaration
   name: (identifier) @test.interface_name
-  (#match? @test.interface_name ".*(ITest|ITestFixture|ITestHelper).*$")) @definition.test_interface
+  (#match? @test.interface_name ".*(?:ITest|ITestFixture|ITestHelper).*$")) @definition.test_interface
 
 ; Test base classes
 (class_declaration
   name: (identifier) @test.base_class_name
-  (#match? @test.base_class_name ".*(TestBase|BaseTest|TestFixtureBase).*$")) @definition.test_base_class
+  (#match? @test.base_class_name ".*(?:TestBase|BaseTest|TestFixtureBase).*$")) @definition.test_base_class
 
 ; Test attributes
 (attribute
   name: (identifier) @test.attribute_name
-  (#match? @test.attribute_name ".*(Test|Fact|Theory|TestCase|TestFixture|TestClass|Setup|TearDown|Initialize|Cleanup|Data|Ignore|Skip|Category|Trait|Property|DataSource|DataRow|Collection|Before|After).*$")) @definition.test_attribute
+  (#match? @test.attribute_name ".*(?:Test|Fact|Theory|TestCase|TestFixture|TestClass|Setup|TearDown|Initialize|Cleanup|Data|Ignore|Skip|Category|Trait|Property|DataSource|DataRow|Collection|Before|After).*$")) @definition.test_attribute
 
 ; Test enums
 (enum_declaration
   name: (identifier) @test.enum_name
-  (#match? @test.enum_name ".*(Test|TestData|TestCase|TestState|TestStatus).*$")) @definition.test_enum
+  (#match? @test.enum_name ".*(?:Test|TestData|TestCase|TestState|TestStatus).*$")) @definition.test_enum
 
 ; Test constants
 (field_declaration
   declaration: (variable_declaration
     declarators: (variable_declarator
       identifier: (identifier) @test.constant_name
-      (#match? @test.constant_name "^(TEST_|MOCK_|FAKE_|STUB_|EXPECTED_|ACTUAL_).*")))) @definition.test_constant
+      (#match? @test.constant_name "^(?:TEST_|MOCK_|FAKE_|STUB_|EXPECTED_|ACTUAL_).*")))) @definition.test_constant
 
 ; Test async methods
 (method_declaration
@@ -357,9 +357,13 @@ export default `
     name: (identifier) @test.async_return
     (#eq? @test.async_return "Task")
     type_arguments: (type_argument_list))) @definition.test_async
-; Test exception handling
-(try_statement) @definition.test_try_statement
-(catch_clause) @definition.test_catch_clause
-(finally_clause) @definition.test_finally_clause
+
+; Test exception handling (scope to test contexts only)
+(method_declaration
+  name: (identifier) @test_exception_method
+  body: (block
+    (try_statement) @test.try_statement
+    (catch_clause) @test.catch_clause
+    (finally_clause)? @test.finally_clause)) @definition.test_exception_handling
 
 `

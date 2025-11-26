@@ -393,15 +393,16 @@ export class OpenRouterEmbedder implements IEmbedder {
 					}
 				}, 1000)
 
+				let timeoutRef: NodeJS.Timeout | null = null
 				try {
 					await new Promise((resolve) => {
-						const timeout = setTimeout(resolve, waitTime)
-						// Clear progress when wait completes
-						// Store timeout reference for cleanup
-						;(progressInterval as any).timeoutRef = timeout
+						timeoutRef = setTimeout(resolve, waitTime)
 					})
 				} finally {
 					clearInterval(progressInterval)
+					if (timeoutRef) {
+						clearTimeout(timeoutRef)
+					}
 				}
 
 				return

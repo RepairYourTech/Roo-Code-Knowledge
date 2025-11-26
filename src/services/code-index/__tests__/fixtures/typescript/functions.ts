@@ -152,12 +152,22 @@ export function compose<T>(...fns: Array<(arg: T) => T>): (arg: T) => T {
 
 // Retry function with exponential backoff
 export async function retry<T>(fn: () => Promise<T>, maxAttempts: number = 3, delay: number = 1000): Promise<T> {
+	// Validate maxAttempts to ensure it's a positive integer
+	if (maxAttempts <= 0) {
+		throw new RangeError("maxAttempts must be a positive integer")
+	}
+
+	let lastError: Error
 	for (let attempt = 1; attempt <= maxAttempts; attempt++) {
 		try {
 			return await fn()
 		} catch (error) {
-			if (attempt === maxAttempts) throw error
+			lastError = error as Error
+			if (attempt === maxAttempts) throw lastError
 			await new Promise((resolve) => setTimeout(resolve, delay * Math.pow(2, attempt - 1)))
 		}
 	}
+
+	// This should never be reached due to the logic above, but TypeScript needs it
+	throw lastError!
 }

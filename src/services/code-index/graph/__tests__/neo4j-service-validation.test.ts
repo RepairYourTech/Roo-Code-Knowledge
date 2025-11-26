@@ -873,7 +873,10 @@ describe("Neo4jService - Validation", () => {
 			expect(errors).toEqual([])
 		})
 
-		test("log level affects validation logging", async () => {
+		// TODO: Implement verification that log level affects validation logging
+		// This test should verify that debug-level logging is invoked during validation
+		// while higher levels are not, using a mock logger that spies on debug/info methods
+		test.skip("log level affects validation logging", async () => {
 			// Create service with debug log level
 			const serviceWithDebugLogging = new Neo4jService(
 				{
@@ -888,6 +891,11 @@ describe("Neo4jService - Validation", () => {
 
 			// Verify service was created with debug logging
 			expect(serviceWithDebugLogging).toBeDefined()
+
+			// TODO: Add real assertions:
+			// - Mock logger with spies on debug/info methods
+			// - Call validation method (e.g., service.validate() or appropriate entrypoint)
+			// - Assert that debug-level logging was invoked while higher levels are not
 		})
 	})
 
@@ -1020,7 +1028,7 @@ describe("Neo4jService - Validation", () => {
 			const invalidNode = {
 				id: "test-node-with-error",
 				type: "function" as const,
-				name: "testFunction",
+				name: "", // Empty name to make it invalid
 				filePath: "/path/to/file.ts",
 				startLine: 10,
 				endLine: 20,

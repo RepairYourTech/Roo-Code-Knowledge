@@ -78,7 +78,34 @@ export class LSPService implements ILSPService {
 			// Extract parameters
 			const parameters: ParameterInfo[] =
 				signature.parameters?.map((param) => {
-					const name = typeof param.label === "string" ? param.label : String(param.label[0])
+					let name: string
+
+					if (typeof param.label === "string") {
+						// Simple string label
+						name = param.label
+					} else if (Array.isArray(param.label) && typeof signature.label === "string") {
+						// Tuple label [start, end] - extract from signature string
+						const [start, end] = param.label
+
+						// Validate that start and end are valid numbers and within bounds
+						if (
+							typeof start === "number" &&
+							typeof end === "number" &&
+							start >= 0 &&
+							end >= 0 &&
+							start <= end &&
+							end <= signature.label.length
+						) {
+							name = signature.label.substring(start, end).trim()
+						} else {
+							console.warn("[LSPService] Invalid parameter label tuple:", param.label)
+							name = "" // Fallback to empty string
+						}
+					} else {
+						// Fallback for any other case
+						console.warn("[LSPService] Unexpected parameter label format:", param.label)
+						name = ""
+					}
 
 					return {
 						name,
@@ -483,19 +510,49 @@ export class LSPService implements ILSPService {
 	 */
 	async searchByType(typeQuery: string, symbolKind?: vscode.SymbolKind): Promise<WorkspaceSymbolInfo[]> {
 		try {
-			// First, get all workspace symbols
+			// Validate and normalize the type query to prevent performance issues
+			if (!typeQuery || typeQuery.trim().length === 0) {
+				console.warn("[LSPService] searchByType called with empty typeQuery - returning empty results")
+				return []
+			}
+
+			// Normalize the query
+			const normalizedQuery = typeQuery.trim()
+
+			// Enforce maximum query length to prevent performance issues
+			const MAX_QUERY_LENGTH = 100
+			if (normalizedQuery.length > MAX_QUERY_LENGTH) {
+				console.warn(
+					`[LSPService] typeQuery too long (${normalizedQuery.length} chars), truncating to ${MAX_QUERY_LENGTH}`,
+				)
+				typeQuery = normalizedQuery.substring(0, MAX_QUERY_LENGTH)
+			} else {
+				typeQuery = normalizedQuery
+			}
+
+			// Use the provided typeQuery instead of empty string to get targeted results
 			const allSymbols = await vscode.commands.executeCommand<vscode.SymbolInformation[]>(
 				"vscode.executeWorkspaceSymbolProvider",
-				"", // Empty query to get all symbols
+				typeQuery, // Use the actual query to limit results
 			)
 
 			if (!allSymbols || allSymbols.length === 0) {
 				return []
 			}
 
+			// Apply client-side limits to prevent memory issues
+			const MAX_RESULTS = 1000
+			const limitedSymbols = allSymbols.slice(0, MAX_RESULTS)
+
+			if (allSymbols.length > MAX_RESULTS) {
+				console.warn(
+					`[LSPService] Workspace symbol query returned ${allSymbols.length} results, limited to ${MAX_RESULTS}`,
+				)
+			}
+
 			const results: WorkspaceSymbolInfo[] = []
 
-			for (const symbol of allSymbols) {
+			for (const symbol of limitedSymbols) {
 				// Filter by symbol kind if specified
 				if (symbolKind && symbol.kind !== symbolKind) {
 					continue

@@ -117,7 +117,7 @@ export class FileWatcher implements IFileWatcher {
 		}
 	}
 
-	private readonly log?: Logger
+	private log?: Logger
 
 	/**
 	 * Initializes the file watcher

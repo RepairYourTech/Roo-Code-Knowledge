@@ -66,7 +66,7 @@ export class CodebaseIndexErrorLogger {
 			const dir = path.dirname(this.logFilePath)
 			await fs.mkdir(dir, { recursive: true })
 		} catch (error) {
-			console.error("[GraphIndexErrorLogger] Failed to create log directory:", error)
+			console.error(`[${this.constructor.name}] Failed to create log directory:`, error)
 		}
 	}
 
@@ -122,9 +122,11 @@ export class CodebaseIndexErrorLogger {
 			return
 		}
 
+		// Move entriesToWrite declaration outside try so it's available in catch
+		let entriesToWrite: any[] = []
 		try {
 			// Get current buffer and clear it
-			const entriesToWrite = [...this.errorBuffer]
+			entriesToWrite = [...this.errorBuffer]
 			this.errorBuffer = []
 
 			// Format entries as JSON lines
@@ -133,9 +135,11 @@ export class CodebaseIndexErrorLogger {
 			// Append to log file
 			await fs.appendFile(this.logFilePath, lines, "utf-8")
 		} catch (error) {
-			console.error("[GraphIndexErrorLogger] Failed to write to log file:", error)
-			// Put entries back in buffer
-			this.errorBuffer.unshift(...this.errorBuffer)
+			console.error(`[${this.constructor.name}] Failed to write to log file:`, error)
+			// Put entries back in buffer using the captured entries
+			if (entriesToWrite.length > 0) {
+				this.errorBuffer.unshift(...entriesToWrite)
+			}
 		}
 	}
 

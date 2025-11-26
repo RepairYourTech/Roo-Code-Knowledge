@@ -11,7 +11,8 @@ Tests:
 """
 
 from functools import wraps
-from typing import Callable, Any, Type
+from typing import Callable, Type
+from contextlib import contextmanager
 import time
 
 
@@ -206,7 +207,6 @@ def fibonacci(n: int) -> int:
 
 
 # Context manager decorator
-from contextlib import contextmanager
 
 @contextmanager
 def managed_resource(name: str):

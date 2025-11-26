@@ -383,7 +383,7 @@ urlpatterns = [
 
 			// Test view metadata
 			const viewNode = new MockNode("decorated_definition", viewsCode)
-			const viewMetadata = extractDjangoViewMetadata(viewNode as Node, viewsCode)
+			const viewMetadata = extractDjangoViewMetadata(viewNode as unknown as Node, viewsCode)
 
 			expect(viewMetadata).toBeDefined()
 			expect(viewMetadata?.viewType).toBe("function_based")
@@ -391,7 +391,7 @@ urlpatterns = [
 
 			// Test model metadata
 			const userNode = new MockNode("class_definition", modelsCode.split("class Post")[0])
-			const userMetadata = extractDjangoModelMetadata(userNode as Node, modelsCode)
+			const userMetadata = extractDjangoModelMetadata(userNode as unknown as Node, modelsCode)
 
 			expect(userMetadata).toBeDefined()
 			expect(userMetadata?.modelName).toBe("User")
@@ -399,7 +399,7 @@ urlpatterns = [
 
 			// Test URL metadata
 			const urlNode = new MockNode("assignment", urlsCode)
-			const urlMetadata = extractDjangoUrlMetadata(urlNode as Node, urlsCode)
+			const urlMetadata = extractDjangoUrlMetadata(urlNode as unknown as Node, urlsCode)
 
 			expect(urlMetadata).toBeDefined()
 			expect(urlMetadata?.urlPattern).toBe("users/<int:user_id>/")

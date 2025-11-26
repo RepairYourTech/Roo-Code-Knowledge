@@ -17,6 +17,7 @@ export class ReachabilityAnalyzer {
 	private context: IReachabilityContext | null = null
 	private config: ReachabilityAnalysisConfig
 	private startTime: number = 0
+	private lastAnalysisStats: { depth: number; time: number; unreachableNodes: number } | null = null
 
 	constructor(config: ReachabilityAnalysisConfig = {}) {
 		this.config = {
@@ -42,6 +43,13 @@ export class ReachabilityAnalyzer {
 
 		// Exit root scope
 		context.exitScope()
+
+		// Store final stats before nullifying context
+		this.lastAnalysisStats = {
+			depth: context.scopeStack.length,
+			time: Date.now() - this.startTime,
+			unreachableNodes: context.unreachableNodes.length,
+		}
 
 		this.context = null
 	}
@@ -229,12 +237,15 @@ export class ReachabilityAnalyzer {
 	 * Get analysis statistics
 	 */
 	getAnalysisStats(): { depth: number; time: number; unreachableNodes: number } | null {
-		if (!this.context) return null
-
-		return {
-			depth: this.context.scopeStack.length,
-			time: Date.now() - this.startTime,
-			unreachableNodes: this.context.unreachableNodes.length,
+		if (this.context) {
+			return {
+				depth: this.context.scopeStack.length,
+				time: Date.now() - this.startTime,
+				unreachableNodes: this.context.unreachableNodes.length,
+			}
 		}
+
+		// Return stored stats if context is null (after analysis completes)
+		return this.lastAnalysisStats
 	}
 }

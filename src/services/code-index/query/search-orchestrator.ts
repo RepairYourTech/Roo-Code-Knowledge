@@ -196,9 +196,23 @@ export class SearchOrchestrator {
 		options?: SearchOrchestrationOptions,
 	): Promise<HybridSearchResult[]> {
 		// Build hybrid search config from analysis weights
+		const sum = analysis.weights.vector + analysis.weights.bm25
+		let vectorWeight: number
+		let bm25Weight: number
+
+		if (sum === 0) {
+			// Use safe defaults when sum is zero
+			vectorWeight = 0.7
+			bm25Weight = 0.3
+		} else {
+			// Calculate normalized weights
+			vectorWeight = analysis.weights.vector / sum
+			bm25Weight = analysis.weights.bm25 / sum
+		}
+
 		const config: HybridSearchConfig = {
-			vectorWeight: analysis.weights.vector / (analysis.weights.vector + analysis.weights.bm25) || 0.7,
-			bm25Weight: analysis.weights.bm25 / (analysis.weights.vector + analysis.weights.bm25) || 0.3,
+			vectorWeight,
+			bm25Weight,
 			fusionStrategy: "weighted",
 		}
 

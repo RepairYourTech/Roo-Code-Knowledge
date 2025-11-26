@@ -99,8 +99,10 @@ export class CodeIndexConfigManager {
 			codebaseIndexSearchMinScore,
 			codebaseIndexSearchMaxResults,
 			neo4jEnabled,
+			neo4jUrl,
 			neo4jUri,
 			neo4jUsername,
+			neo4jDatabase,
 			configSchemaVersion,
 		} = codebaseIndexConfig
 
@@ -178,10 +180,10 @@ export class CodeIndexConfigManager {
 			searchMinScore: codebaseIndexSearchMinScore,
 			searchMaxResults: codebaseIndexSearchMaxResults,
 			neo4jEnabled: neo4jEnabled ?? false,
-			neo4jUrl: neo4jUri ?? "bolt://localhost:7687",
+			neo4jUrl: neo4jUrl ?? neo4jUri ?? "bolt://localhost:7687",
 			neo4jUsername: neo4jUsername ?? "neo4j",
 			neo4jPassword: neo4jPassword ?? "",
-			neo4jDatabase: "neo4j",
+			neo4jDatabase: neo4jDatabase ?? "neo4j",
 			configSchemaVersion,
 			// We need to calculate isConfigured for the object to be complete according to interface
 			isConfigured: this._calculateIsConfigured(embedderProvider, {

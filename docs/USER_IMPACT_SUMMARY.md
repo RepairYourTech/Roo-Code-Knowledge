@@ -108,7 +108,7 @@ This document explains the impact of indexing pipeline remediation on end users,
 
 #### 📊 Real-time Progress Bars
 
-```
+```text
 Indexing Progress: ████████████████████░░░░ 78%
 Files: 7,847 / 10,000 | Blocks: 39,234 / 50,000
 ETA: 3m 24s | Current: Processing src/components/Button.tsx

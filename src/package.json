@@ -477,7 +477,7 @@
 		"pretest": "turbo run bundle --cwd ..",
 		"test": "vitest run",
 		"format": "prettier --write .",
-		"bundle": "node esbuild.mjs",
+		"bundle": "tsx esbuild.mjs",
 		"download-wasms": "tsx ../scripts/download-tree-sitter-wasms.ts",
 		"check-wasms": "node ../scripts/check-tree-sitter-wasms.js",
 		"vscode:prepublish": "pnpm download-wasms && pnpm bundle --production",

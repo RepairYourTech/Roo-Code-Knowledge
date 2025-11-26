@@ -105,7 +105,7 @@ export class SwitchHandler extends BaseControlFlowHandler implements ISwitchHand
 		// Process all children of the case (except the case value itself)
 		for (const child of caseNode.children || []) {
 			if (!child) continue
-			if (child.type === "case") continue // Skip the case declaration
+			if (child.type === "switch_case") continue // Skip the case declaration
 
 			context.processNode(child)
 		}
@@ -155,30 +155,17 @@ export class SwitchHandler extends BaseControlFlowHandler implements ISwitchHand
 		hasDefaultCase: boolean,
 		context: IReachabilityContext,
 	): void {
-		// If there's a default case and all cases have break statements,
-		// then the switch is fully reachable
-		if (hasDefaultCase) {
-			// Check if all cases have explicit break or return/throw
-			const allCasesTerminate = caseBranches.every((branch) => !branch.isReachable)
-
-			if (allCasesTerminate) {
-				// All cases terminate, so code after switch is reachable
-				return
-			}
-		} else {
-			// No default case - switch might not handle all values
-			// This is a complex analysis that depends on the switch value
-			// For now, we'll assume the switch is reachable
-			return
-		}
-
-		// If we get here, we might need to mark the context as unreachable
-		// This is a simplified implementation
+		// Check if all cases terminate (have break/return/throw)
+		const allCasesTerminate = caseBranches.every((branch) => !branch.isReachable)
 		const hasReachableBranch = caseBranches.some((branch) => branch.isReachable)
 
-		if (!hasReachableBranch && !hasDefaultCase) {
-			// No reachable branches and no default case
+		if (hasDefaultCase && allCasesTerminate) {
+			// All cases terminate including default, so code after switch is reachable
+			// No action needed - context remains reachable
+		} else if (!hasDefaultCase && !hasReachableBranch) {
+			// No reachable branches and no default case - switch might not handle the value
 			context.markUnreachable(UnreachableReason.CONDITIONAL_FALSE)
 		}
+		// Otherwise, context remains reachable (either has reachable branches or default case)
 	}
 }

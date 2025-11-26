@@ -36,7 +36,7 @@ interface CachedCodebaseContext {
  * Enhances a message prompt using AI, optionally including task history and codebase context
  */
 export class MessageEnhancer {
-	// LRU cache for common prompt patterns
+	// FIFO cache for common prompt patterns - evicts oldest entries by insertion order when size exceeds limit
 	private static codebaseContextCache: Map<string, CachedCodebaseContext> = new Map()
 	private static readonly CACHE_SIZE_LIMIT = 50 // Conservative limit
 	private static readonly CACHE_TTL_MS = 15 * 60 * 1000 // 15 minutes
@@ -199,7 +199,7 @@ ${contentPreview}`)
 	}
 
 	/**
-	 * Sets a value in the cache with LRU eviction
+	 * Sets a value in the cache with FIFO eviction
 	 * @param key Cache key
 	 * @param value Value to cache
 	 */

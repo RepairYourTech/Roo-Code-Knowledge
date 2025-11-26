@@ -165,26 +165,57 @@ export class QualityMetricsService implements IQualityMetricsService {
 		try {
 			const lines = astNode.text.split("\n")
 			let codeLines = 0
+			let inMultiLineComment = false
 
 			for (const line of lines) {
 				const trimmed = line.trim()
 
-				// Skip empty lines and comment-only lines
+				// Skip empty lines
 				if (trimmed === "") continue
-				if (trimmed.startsWith("//")) continue
-				if (trimmed.startsWith("/*")) {
-					// Handle multi-line comments that span multiple lines
+
+				// Handle multi-line comment state tracking
+				if (inMultiLineComment) {
+					// Check if this line contains the closing of the multi-line comment
 					if (trimmed.includes("*/")) {
-						// This line contains both start and end of comment
-						continue
+						inMultiLineComment = false
+						// If the line also contains code after the closing comment, count it as code
+						const afterComment = trimmed.split("*/")[1]
+						if (afterComment && afterComment.trim()) {
+							codeLines++
+						}
 					}
-					// Skip until we find the end of the multi-line comment
+					// Still in multi-line comment, skip this line
 					continue
 				}
-				if (trimmed.startsWith("*") && !trimmed.startsWith("* ")) continue // Skip continuation of multi-line comment
-				if (trimmed.endsWith("*/")) continue // Skip end of multi-line comment
+
+				// Check for opening of multi-line comment when not already in one
+				if (trimmed.includes("/*")) {
+					// Check if both /* and */ are on the same line (inline comment)
+					const hasInlineComment = trimmed.includes("*/")
+
+					if (hasInlineComment) {
+						// Handle inline /* ... */ comment
+						const beforeComment = trimmed.split("/*")[0]
+						const afterComment = trimmed.split("*/")[1]
+
+						// Count as code if there's content before or after the inline comment
+						if ((beforeComment && beforeComment.trim()) || (afterComment && afterComment.trim())) {
+							codeLines++
+						}
+						// No need to toggle state since it's inline
+						continue
+					} else {
+						// Start of multi-line comment, set state and continue
+						inMultiLineComment = true
+						continue
+					}
+				}
+
+				// Skip comment-only lines (single-line comments)
+				if (trimmed.startsWith("//")) continue
 				if (trimmed.startsWith("#")) continue // Python, shell comments
 				if (trimmed.startsWith("--")) continue // SQL, Lua comments
+				if (trimmed.startsWith("*") && !trimmed.startsWith("* ")) continue // Skip continuation of multi-line comment
 
 				codeLines++
 			}
@@ -368,15 +399,20 @@ export class QualityMetricsService implements IQualityMetricsService {
 				}
 			}
 
-			// Check for logical operators in other node types
-			if (!countedByType && n.text && logicalOperators.some((op) => n.text.includes(op))) {
-				// Additional check for logical operators that might be missed
-				const text = n.text
-				for (const op of logicalOperators) {
-					if (text.includes(op)) {
-						complexity++
-						break // Only count once per node
-					}
+			// Only detect logical operators on node kinds that actually represent operators
+			// Avoid scanning full text which can match inside strings/comments
+			if (
+				!countedByType &&
+				n.type &&
+				(n.type === "LogicalExpression" ||
+					n.type === "BinaryExpression" ||
+					n.type === "&&" ||
+					n.type === "||" ||
+					n.type === "??")
+			) {
+				// Check if this node has logical operators and increment complexity at most once
+				if (n.text && logicalOperators.some((op) => n.text.includes(op))) {
+					complexity++
 				}
 			}
 
@@ -1728,6 +1764,31 @@ export class QualityMetricsService implements IQualityMetricsService {
 	 * @returns Import information
 	 */
 	private parseJSImport(importText: string): ImportInfo {
+		// Combined default + named imports: import React, { useState, useEffect } from 'react'
+		const combinedMatch = importText.match(/import\s+(\w+),?\s*\{([^}]*)\}\s+from\s+['"`]([^'"`]+)['"`]/)
+		if (combinedMatch) {
+			const defaultIdentifier = combinedMatch[1]
+			const namedBlock = combinedMatch[2]
+			const module = combinedMatch[3]
+
+			// Split and trim the named symbols while handling "as" aliases
+			const namedSymbols = namedBlock
+				.split(",")
+				.map((s) => s.trim())
+				.filter((s) => s.length > 0)
+				.map((s) => s.split(" as ")[0].trim())
+
+			// Combine default identifier with named symbols
+			const symbols = [defaultIdentifier, ...namedSymbols]
+
+			return {
+				source: module,
+				symbols,
+				isDefault: true,
+				isDynamic: false,
+			}
+		}
+
 		// Default import: import name from 'module'
 		const defaultMatch = importText.match(/import\s+(\w+)\s+from\s+['"`]([^'"`]+)['"`]/)
 		if (defaultMatch) {

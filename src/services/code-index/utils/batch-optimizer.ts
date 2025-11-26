@@ -40,6 +40,7 @@ interface TokenEstimation {
 	tokenCount: number
 	confidence: number // 0-1
 	method: "length-based" | "complexity-based" | "hybrid"
+	itemCount: number
 }
 
 /**
@@ -131,7 +132,7 @@ export class AdaptiveBatchOptimizer {
 	 */
 	private estimateTokens(items: CodeBlock[]): TokenEstimation {
 		if (items.length === 0) {
-			return { tokenCount: 0, confidence: 1, method: "length-based" }
+			return { tokenCount: 0, confidence: 1, method: "length-based", itemCount: 0 }
 		}
 
 		// Use multiple estimation methods for better accuracy
@@ -147,6 +148,7 @@ export class AdaptiveBatchOptimizer {
 			tokenCount: combinedTokens,
 			confidence: combinedConfidence,
 			method: "hybrid",
+			itemCount: items.length,
 		}
 	}
 
@@ -169,6 +171,7 @@ export class AdaptiveBatchOptimizer {
 			tokenCount: estimatedTokens,
 			confidence,
 			method: "length-based",
+			itemCount: items.length,
 		}
 	}
 
@@ -202,6 +205,7 @@ export class AdaptiveBatchOptimizer {
 			tokenCount: estimatedTokens,
 			confidence,
 			method: "complexity-based",
+			itemCount: items.length,
 		}
 	}
 
@@ -214,9 +218,8 @@ export class AdaptiveBatchOptimizer {
 		}
 
 		// Calculate how many items we can fit within token limits
-		// Use a conservative estimate of average tokens per item based on the current batch
-		const currentBatchSize = Math.max(1, this.config.minBatchSize)
-		const avgTokensPerItem = tokenEstimate.tokenCount / currentBatchSize
+		// Use the actual item count from tokenEstimate instead of hardcoded minBatchSize
+		const avgTokensPerItem = tokenEstimate.itemCount > 0 ? tokenEstimate.tokenCount / tokenEstimate.itemCount : 0
 		const maxItemsByTokens =
 			avgTokensPerItem > 0 ? Math.floor(this.maxTokenLimit / avgTokensPerItem) : this.config.maxBatchSize
 		const maxItemsByItemLimit =

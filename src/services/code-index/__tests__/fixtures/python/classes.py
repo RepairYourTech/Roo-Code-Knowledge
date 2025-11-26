@@ -97,18 +97,22 @@ class User(Entity):
 class AdminUser(User):
     """Admin user with additional permissions"""
     
-    _admin_count = 0
+    _active_admin_ids = set()
     
     def __init__(self, user_id: str, email: str, username: str):
         super().__init__(user_id, email, username)
         self._permissions = {'read', 'write', 'delete'}
         self.add_role('admin')
-        AdminUser._admin_count += 1
+        AdminUser._active_admin_ids.add(id(self))
+    
+    def __del__(self):
+        """Remove instance ID from registry when object is deleted"""
+        AdminUser._active_admin_ids.discard(id(self))
     
     @classmethod
     def get_admin_count(cls) -> int:
-        """Get total number of admin users"""
-        return cls._admin_count
+        """Get total number of active admin users"""
+        return len(cls._active_admin_ids)
     
     @staticmethod
     def is_valid_permission(permission: str) -> bool:
