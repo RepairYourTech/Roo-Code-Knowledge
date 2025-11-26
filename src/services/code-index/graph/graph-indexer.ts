@@ -16,8 +16,8 @@ import { CodebaseIndexErrorLogger } from "./error-logger"
 import { MetadataValidator } from "./metadata-validator"
 import { MAX_METADATA_ARRAY_LENGTH } from "../constants"
 import * as path from "path"
-import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
 import * as vscode from "vscode"
+import { Logger } from "../../../shared/logger"
 import { TelemetryService } from "@roo-code/telemetry"
 
 /**
@@ -31,10 +31,10 @@ export class GraphIndexer implements IGraphIndexer {
 	constructor(
 		private neo4jService: INeo4jService,
 		private errorLogger?: CodebaseIndexErrorLogger,
-		outputChannel?: vscode.OutputChannel,
+		logger?: Logger,
 		telemetryEnabled: boolean = true,
 	) {
-		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
+		this.log = logger
 		this.telemetryEnabled = telemetryEnabled && TelemetryService.hasInstance()
 
 		// Initialize metadata validator with appropriate configuration
@@ -49,7 +49,7 @@ export class GraphIndexer implements IGraphIndexer {
 		)
 	}
 
-	private readonly log: LogFunction
+	private readonly log?: Logger
 
 	/**
 	 * Safely capture telemetry events with error handling
@@ -73,7 +73,7 @@ export class GraphIndexer implements IGraphIndexer {
 		} catch (error) {
 			// Silently fail to avoid impacting indexing performance
 			// Log to debug channel if available
-			this.log(`[GraphIndexer] Telemetry capture failed:`, error)
+			this.log?.info(`[GraphIndexer] Telemetry capture failed:`, error)
 		}
 	}
 
@@ -131,7 +131,7 @@ export class GraphIndexer implements IGraphIndexer {
 		const startTime = this.getTimestamp()
 
 		// Log entry
-		this.log(`[GraphIndexer] indexBlocks ENTRY: Processing ${blocks.length} blocks for file: ${filePath}`)
+		this.log?.info(`[GraphIndexer] indexBlocks ENTRY: Processing ${blocks.length} blocks for file: ${filePath}`)
 
 		// Capture telemetry for indexing start
 		this.captureTelemetry("GRAPH_INDEXING_STARTED", {
@@ -148,8 +148,8 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 
 			// Log extraction summary
-			this.log(`[GraphIndexer] Extracted ${allNodes.length} nodes from ${blocks.length} blocks`)
-			this.log(`[GraphIndexer] Node types: ${this.extractNodeTypes(allNodes).join(", ")}`)
+			this.log?.info(`[GraphIndexer] Extracted ${allNodes.length} nodes from ${blocks.length} blocks`)
+			this.log?.info(`[GraphIndexer] Node types: ${this.extractNodeTypes(allNodes).join(", ")}`)
 
 			// Extract all relationships from all blocks
 			const allRelationships: CodeRelationship[] = []
@@ -159,8 +159,12 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 
 			// Log extraction summary
-			this.log(`[GraphIndexer] Extracted ${allRelationships.length} relationships from ${blocks.length} blocks`)
-			this.log(`[GraphIndexer] Relationship types: ${this.extractRelationshipTypes(allRelationships).join(", ")}`)
+			this.log?.info(
+				`[GraphIndexer] Extracted ${allRelationships.length} relationships from ${blocks.length} blocks`,
+			)
+			this.log?.info(
+				`[GraphIndexer] Relationship types: ${this.extractRelationshipTypes(allRelationships).join(", ")}`,
+			)
 
 			// Create nodes first, then relationships in the same transaction context
 			// This improves consistency and reduces transaction overhead
@@ -169,7 +173,7 @@ export class GraphIndexer implements IGraphIndexer {
 				nodesCreated = allNodes.length
 
 				// Log confirmation
-				this.log(`[GraphIndexer] Successfully created ${nodesCreated} nodes in Neo4j`)
+				this.log?.info(`[GraphIndexer] Successfully created ${nodesCreated} nodes in Neo4j`)
 
 				// Capture telemetry for node creation
 				this.captureTelemetry("GRAPH_NODES_CREATED", {
@@ -185,7 +189,7 @@ export class GraphIndexer implements IGraphIndexer {
 				relationshipsCreated = allRelationships.length
 
 				// Log confirmation
-				this.log(`[GraphIndexer] Successfully created ${relationshipsCreated} relationships in Neo4j`)
+				this.log?.info(`[GraphIndexer] Successfully created ${relationshipsCreated} relationships in Neo4j`)
 
 				// Capture telemetry for relationship creation
 				this.captureTelemetry("GRAPH_RELATIONSHIPS_CREATED", {
@@ -209,7 +213,9 @@ export class GraphIndexer implements IGraphIndexer {
 
 			// Log partial success information if nodes were created
 			if (nodesCreated > 0) {
-				this.log(`[GraphIndexer] Partial success: Created ${nodesCreated} nodes before failure in ${filePath}`)
+				this.log?.info(
+					`[GraphIndexer] Partial success: Created ${nodesCreated} nodes before failure in ${filePath}`,
+				)
 			}
 
 			// Capture telemetry for indexing error with context
@@ -243,7 +249,7 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 
 			// Log to output channel with full context
-			this.log(`[GraphIndexer] Failed to index blocks for ${filePath}:`, {
+			this.log?.info(`[GraphIndexer] Failed to index blocks for ${filePath}:`, {
 				error: errorMessage,
 				stack: errorStack,
 				blockCount: blocks.length,
@@ -261,7 +267,7 @@ export class GraphIndexer implements IGraphIndexer {
 		}
 
 		// Log exit summary
-		this.log(
+		this.log?.info(
 			`[GraphIndexer] indexBlocks EXIT: Successfully indexed ${blocks.length} blocks (${nodesCreated} nodes, ${relationshipsCreated} relationships) for file: ${filePath}`,
 		)
 
@@ -280,13 +286,13 @@ export class GraphIndexer implements IGraphIndexer {
 		const language = this.detectLanguage(filePath)
 
 		// Log entry
-		this.log(`[GraphIndexer] indexFile ENTRY: Received ${blocks.length} blocks for file: ${filePath}`)
+		this.log?.info(`[GraphIndexer] indexFile ENTRY: Received ${blocks.length} blocks for file: ${filePath}`)
 
 		try {
 			// First, remove any existing data for this file
 			await this.removeFile(filePath)
 			// Log confirmation
-			this.log(`[GraphIndexer] Removed existing data for file: ${filePath}`)
+			this.log?.info(`[GraphIndexer] Removed existing data for file: ${filePath}`)
 
 			// Create a file node
 			const fileNode: CodeNode = {
@@ -300,11 +306,11 @@ export class GraphIndexer implements IGraphIndexer {
 
 			await this.neo4jService.upsertNode(fileNode)
 			// Log confirmation
-			this.log(`[GraphIndexer] Created file node: ${fileNode.id}`)
+			this.log?.info(`[GraphIndexer] Created file node: ${fileNode.id}`)
 
 			// Index all blocks
 			// Log delegation
-			this.log(`[GraphIndexer] Delegating ${blocks.length} blocks to indexBlocks for processing`)
+			this.log?.info(`[GraphIndexer] Delegating ${blocks.length} blocks to indexBlocks for processing`)
 			const result = await this.indexBlocks(blocks)
 
 			// Create CONTAINS relationships from file to all top-level nodes
@@ -324,7 +330,7 @@ export class GraphIndexer implements IGraphIndexer {
 			const duration = this.getTimestamp() - startTime
 
 			// Log detailed success summary
-			this.log(
+			this.log?.info(
 				`[GraphIndexer] indexFile SUCCESS: Indexed ${blocks.length} blocks for ${filePath} (${totalNodesCreated} nodes, ${totalRelationshipsCreated} relationships) in ${duration}ms`,
 			)
 
@@ -378,7 +384,7 @@ export class GraphIndexer implements IGraphIndexer {
 			})
 
 			// Log with file path in message for easier debugging
-			this.log(`[GraphIndexer] Failed to remove file from graph: ${filePath}`, error)
+			this.log?.info(`[GraphIndexer] Failed to remove file from graph: ${filePath}`, error)
 
 			// Throw error with enhanced context
 			throw new Error(`Failed to remove file ${filePath} from graph: ${errorMessage}`, { cause: error })
@@ -410,19 +416,23 @@ export class GraphIndexer implements IGraphIndexer {
 		// Determine node type from block type
 		const nodeType = this.mapBlockTypeToNodeType(block.type)
 		if (!nodeType) {
-			this.log(`[GraphIndexer] Unrecognized block type "${block.type}" in ${block.file_path}:${block.start_line}`)
+			this.log?.info(
+				`[GraphIndexer] Unrecognized block type "${block.type}" in ${block.file_path}:${block.start_line}`,
+			)
 			return nodes
 		}
 
 		// Validate line numbers
 		if (block.start_line > block.end_line) {
-			this.log(`[GraphIndexer] Invalid line range ${block.start_line}-${block.end_line} in ${block.file_path}`)
+			this.log?.info(
+				`[GraphIndexer] Invalid line range ${block.start_line}-${block.end_line} in ${block.file_path}`,
+			)
 			return nodes
 		}
 
 		// Validate file path is non-empty
 		if (!block.file_path || block.file_path.trim() === "") {
-			this.log(`[GraphIndexer] Skipping node with empty file path`)
+			this.log?.info(`[GraphIndexer] Skipping node with empty file path`)
 			return nodes
 		}
 
@@ -430,7 +440,7 @@ export class GraphIndexer implements IGraphIndexer {
 		let identifier = block.identifier
 		if (!identifier || identifier.trim() === "") {
 			identifier = this.generateSyntheticIdentifier(block)
-			this.log(
+			this.log?.info(
 				`[GraphIndexer] Using fallback synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
 			)
 		}
@@ -2282,7 +2292,7 @@ export class GraphIndexer implements IGraphIndexer {
 			if (relationshipType === "IMPORTS" && metadata.symbols && Array.isArray(metadata.symbols)) {
 				const symbols = metadata.symbols as string[]
 				if (symbols.length > MAX_METADATA_ARRAY_LENGTH) {
-					this.log(
+					this.log?.info(
 						`[GraphIndexer] IMPORTS symbols array (${symbols.length} items) exceeds limit (${MAX_METADATA_ARRAY_LENGTH}), truncating`,
 					)
 					metadata.symbols = symbols.slice(0, MAX_METADATA_ARRAY_LENGTH)
@@ -2302,7 +2312,7 @@ export class GraphIndexer implements IGraphIndexer {
 			// Validate testMetadata structure
 			if (relationshipType === "TESTS" && metadata.testFramework) {
 				if (typeof metadata.testFramework !== "string") {
-					this.log(`[GraphIndexer] Invalid testFramework type in TESTS metadata for ${blockIdentifier}`)
+					this.log?.info(`[GraphIndexer] Invalid testFramework type in TESTS metadata for ${blockIdentifier}`)
 					metadata.testFramework = String(metadata.testFramework)
 				}
 			}
@@ -2311,7 +2321,7 @@ export class GraphIndexer implements IGraphIndexer {
 			if (metadata.source === "lsp") {
 				// Basic structure validation for LSP-derived metadata
 				if (metadata.typeString && typeof metadata.typeString !== "string") {
-					this.log(`[GraphIndexer] Invalid typeString in LSP metadata for ${blockIdentifier}`)
+					this.log?.info(`[GraphIndexer] Invalid typeString in LSP metadata for ${blockIdentifier}`)
 					metadata.typeString = String(metadata.typeString)
 				}
 			}
@@ -2321,7 +2331,7 @@ export class GraphIndexer implements IGraphIndexer {
 
 			// Log any warnings from validation
 			if (validationResult.warnings.length > 0) {
-				this.log(
+				this.log?.info(
 					`[GraphIndexer] Metadata validation warnings for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
 					validationResult.warnings,
 				)
@@ -2329,7 +2339,7 @@ export class GraphIndexer implements IGraphIndexer {
 
 			// Log if truncation occurred
 			if (validationResult.wasTruncated) {
-				this.log(
+				this.log?.info(
 					`[GraphIndexer] Metadata was truncated for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}`,
 				)
 			}
@@ -2340,7 +2350,7 @@ export class GraphIndexer implements IGraphIndexer {
 		} catch (error) {
 			// Phase 4: Add error handling for metadata creation
 			const errorMessage = error instanceof Error ? error.message : String(error)
-			this.log(
+			this.log?.info(
 				`[GraphIndexer] Error validating metadata for ${relationshipType} relationship${blockIdentifier ? ` (${blockIdentifier})` : ""}:`,
 				errorMessage,
 			)

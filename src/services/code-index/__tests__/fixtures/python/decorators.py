@@ -41,18 +41,20 @@ def repeat(times: int):
     return decorator
 
 
-# Class decorator
+# Class decorator (preserves class semantics using metaclass pattern)
 def singleton(cls: Type) -> Type:
-    """Make a class a singleton"""
-    instances = {}
-    
-    @wraps(cls)
-    def get_instance(*args, **kwargs):
-        if cls not in instances:
-            instances[cls] = cls(*args, **kwargs)
-        return instances[cls]
-    
-    return get_instance
+    """Make a class a singleton using metaclass pattern for proper class semantics"""
+    # Create a metaclass on-the-fly to preserve isinstance, subclassing, and type hints
+    class SingletonMeta(type):
+        _instance = None
+
+        def __call__(cls_inner, *args, **kwargs):
+            if cls_inner._instance is None:
+                cls_inner._instance = super().__call__(*args, **kwargs)
+            return cls_inner._instance
+
+    # Apply the metaclass to the original class
+    return SingletonMeta(cls.__name__, cls.__bases__, dict(cls.__dict__))
 
 
 # Method decorator

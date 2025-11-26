@@ -179,6 +179,11 @@
 				"command": "roo-cline.toggleAutoApprove",
 				"title": "%command.toggleAutoApprove.title%",
 				"category": "%configuration.title%"
+			},
+			{
+				"command": "roo-cline.downloadTreeSitterWasms",
+				"title": "%command.downloadTreeSitterWasms.title%",
+				"category": "%configuration.title%"
 			}
 		],
 		"menus": {
@@ -441,6 +446,27 @@
 					"type": "boolean",
 					"default": true,
 					"description": "%settings.codeIndex.enabled.description%"
+				},
+				"roo-cline.codeIndex.logLevel": {
+					"type": "string",
+					"enum": [
+						"off",
+						"error",
+						"warn",
+						"info",
+						"debug",
+						"trace"
+					],
+					"default": "info",
+					"description": "%settings.codeIndex.logLevel.description%",
+					"enumDescriptions": [
+						"%settings.codeIndex.logLevel.off%",
+						"%settings.codeIndex.logLevel.error%",
+						"%settings.codeIndex.logLevel.warn%",
+						"%settings.codeIndex.logLevel.info%",
+						"%settings.codeIndex.logLevel.debug%",
+						"%settings.codeIndex.logLevel.trace%"
+					]
 				}
 			}
 		}
@@ -452,7 +478,9 @@
 		"test": "vitest run",
 		"format": "prettier --write .",
 		"bundle": "node esbuild.mjs",
-		"vscode:prepublish": "pnpm bundle --production",
+		"download-wasms": "tsx ../scripts/download-tree-sitter-wasms.ts",
+		"check-wasms": "node ../scripts/check-tree-sitter-wasms.js",
+		"vscode:prepublish": "pnpm download-wasms && pnpm bundle --production",
 		"vsix": "mkdirp ../bin && vsce package --no-dependencies --out ../bin",
 		"publish:marketplace": "vsce publish --no-dependencies && ovsx publish --no-dependencies",
 		"watch:bundle": "pnpm bundle --watch",

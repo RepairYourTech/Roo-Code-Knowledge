@@ -34,23 +34,23 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { Package } from "../../shared/package"
 import { BATCH_SEGMENT_THRESHOLD } from "./constants"
-import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
 import { MetricsCollector } from "./utils/metrics-collector"
+import { Logger } from "../../shared/logger"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
  */
 export class CodeIndexServiceFactory {
+	private readonly log: Logger
+
 	constructor(
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
-		private readonly outputChannel: vscode.OutputChannel,
+		private readonly logger: Logger,
 	) {
-		this.log = createOutputChannelLogger(outputChannel)
+		this.log = this.logger
 	}
-
-	private readonly log: LogFunction
 
 	public get config(): CodeIndexConfigManager {
 		return this.configManager
@@ -92,13 +92,13 @@ export class CodeIndexServiceFactory {
 				config.modelId,
 				undefined, // maxItemTokens
 				undefined, // maxBatchItems
-				this.outputChannel,
+				// Note: OpenAICompatibleEmbedder doesn't use outputChannel for logging
 			)
 		} else if (provider === "gemini") {
 			if (!config.geminiOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.geminiConfigMissing"))
 			}
-			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId, this.outputChannel)
+			return new GeminiEmbedder(config.geminiOptions.apiKey, config.modelId) // Note: GeminiEmbedder doesn't use outputChannel for logging
 		} else if (provider === "mistral") {
 			if (!config.mistralOptions?.apiKey) {
 				throw new Error(t("embeddings:serviceFactory.mistralConfigMissing"))
@@ -181,13 +181,7 @@ export class CodeIndexServiceFactory {
 		}
 
 		// Assuming constructor is updated: new QdrantVectorStore(workspacePath, url, vectorSize, apiKey?, outputChannel?)
-		return new QdrantVectorStore(
-			this.workspacePath,
-			config.qdrantUrl,
-			vectorSize,
-			config.qdrantApiKey,
-			this.outputChannel,
-		)
+		return new QdrantVectorStore(this.workspacePath, config.qdrantUrl, vectorSize, config.qdrantApiKey)
 	}
 
 	/**
@@ -230,7 +224,7 @@ export class CodeIndexServiceFactory {
 			database: config.database || "neo4j",
 		}
 
-		return new Neo4jService(neo4jConfig, undefined, this.outputChannel)
+		return new Neo4jService(neo4jConfig, undefined, this.log)
 	}
 
 	/**
@@ -244,7 +238,7 @@ export class CodeIndexServiceFactory {
 		context?: vscode.ExtensionContext,
 	): IGraphIndexer | undefined {
 		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
-			this.log("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
+			this.log.info("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
 			return undefined
 		}
 
@@ -252,12 +246,12 @@ export class CodeIndexServiceFactory {
 		const errorLogger = context ? new CodebaseIndexErrorLogger(context) : undefined
 
 		if (!errorLogger) {
-			this.log("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")
+			this.log.info("[ServiceFactory] GraphIndexer created WITHOUT error logger - context not provided")
 		} else {
-			this.log("[ServiceFactory] GraphIndexer created WITH error logger")
+			this.log.info("[ServiceFactory] GraphIndexer created WITH error logger")
 		}
 
-		return new GraphIndexer(neo4jService, errorLogger, this.outputChannel)
+		return new GraphIndexer(neo4jService, errorLogger, this.log)
 	}
 
 	/**
@@ -293,7 +287,7 @@ export class CodeIndexServiceFactory {
 			batchSize,
 			graphIndexer,
 			stateManager,
-			this.outputChannel,
+			this.logger, // Pass logger instead of outputChannel
 			undefined, // verboseLogging
 			metricsCollector,
 		)
@@ -335,7 +329,7 @@ export class CodeIndexServiceFactory {
 			batchSize,
 			graphIndexer,
 			stateManager,
-			this.outputChannel,
+			this.log, // Pass logger instead of outputChannel
 		)
 	}
 

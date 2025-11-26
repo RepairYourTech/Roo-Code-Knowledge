@@ -25,6 +25,7 @@
 	"command.terminal.addToContext.title": "Add Terminal Content to Context",
 	"command.terminal.fixCommand.title": "Fix This Command",
 	"command.terminal.explainCommand.title": "Explain This Command",
+	"command.downloadTreeSitterWasms.title": "Download Tree-sitter WASM Files",
 	"command.acceptInput.title": "Accept Input/Suggestion",
 	"command.toggleAutoApprove.title": "Toggle Auto-Approve",
 	"configuration.title": "Roo Code",
@@ -44,5 +45,12 @@
 	"settings.apiRequestTimeout.description": "Maximum time in seconds to wait for API responses (0 = no timeout, 1-3600s, default: 600s). Higher values are recommended for local providers like LM Studio and Ollama that may need more processing time.",
 	"settings.newTaskRequireTodos.description": "Require todos parameter when creating new tasks with the new_task tool",
 	"settings.codeIndex.embeddingBatchSize.description": "The batch size for embedding operations during code indexing. Adjust this based on your API provider's limits. Default is 60.",
-	"settings.codeIndex.enabled.description": "Enable or disable the code index feature. When disabled, code indexing will stop and the Neo4j connection will be closed. This setting persists across extension reinstalls."
+	"settings.codeIndex.enabled.description": "Enable or disable the code index feature. When disabled, code indexing will stop and the Neo4j connection will be closed. This setting persists across extension reinstalls.",
+	"settings.codeIndex.logLevel.description": "Controls the verbosity of code indexing logs in the output channel",
+	"settings.codeIndex.logLevel.off": "No logging",
+	"settings.codeIndex.logLevel.error": "Only errors",
+	"settings.codeIndex.logLevel.warn": "Errors and warnings",
+	"settings.codeIndex.logLevel.info": "Errors, warnings, and informational messages (recommended)",
+	"settings.codeIndex.logLevel.debug": "Detailed debugging information",
+	"settings.codeIndex.logLevel.trace": "Extremely verbose trace-level logging"
 }

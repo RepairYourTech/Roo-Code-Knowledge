@@ -150,6 +150,8 @@ export interface ExtensionMessage {
 		| "shareTaskSuccess"
 		| "codeIndexSettingsSaved"
 		| "codeIndexSecretStatus"
+		| "codeIndexLogLevel" // Response: current log level
+		| "codeIndexLogLevelChanged" // Notification: log level was changed
 		| "showDeleteMessageDialog"
 		| "showEditMessageDialog"
 		| "commands"
@@ -236,6 +238,7 @@ export interface ExtensionMessage {
 	visibility?: ShareVisibility
 	rulesFolderPath?: string
 	settings?: any
+	logLevel?: "off" | "error" | "warn" | "info" | "debug" | "trace"
 	messageTs?: number
 	hasCheckpoint?: boolean
 	context?: string

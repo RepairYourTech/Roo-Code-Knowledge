@@ -153,8 +153,8 @@ function getLanguage(filePath: string): string {
 async function runBenchmark(): Promise<BenchmarkResult> {
 	console.log("🚀 Starting Baseline Performance Benchmark...\n")
 
-	// Use absolute path to fixtures since __dirname changes when compiled
-	const fixturesDir = "/home/birdman/RooKnowledge/Roo-Code-Knowledge/src/services/code-index/__tests__/fixtures"
+	// Use portable path resolution for fixtures
+	const fixturesDir = path.join(__dirname, "fixtures")
 	const files = getFixtureFiles(fixturesDir)
 
 	console.log(`📁 Found ${files.length} test fixture files`)

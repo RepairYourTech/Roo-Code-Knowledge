@@ -245,6 +245,9 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 	// Current settings state - tracks user changes
 	const [currentSettings, setCurrentSettings] = useState<LocalCodeIndexSettings>(getDefaultSettings())
 
+	// Log level state
+	const [logLevel, setLogLevel] = useState<"off" | "error" | "warn" | "info" | "debug" | "trace">("info")
+
 	// Update indexing status from parent
 	useEffect(() => {
 		setIndexingStatus(externalIndexingStatus)
@@ -290,11 +293,12 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 		}
 	}, [codebaseIndexConfig])
 
-	// Request initial indexing status
+	// Request initial indexing status and log level
 	useEffect(() => {
 		if (open) {
 			vscode.postMessage({ type: "requestIndexingStatus" })
 			vscode.postMessage({ type: "requestCodeIndexSecretStatus" })
+			vscode.postMessage({ type: "getCodeIndexLogLevel" })
 		}
 		const handleMessage = (event: MessageEvent) => {
 			if (event.data.type === "workspaceUpdated") {
@@ -387,6 +391,10 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 					setSaveStatus("idle")
 					setSaveError(null)
 				}
+			} else if (event.data.type === "codeIndexLogLevel") {
+				setLogLevel(event.data.logLevel || "info")
+			} else if (event.data.type === "codeIndexLogLevelChanged") {
+				setLogLevel(event.data.logLevel || "info")
 			}
 		}
 
@@ -733,6 +741,42 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 								<StandardTooltip content={t("settings:codeIndex.enableDescription")}>
 									<span className="codicon codicon-info text-xs text-vscode-descriptionForeground cursor-help" />
 								</StandardTooltip>
+							</div>
+						</div>
+
+						{/* Log Level Section */}
+						<div className="mb-4 space-y-2">
+							<h4 className="text-sm font-medium">Log Level</h4>
+							<div className="flex items-center gap-2">
+								<VSCodeDropdown
+									value={logLevel}
+									onChange={(e: any) => {
+										const newLevel = e.target.value as typeof logLevel
+										setLogLevel(newLevel)
+										vscode.postMessage({
+											type: "setCodeIndexLogLevel",
+											text: newLevel,
+										})
+									}}
+									className="flex-1">
+									<VSCodeOption value="off">Off - No logging</VSCodeOption>
+									<VSCodeOption value="error">Error - Only errors</VSCodeOption>
+									<VSCodeOption value="warn">Warn - Errors and warnings</VSCodeOption>
+									<VSCodeOption value="info">Info - Standard logging (recommended)</VSCodeOption>
+									<VSCodeOption value="debug">Debug - Detailed diagnostics</VSCodeOption>
+									<VSCodeOption value="trace">Trace - Extremely verbose</VSCodeOption>
+								</VSCodeDropdown>
+								<StandardTooltip content="Controls the verbosity of indexing logs in the output channel">
+									<span className="codicon codicon-info text-xs text-vscode-descriptionForeground cursor-help" />
+								</StandardTooltip>
+							</div>
+							<div className="flex items-center gap-2 mt-2">
+								<VSCodeButton
+									appearance="icon"
+									onClick={() => vscode.postMessage({ type: "showOutput" })}
+									className="text-xs">
+									Show Indexing Logs
+								</VSCodeButton>
 							</div>
 						</div>
 

@@ -30,7 +30,7 @@ export class CodeIndexConfigManager {
 	private searchMaxResults?: number
 	// Neo4j graph database configuration (optional, disabled by default)
 	private neo4jEnabled: boolean = false
-	private neo4jUri?: string = "bolt://localhost:7687"
+	private neo4jUrl?: string = "bolt://localhost:7687"
 	private neo4jUsername?: string = "neo4j"
 	private neo4jPassword?: string
 	private neo4jDatabase?: string = "neo4j"
@@ -87,7 +87,7 @@ export class CodeIndexConfigManager {
 			codebaseIndexSearchMaxResults: 50,
 			// Neo4j defaults (disabled by default, simplified naming)
 			neo4jEnabled: false,
-			neo4jUri: "bolt://localhost:7687",
+			neo4jUrl: "bolt://localhost:7687",
 			neo4jUsername: "neo4j",
 			neo4jPassword: "",
 			neo4jDatabase: "neo4j",
@@ -182,7 +182,7 @@ export class CodeIndexConfigManager {
 			searchMinScore: codebaseIndexSearchMinScore,
 			searchMaxResults: codebaseIndexSearchMaxResults,
 			neo4jEnabled: neo4jEnabled ?? false,
-			neo4jUrl: neo4jUri ?? "bolt://localhost:7687",
+			neo4jUrl: neo4jUrl ?? "bolt://localhost:7687",
 			neo4jUsername: neo4jUsername ?? "neo4j",
 			neo4jPassword: neo4jPassword ?? "",
 			neo4jDatabase: "neo4j",
@@ -253,7 +253,7 @@ export class CodeIndexConfigManager {
 		this.searchMinScore = config.searchMinScore
 		this.searchMaxResults = config.searchMaxResults
 		this.neo4jEnabled = config.neo4jEnabled ?? false
-		this.neo4jUri = config.neo4jUrl
+		this.neo4jUrl = config.neo4jUrl
 		this.neo4jUsername = config.neo4jUsername
 		this.neo4jPassword = config.neo4jPassword
 		this.neo4jDatabase = config.neo4jDatabase
@@ -307,7 +307,7 @@ export class CodeIndexConfigManager {
 			qdrantApiKey: this.qdrantApiKey ?? "",
 			// Neo4j configuration snapshot
 			neo4jEnabled: this.neo4jEnabled,
-			neo4jUrl: this.neo4jUri ?? "",
+			neo4jUrl: this.neo4jUrl ?? "",
 			neo4jUsername: this.neo4jUsername ?? "",
 			neo4jPassword: this.neo4jPassword ?? "",
 			neo4jDatabase: this.neo4jDatabase ?? "",
@@ -356,7 +356,7 @@ export class CodeIndexConfigManager {
 						searchMinScore: this.currentSearchMinScore,
 						searchMaxResults: this.searchMaxResults,
 						neo4jEnabled: this.neo4jEnabled,
-						neo4jUrl: this.neo4jUri,
+						neo4jUrl: this.neo4jUrl,
 						neo4jUsername: this.neo4jUsername,
 						neo4jPassword: this.neo4jPassword,
 						neo4jDatabase: this.neo4jDatabase,
@@ -397,7 +397,7 @@ export class CodeIndexConfigManager {
 					searchMinScore: this.currentSearchMinScore,
 					searchMaxResults: this.searchMaxResults,
 					neo4jEnabled: this.neo4jEnabled,
-					neo4jUrl: this.neo4jUri,
+					neo4jUrl: this.neo4jUrl,
 					neo4jUsername: this.neo4jUsername,
 					neo4jPassword: this.neo4jPassword,
 					neo4jDatabase: this.neo4jDatabase,
@@ -435,7 +435,7 @@ export class CodeIndexConfigManager {
 				searchMinScore: this.currentSearchMinScore,
 				searchMaxResults: this.searchMaxResults,
 				neo4jEnabled: this.neo4jEnabled,
-				neo4jUrl: this.neo4jUri,
+				neo4jUrl: this.neo4jUrl,
 				neo4jUsername: this.neo4jUsername,
 				neo4jPassword: this.neo4jPassword,
 				neo4jDatabase: this.neo4jDatabase,
@@ -446,6 +446,16 @@ export class CodeIndexConfigManager {
 
 	/**
 	 * Checks if the service is properly configured based on the embedder type.
+	 *
+	 * REQUIRED for all configurations:
+	 * - Qdrant URL (vector store - always required)
+	 * - Embedder-specific credentials (API key or base URL)
+	 *
+	 * OPTIONAL:
+	 * - Neo4j configuration (can be enabled/disabled independently)
+	 *
+	 * The feature is considered "configured" when Qdrant + embedder are set up,
+	 * regardless of Neo4j status.
 	 */
 	public isConfigured(): boolean {
 		if (this.embedderProvider === "openai") {
@@ -608,7 +618,7 @@ export class CodeIndexConfigManager {
 
 		// Neo4j configuration changes (requires restart if enabled/disabled or connection details change)
 		const currentNeo4jEnabled = this.neo4jEnabled
-		const currentNeo4jUri = this.neo4jUri ?? ""
+		const currentNeo4jUrl = this.neo4jUrl ?? ""
 		const currentNeo4jUsername = this.neo4jUsername ?? ""
 		const currentNeo4jPassword = this.neo4jPassword ?? ""
 		const currentNeo4jDatabase = this.neo4jDatabase ?? ""
@@ -685,7 +695,7 @@ export class CodeIndexConfigManager {
 			searchMaxResults: this.currentSearchMaxResults,
 			// Neo4j configuration
 			neo4jEnabled: this.neo4jEnabled,
-			neo4jUrl: this.neo4jUri,
+			neo4jUrl: this.neo4jUrl,
 			neo4jUsername: this.neo4jUsername,
 			neo4jPassword: this.neo4jPassword,
 			neo4jDatabase: this.neo4jDatabase,
@@ -724,7 +734,13 @@ export class CodeIndexConfigManager {
 	}
 
 	/**
-	 * Gets whether Neo4j graph database integration is enabled
+	 * Gets whether Neo4j graph database integration is enabled.
+	 *
+	 * NOTE: Neo4j is OPTIONAL. The code indexing feature requires Qdrant (vector store)
+	 * but can work with Qdrant alone. Neo4j provides additional graph-based relationships
+	 * but is not required for basic code indexing functionality.
+	 *
+	 * Users CANNOT use Neo4j without Qdrant - Qdrant is always required.
 	 */
 	public get isNeo4jEnabled(): boolean {
 		return this.neo4jEnabled
@@ -742,7 +758,7 @@ export class CodeIndexConfigManager {
 	} {
 		return {
 			enabled: this.neo4jEnabled,
-			url: this.neo4jUri,
+			url: this.neo4jUrl,
 			username: this.neo4jUsername,
 			password: this.neo4jPassword,
 			database: this.neo4jDatabase,

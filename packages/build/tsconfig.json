@@ -3,9 +3,8 @@
 	"compilerOptions": {
 		"module": "ESNext",
 		"moduleResolution": "bundler",
-		"types": ["vitest/globals"],
-		"outDir": "dist"
+		"types": ["node", "vitest/globals"]
 	},
-	"include": ["src/**/*.ts"],
-	"exclude": ["node_modules"]
+	"include": ["src/**/*"],
+	"exclude": ["node_modules", "dist"]
 }

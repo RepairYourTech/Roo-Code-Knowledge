@@ -60,8 +60,8 @@ async function main() {
 		{
 			name: "copyPaths",
 			setup(build) {
-				build.onEnd(() => {
-					copyPaths(
+				build.onEnd(async () => {
+					await copyPaths(
 						[
 							["../README.md", "README.md"],
 							["../CHANGELOG.md", "CHANGELOG.md"],
@@ -82,7 +82,7 @@ async function main() {
 		{
 			name: "generatePackageJson",
 			setup(build) {
-				build.onEnd(() => {
+				build.onEnd(async () => {
 					const packageJson = JSON.parse(fs.readFileSync(path.join(srcDir, "package.json"), "utf8"))
 
 					const generatedPackageJson = generatePackageJson({
@@ -123,13 +123,28 @@ async function main() {
 		{
 			name: "copyWasms",
 			setup(build) {
-				build.onEnd(() => copyWasms(srcDir, distDir))
+				build.onEnd(async () => {
+					try {
+						const success = await copyWasms(srcDir, distDir)
+						if (!success) {
+							console.warn(`[${name}] [copyWasms] Completed with errors for optional WASM sources`)
+						} else {
+							console.log(`[${name}] [copyWasms] Completed successfully`)
+						}
+					} catch (error) {
+						console.error(`[${name}] [copyWasms] Failed to copy required WASM files:`, error instanceof Error ? error.message : "Unknown error")
+						// Re-throw the error to fail the build
+						throw error
+					}
+				})
 			},
 		},
 		{
 			name: "copyLocales",
 			setup(build) {
-				build.onEnd(() => copyLocales(srcDir, distDir))
+				build.onEnd(async () => {
+					await copyLocales(srcDir, distDir)
+				})
 			},
 		},
 	]

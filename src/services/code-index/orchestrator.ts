@@ -9,8 +9,8 @@ import { CacheManager } from "./cache-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { t } from "../../i18n"
-import { createOutputChannelLogger, type LogFunction } from "../../utils/outputChannelLogger"
 import { MetricsCollector } from "./utils/metrics-collector"
+import { Logger } from "../../shared/logger"
 import {
 	PipelineParallelizer,
 	EmbeddingParallelizer,
@@ -60,10 +60,11 @@ export class CodeIndexOrchestrator {
 		private readonly fileWatcher: IFileWatcher,
 		private readonly graphIndexer?: IGraphIndexer,
 		private readonly neo4jService?: INeo4jService,
+		private readonly logger?: Logger,
 		private readonly outputChannel?: vscode.OutputChannel,
 		metricsCollector?: MetricsCollector,
 	) {
-		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
+		this.log = logger
 		this.metricsCollector = metricsCollector
 
 		// Initialize pipeline parallelizers
@@ -106,26 +107,26 @@ export class CodeIndexOrchestrator {
 		// Set up embedding parallelizer event handlers
 		this.embeddingParallelizer.setEventHandlers({
 			onTaskComplete: async (task, result) => {
-				this.log(`[CodeIndexOrchestrator] Embedding task ${task.id} completed`)
+				this.log?.info(`[CodeIndexOrchestrator] Embedding task ${task.id} completed`)
 				// Record metrics via manager (if available)
 				// Note: This would require access to the manager instance
 				// For now, we'll just log the completion
 			},
 			onTaskError: async (task, error) => {
-				this.log(`[CodeIndexOrchestrator] Embedding task ${task.id} failed:`, error)
+				this.log?.error(`[CodeIndexOrchestrator] Embedding task ${task.id} failed:`, error)
 			},
 		})
 
 		// Set up vector store parallelizer event handlers
 		this.vectorStoreParallelizer.setEventHandlers({
 			onTaskComplete: async (task, result) => {
-				this.log(`[CodeIndexOrchestrator] Vector store task ${task.id} completed`)
+				this.log?.info(`[CodeIndexOrchestrator] Vector store task ${task.id} completed`)
 				// Record metrics via manager (if available)
 				// Note: This would require access to the manager instance
 				// For now, we'll just log the completion
 			},
 			onTaskError: async (task, error) => {
-				this.log(`[CodeIndexOrchestrator] Vector store task ${task.id} failed:`, error)
+				this.log?.error(`[CodeIndexOrchestrator] Vector store task ${task.id} failed:`, error)
 			},
 		})
 
@@ -133,13 +134,13 @@ export class CodeIndexOrchestrator {
 		if (this.graphDatabaseParallelizer) {
 			this.graphDatabaseParallelizer.setEventHandlers({
 				onTaskComplete: async (task, result) => {
-					this.log(`[CodeIndexOrchestrator] Graph database task ${task.id} completed`)
+					this.log?.info(`[CodeIndexOrchestrator] Graph database task ${task.id} completed`)
 					// Record metrics via manager (if available)
 					// Note: This would require access to the manager instance
 					// For now, we'll just log the completion
 				},
 				onTaskError: async (task, error) => {
-					this.log(`[CodeIndexOrchestrator] Graph database task ${task.id} failed:`, error)
+					this.log?.error(`[CodeIndexOrchestrator] Graph database task ${task.id} failed:`, error)
 					// Record metrics via manager (if available)
 					// Note: This would require access to the manager instance
 					// For now, we'll just log the completion
@@ -148,13 +149,13 @@ export class CodeIndexOrchestrator {
 		}
 	}
 
-	private readonly log: LogFunction
+	private readonly log?: Logger
 
 	/**
 	 * Cancel any active indexing operation
 	 */
 	public cancelIndexing(): void {
-		this.log("[CodeIndexOrchestrator] Cancelling active indexing operation")
+		this.log?.info("[CodeIndexOrchestrator] Cancelling active indexing operation")
 		this.scanner.cancel()
 		// Set _isProcessing to false immediately so the UI updates
 		// and subsequent operations know indexing is no longer active
@@ -205,7 +206,7 @@ export class CodeIndexOrchestrator {
 						const errorStack = summary.batchError.stack
 
 						// Enhanced error logging with file-level details
-						this.log(`[CodeIndexOrchestrator] Batch processing failed:`, {
+						this.log?.error(`[CodeIndexOrchestrator] Batch processing failed:`, {
 							error: errorMessage,
 							stack: errorStack,
 							filesProcessed: summary.processedFiles.length,
@@ -228,7 +229,7 @@ export class CodeIndexOrchestrator {
 						)
 
 						// Log file-level details for debugging
-						this.log(`[CodeIndexOrchestrator] Batch processing file-level details:`, {
+						this.log?.error(`[CodeIndexOrchestrator] Batch processing file-level details:`, {
 							successFiles: successFiles.map((f: any) => f.filePath),
 							errorFiles: errorFiles.map((f: any) => ({ filePath: f.filePath, error: f.error })),
 							totalFiles: summary.processedFiles.length,
@@ -314,13 +315,13 @@ export class CodeIndexOrchestrator {
 
 						// Log batch completion with stats
 						if (errorCount > 0) {
-							this.log(`[CodeIndexOrchestrator] Batch completed with errors:`, {
+							this.log?.error(`[CodeIndexOrchestrator] Batch completed with errors:`, {
 								success: successCount,
 								errors: errorCount,
 								total: summary.processedFiles.length,
 							})
 						} else {
-							this.log(`[CodeIndexOrchestrator] Batch completed successfully:`, {
+							this.log?.info(`[CodeIndexOrchestrator] Batch completed successfully:`, {
 								success: successCount,
 								total: summary.processedFiles.length,
 							})
@@ -329,7 +330,7 @@ export class CodeIndexOrchestrator {
 				}),
 			]
 		} catch (error) {
-			this.log("[CodeIndexOrchestrator] Failed to start file watcher:", error)
+			this.log?.error("[CodeIndexOrchestrator] Failed to start file watcher:", error)
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
@@ -350,13 +351,13 @@ export class CodeIndexOrchestrator {
 		// Check if workspace is available first
 		if (!vscode.workspace.workspaceFolders || vscode.workspace.workspaceFolders.length === 0) {
 			this.stateManager.setSystemState("Error", t("embeddings:orchestrator.indexingRequiresWorkspace"))
-			this.log("[CodeIndexOrchestrator] Start rejected: No workspace folder open.")
+			this.log?.info("[CodeIndexOrchestrator] Start rejected: No workspace folder open.")
 			return
 		}
 
 		if (!this.configManager.isFeatureConfigured) {
 			this.stateManager.setSystemState("Standby", "Missing configuration. Save your settings to start indexing.")
-			this.log("[CodeIndexOrchestrator] Start rejected: Missing configuration.")
+			this.log?.info("[CodeIndexOrchestrator] Start rejected: Missing configuration.")
 			return
 		}
 
@@ -366,7 +367,7 @@ export class CodeIndexOrchestrator {
 				this.stateManager.state !== "Error" &&
 				this.stateManager.state !== "Indexed")
 		) {
-			this.log(
+			this.log?.info(
 				`[CodeIndexOrchestrator] Start rejected: Already processing or in state ${this.stateManager.state}.`,
 			)
 			return
@@ -378,7 +379,7 @@ export class CodeIndexOrchestrator {
 		this._isProcessing = true
 		this.stateManager.setSystemState("Indexing", "Initializing services...")
 
-		this.log(`[CodeIndexOrchestrator] Starting indexing for workspace: ${this.workspacePath}`)
+		this.log?.info(`[CodeIndexOrchestrator] Starting indexing for workspace: ${this.workspacePath}`)
 
 		// Track whether we successfully connected to Qdrant and started indexing
 		// This helps us decide whether to preserve cache on error
@@ -401,7 +402,7 @@ export class CodeIndexOrchestrator {
 			if (hasExistingData && !collectionCreated) {
 				// Collection exists with data - run incremental scan to catch any new/changed files
 				// This handles files added while workspace was closed or Qdrant was inactive
-				this.log(
+				this.log?.info(
 					"[CodeIndexOrchestrator] Collection already has indexed data. Running incremental scan for new/changed files...",
 				)
 				this.stateManager.setSystemState("Indexing", "Checking for new or modified files...")
@@ -428,14 +429,17 @@ export class CodeIndexOrchestrator {
 					this.workspacePath,
 					(batchError: Error) => {
 						// Enhanced error logging with detailed context
-						this.log(`[CodeIndexOrchestrator] Error during incremental scan batch: ${batchError.message}`, {
-							error: batchError.message,
-							stack: batchError.stack,
-							timestamp: new Date().toISOString(),
-							currentState: this.stateManager.state,
-							cumulativeBlocksIndexed,
-							cumulativeBlocksFoundSoFar,
-						})
+						this.log?.error(
+							`[CodeIndexOrchestrator] Error during incremental scan batch: ${batchError.message}`,
+							{
+								error: batchError.message,
+								stack: batchError.stack,
+								timestamp: new Date().toISOString(),
+								currentState: this.stateManager.state,
+								cumulativeBlocksIndexed,
+								cumulativeBlocksFoundSoFar,
+							},
+						)
 
 						// Record error metrics if metrics collector is available
 						this.metricsCollector?.recordOperationMetrics("incrementalScanError", 0, false)
@@ -460,7 +464,7 @@ export class CodeIndexOrchestrator {
 					result.filesProcessed,
 				)
 
-				this.log(`[CodeIndexOrchestrator] Incremental scan completed:
+				this.log?.info(`[CodeIndexOrchestrator] Incremental scan completed:
 					Files processed: ${result.stats.processed}
 					Files skipped: ${result.stats.skipped}
 					Files discovered: ${result.filesDiscovered}
@@ -472,11 +476,11 @@ export class CodeIndexOrchestrator {
 
 				// If new files were found and indexed, log the results
 				if (cumulativeBlocksFoundSoFar > 0) {
-					this.log(
+					this.log?.info(
 						`[CodeIndexOrchestrator] Incremental scan completed: ${cumulativeBlocksIndexed} blocks indexed from new/changed files`,
 					)
 				} else {
-					this.log("[CodeIndexOrchestrator] No new or changed files found")
+					this.log?.info("[CodeIndexOrchestrator] No new or changed files found")
 				}
 
 				await this._startWatcher()
@@ -488,7 +492,7 @@ export class CodeIndexOrchestrator {
 			} else {
 				// No existing data or collection was just created - do a full scan
 				this.stateManager.setSystemState("Indexing", "Services ready. Starting workspace scan...")
-				this.log("[CodeIndexOrchestrator] Starting full workspace scan...")
+				this.log?.info("[CodeIndexOrchestrator] Starting full workspace scan...")
 
 				// Mark as incomplete at the start of full scan
 				await this.vectorStore.markIndexingIncomplete()
@@ -511,14 +515,17 @@ export class CodeIndexOrchestrator {
 					this.workspacePath,
 					(batchError: Error) => {
 						// Enhanced error logging with detailed context
-						this.log(`[CodeIndexOrchestrator] Error during initial scan batch: ${batchError.message}`, {
-							error: batchError.message,
-							stack: batchError.stack,
-							timestamp: new Date().toISOString(),
-							currentState: this.stateManager.state,
-							cumulativeBlocksIndexed,
-							cumulativeBlocksFoundSoFar,
-						})
+						this.log?.error(
+							`[CodeIndexOrchestrator] Error during initial scan batch: ${batchError.message}`,
+							{
+								error: batchError.message,
+								stack: batchError.stack,
+								timestamp: new Date().toISOString(),
+								currentState: this.stateManager.state,
+								cumulativeBlocksIndexed,
+								cumulativeBlocksFoundSoFar,
+							},
+						)
 
 						// Record error metrics if metrics collector is available
 						this.metricsCollector?.recordOperationMetrics("initialScanError", 0, false)
@@ -545,7 +552,7 @@ export class CodeIndexOrchestrator {
 					result.filesProcessed,
 				)
 
-				this.log(`[CodeIndexOrchestrator] Full scan completed:
+				this.log?.info(`[CodeIndexOrchestrator] Full scan completed:
 					Files processed: ${stats.processed}
 					Files skipped: ${stats.skipped}
 					Files discovered: ${result.filesDiscovered}
@@ -612,7 +619,7 @@ export class CodeIndexOrchestrator {
 			}
 		} catch (error: any) {
 			// Enhanced error logging with more context
-			this.log("[CodeIndexOrchestrator] Error during indexing:", {
+			this.log?.error("[CodeIndexOrchestrator] Error during indexing:", {
 				error: error instanceof Error ? error.message : String(error),
 				stack: error instanceof Error ? error.stack : undefined,
 				timestamp: new Date().toISOString(),
@@ -629,7 +636,7 @@ export class CodeIndexOrchestrator {
 			const categorizedError = this.stateManager.categorizeError(error)
 
 			// Log categorized error information
-			this.log("[CodeIndexOrchestrator] Categorized error information:", {
+			this.log?.info("[CodeIndexOrchestrator] Categorized error information:", {
 				category: categorizedError.category,
 				retrySuggestion: categorizedError.retrySuggestion,
 				componentStatus,
@@ -701,7 +708,7 @@ export class CodeIndexOrchestrator {
 				try {
 					await this.vectorStore.clearCollection()
 				} catch (cleanupError) {
-					this.log("[CodeIndexOrchestrator] Failed to clean up after error:", cleanupError)
+					this.log?.error("[CodeIndexOrchestrator] Failed to clean up after error:", cleanupError)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
 						stack: cleanupError instanceof Error ? cleanupError.stack : undefined,
@@ -715,12 +722,12 @@ export class CodeIndexOrchestrator {
 			if (indexingStarted) {
 				// Indexing started but failed mid-way - clear cache to avoid cache-Qdrant mismatch
 				await this.cacheManager.clearCacheFile()
-				this.log(
+				this.log?.info(
 					"[CodeIndexOrchestrator] Indexing failed after starting. Clearing cache to avoid inconsistency.",
 				)
 			} else {
 				// Never connected to Qdrant - preserve cache for future incremental scan
-				this.log(
+				this.log?.info(
 					"[CodeIndexOrchestrator] Failed to connect to Qdrant. Preserving cache for future incremental scan.",
 				)
 			}
@@ -754,7 +761,7 @@ export class CodeIndexOrchestrator {
 	 * Dispose of the orchestrator and clean up parallelizers
 	 */
 	public dispose(): void {
-		this.log("[CodeIndexOrchestrator] Disposing orchestrator and cleaning up parallelizers")
+		this.log?.info("[CodeIndexOrchestrator] Disposing orchestrator and cleaning up parallelizers")
 
 		// Shutdown parallelizers
 		this.embeddingParallelizer?.shutdown()
@@ -784,14 +791,14 @@ export class CodeIndexOrchestrator {
 			try {
 				if (this.configManager.isFeatureConfigured) {
 					await this.vectorStore.deleteCollection()
-					this.log("[CodeIndexOrchestrator] Qdrant collection deleted successfully")
+					this.log?.info("[CodeIndexOrchestrator] Qdrant collection deleted successfully")
 				} else {
-					this.log("[CodeIndexOrchestrator] Service not configured, skipping vector collection clear.")
+					this.log?.info("[CodeIndexOrchestrator] Service not configured, skipping vector collection clear.")
 				}
 			} catch (error: any) {
 				const errorMsg = `Failed to clear Qdrant collection: ${error.message}`
 				errors.push(errorMsg)
-				this.log("[CodeIndexOrchestrator]", errorMsg, error)
+				this.log?.error("[CodeIndexOrchestrator]", errorMsg, error)
 				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 					error: error instanceof Error ? error.message : String(error),
 					stack: error instanceof Error ? error.stack : undefined,
@@ -810,17 +817,17 @@ export class CodeIndexOrchestrator {
 			}
 
 			// Clear Neo4j graph database if enabled or if service is available
-			this.log(`[CodeIndexOrchestrator] Neo4j clearing check: neo4jService=${!!this.neo4jService}`)
+			this.log?.info(`[CodeIndexOrchestrator] Neo4j clearing check: neo4jService=${!!this.neo4jService}`)
 
 			if (this.neo4jService) {
-				this.log("[CodeIndexOrchestrator] Starting Neo4j graph database clear...")
+				this.log?.info("[CodeIndexOrchestrator] Starting Neo4j graph database clear...")
 				try {
 					await this.neo4jService.clearAll()
-					this.log("[CodeIndexOrchestrator] Neo4j graph database cleared successfully")
+					this.log?.info("[CodeIndexOrchestrator] Neo4j graph database cleared successfully")
 				} catch (error: any) {
 					const errorMsg = `Failed to clear Neo4j graph: ${error.message}`
 					errors.push(errorMsg)
-					this.log("[CodeIndexOrchestrator]", errorMsg, error)
+					this.log?.error("[CodeIndexOrchestrator]", errorMsg, error)
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 						error: error instanceof Error ? error.message : String(error),
 						stack: error instanceof Error ? error.stack : undefined,
@@ -849,7 +856,7 @@ export class CodeIndexOrchestrator {
 				}
 
 				if (neo4jConfig.url && neo4jConfig.username) {
-					this.log(
+					this.log?.info(
 						"[CodeIndexOrchestrator] Neo4j service not active, creating temporary connection for clearing...",
 					)
 					const tempService = new Neo4jService(neo4jConfig)
@@ -857,14 +864,14 @@ export class CodeIndexOrchestrator {
 						await tempService.initialize()
 						if (tempService.isConnected()) {
 							await tempService.clearAll()
-							this.log(
+							this.log?.info(
 								"[CodeIndexOrchestrator] Neo4j graph database cleared successfully (temp connection)",
 							)
 						}
 					} catch (error: any) {
 						const errorMsg = `Failed to clear Neo4j graph (temp connection): ${error.message}`
 						errors.push(errorMsg)
-						this.log("[CodeIndexOrchestrator]", errorMsg, error)
+						this.log?.error("[CodeIndexOrchestrator]", errorMsg, error)
 
 						// Report categorized error to state manager
 						const categorized = this.stateManager.categorizeError(error)

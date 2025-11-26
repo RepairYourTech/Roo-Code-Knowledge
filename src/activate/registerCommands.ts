@@ -599,6 +599,56 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			vscode.window.showErrorMessage(`Failed to run diagnostics: ${errorMessage}`)
 		}
 	},
+	downloadTreeSitterWasms: async () => {
+		await vscode.window.withProgress(
+			{
+				location: vscode.ProgressLocation.Notification,
+				title: "Downloading Tree-sitter WASM files...",
+				cancellable: false,
+			},
+			async (progressToken) => {
+				try {
+					// Import the new download module
+					const { downloadTreeSitterWasms } = await import("../services/tree-sitter/download-wasms")
+
+					// Get the extension path from context
+					const extensionPath = context.extensionUri.fsPath
+
+					// Execute the download using the new module
+					const result = await downloadTreeSitterWasms({
+						extensionPath,
+						progressToken,
+						outputChannel,
+					})
+
+					if (result.success) {
+						// Show success message with details
+						const message = `Successfully downloaded ${result.successCount}/${result.totalExpected} Tree-sitter WASM files (${(result.totalSize / 1024 / 1024).toFixed(2)} MB). Restart the extension or reload the window for changes to take effect.`
+						await vscode.window.showInformationMessage(message)
+						outputChannel.appendLine(`[DownloadTreeSitterWasms] Success: ${message}`)
+					} else {
+						// Show partial success message
+						const message = `Downloaded ${result.successCount}/${result.totalExpected} files. Some parsing functionality may be limited. Check output channel for details.`
+						await vscode.window.showWarningMessage(message)
+						outputChannel.appendLine(`[DownloadTreeSitterWasms] Partial success: ${message}`)
+					}
+				} catch (error) {
+					const errorMessage = error instanceof Error ? error.message : String(error)
+
+					// Log error to output channel
+					outputChannel.appendLine(`[DownloadTreeSitterWasms] Error: ${errorMessage}`)
+					if (error instanceof Error && error.stack) {
+						outputChannel.appendLine(`Stack trace: ${error.stack}`)
+					}
+
+					// Show error message to user
+					await vscode.window.showErrorMessage(
+						`Failed to download Tree-sitter WASM files: ${errorMessage}. Please check the output channel for more details.`,
+					)
+				}
+			},
+		)
+	},
 })
 
 export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {

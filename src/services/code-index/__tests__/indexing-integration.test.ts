@@ -1,56 +1,27 @@
-// Mock VSCode APIs
-vi.mock("vscode", () => ({
-	EventEmitter: vi.fn().mockImplementation(() => ({
-		event: vi.fn(),
-		fire: vi.fn(),
-		dispose: vi.fn(),
-	})),
-	workspace: {
-		getConfiguration: vi.fn().mockReturnValue({
-			get: vi.fn(),
-		}),
-	},
-	Uri: {
-		file: vi.fn(),
-	},
-	commands: {
-		executeCommand: vi.fn(),
-	},
-	window: {
-		showErrorMessage: vi.fn(),
-	},
-}))
-
 // Mock ContextProxy
 vi.mock("../../../core/config/ContextProxy")
 
 // Mock embeddingModels module
 vi.mock("../../../shared/embeddingModels")
 
-// Mock telemetry
-vi.mock("../../../core/telemetry", () => ({
-	TelemetryService: {
-		getInstance: vi.fn().mockReturnValue({
-			sendTelemetryEvent: vi.fn(),
-		}),
-	},
-}))
-
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
-import { CodeIndexManager } from "../manager"
-import { CodeIndexServiceFactory } from "../service-factory"
-import type { MockedClass } from "vitest"
-import * as path from "path"
-
-// Mock vscode module
+// Mock vscode module - unified mock combining all required behaviors
 vi.mock("vscode", () => {
 	const testPath = require("path")
 	const testWorkspacePath = testPath.join(testPath.sep, "test", "workspace")
 	return {
+		EventEmitter: vi.fn().mockImplementation(() => ({
+			event: vi.fn(),
+			fire: vi.fn(),
+			dispose: vi.fn(),
+		})),
 		window: {
 			activeTextEditor: null,
+			showErrorMessage: vi.fn(),
 		},
 		workspace: {
+			getConfiguration: vi.fn().mockReturnValue({
+				get: vi.fn(),
+			}),
 			workspaceFolders: [
 				{
 					uri: { fsPath: testWorkspacePath },
@@ -65,9 +36,21 @@ vi.mock("vscode", () => {
 				dispose: vi.fn(),
 			}),
 		},
+		Uri: {
+			file: vi.fn(),
+		},
 		RelativePattern: vi.fn().mockImplementation((base, pattern) => ({ base, pattern })),
+		commands: {
+			executeCommand: vi.fn(),
+		},
 	}
 })
+
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest"
+import { CodeIndexManager } from "../manager"
+import { CodeIndexServiceFactory } from "../service-factory"
+import type { MockedClass } from "vitest"
+import * as path from "path"
 
 // Mock TelemetryService
 vi.mock("@roo-code/telemetry", () => ({

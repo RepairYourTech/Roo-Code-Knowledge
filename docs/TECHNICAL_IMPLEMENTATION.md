@@ -421,7 +421,7 @@ class Neo4jTransaction implements INeo4jTransaction {
 
 ### 5. Reachability Analysis System
 
-**File:** [`src/services/code-index/quality/reachability-context.ts`](src/services/code-index/quality/IMPLEMENTATION_SUMMARY.md:24)
+**File:** [`src/services/code-index/quality/reachability-context.ts`](src/services/code-index/quality/reachability-context.ts:24)
 
 Sophisticated scope-based tracking system for accurate unreachable code detection.
 

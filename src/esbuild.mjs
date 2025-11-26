@@ -46,8 +46,8 @@ async function main() {
 		{
 			name: "copyFiles",
 			setup(build) {
-				build.onEnd(() => {
-					copyPaths(
+				build.onEnd(async () => {
+					await copyPaths(
 						[
 							["../README.md", "README.md"],
 							["../CHANGELOG.md", "CHANGELOG.md"],
@@ -66,16 +66,29 @@ async function main() {
 			name: "copyWasms",
 			setup(build) {
 				console.log("[copyWasms] Plugin registered")
-				build.onEnd(() => {
+				build.onEnd(async () => {
 					console.log("[copyWasms] Plugin executing - copying WASM files")
-					copyWasms(srcDir, distDir)
+					try {
+						const success = await copyWasms(srcDir, distDir)
+						if (!success) {
+							console.warn("[copyWasms] Completed with errors for optional WASM sources")
+						} else {
+							console.log("[copyWasms] Completed successfully")
+						}
+					} catch (error) {
+						console.error("[copyWasms] Failed to copy required WASM files:", error instanceof Error ? error.message : "Unknown error")
+						// Re-throw the error to fail the build
+						throw error
+					}
 				})
 			},
 		},
 		{
 			name: "copyLocales",
 			setup(build) {
-				build.onEnd(() => copyLocales(srcDir, distDir))
+				build.onEnd(async () => {
+					await copyLocales(srcDir, distDir)
+				})
 			},
 		},
 		{
@@ -123,7 +136,7 @@ async function main() {
 
 	if (watch) {
 		await Promise.all([extensionCtx.watch(), workerCtx.watch()])
-		copyLocales(srcDir, distDir)
+		await copyLocales(srcDir, distDir)
 		setupLocaleWatcher(srcDir, distDir)
 	} else {
 		await Promise.all([extensionCtx.rebuild(), workerCtx.rebuild()])

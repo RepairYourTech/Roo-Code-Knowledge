@@ -151,6 +151,26 @@ If you prefer to install the VSIX package manually:
 
 ---
 
+## Tree-Sitter WASM Files
+
+The code indexing feature requires tree-sitter WASM files for parsing various programming languages. These files are committed to the repository in `src/services/tree-sitter/` for reliable builds.
+
+### If WASM files are missing:
+
+```bash
+pnpm download-wasms
+```
+
+This downloads ~30 language parsers (~5-10MB total) from the `tree-sitter-wasms` package.
+
+### Verifying WASM files:
+
+```bash
+pnpm --filter roo-cline check-wasms
+```
+
+---
+
 ## Troubleshooting
 
 ### Codebase Index Not Working

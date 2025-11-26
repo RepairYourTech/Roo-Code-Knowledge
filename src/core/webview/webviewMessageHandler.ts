@@ -2648,6 +2648,9 @@ export const webviewMessageHandler = async (
 					return
 				}
 				if (manager.isFeatureEnabled && manager.isFeatureConfigured) {
+					// Mark as user-initiated before starting
+					await manager.markUserInitiatedIndexing()
+
 					// Mimic extension startup behavior: initialize first, which will
 					// check if Qdrant container is active and reuse existing collection
 					await manager.initialize(provider.contextProxy)
@@ -2714,6 +2717,65 @@ export const webviewMessageHandler = async (
 						error: error instanceof Error ? error.message : String(error),
 					},
 				})
+			}
+			break
+		}
+		case "getCodeIndexLogLevel": {
+			try {
+				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				if (!manager) {
+					provider.log("Cannot get log level: No workspace folder open")
+					provider.postMessageToWebview({
+						type: "codeIndexLogLevel",
+						logLevel: "info", // Default fallback
+					})
+					return
+				}
+
+				const currentLevel = manager.getLogLevel()
+				provider.postMessageToWebview({
+					type: "codeIndexLogLevel",
+					logLevel: currentLevel,
+				})
+			} catch (error) {
+				provider.log(`Error getting log level: ${error instanceof Error ? error.message : String(error)}`)
+				provider.postMessageToWebview({
+					type: "codeIndexLogLevel",
+					logLevel: "info", // Default fallback on error
+				})
+			}
+			break
+		}
+		case "setCodeIndexLogLevel": {
+			try {
+				const manager = provider.getCurrentWorkspaceCodeIndexManager()
+				if (!manager) {
+					provider.log("Cannot set log level: No workspace folder open")
+					return
+				}
+
+				const newLevel = message.text as "off" | "error" | "warn" | "info" | "debug" | "trace"
+				if (!newLevel || !["off", "error", "warn", "info", "debug", "trace"].includes(newLevel)) {
+					provider.log(`Invalid log level: ${newLevel}`)
+					return
+				}
+
+				// Update the manager's log level
+				manager.setLogLevel(newLevel)
+
+				// Also update the VSCode setting to persist across sessions
+				const config = vscode.workspace.getConfiguration("roo-cline")
+				await config.update("codeIndex.logLevel", newLevel, vscode.ConfigurationTarget.Global)
+
+				// Notify webview of successful change
+				provider.postMessageToWebview({
+					type: "codeIndexLogLevelChanged",
+					logLevel: newLevel,
+				})
+
+				provider.log(`Code index log level changed to: ${newLevel}`)
+			} catch (error) {
+				provider.log(`Error setting log level: ${error instanceof Error ? error.message : String(error)}`)
 			}
 			break
 		}

@@ -18,6 +18,25 @@ import typescriptQuery from "./typescript"
 
 export default `${typescriptQuery}
 
+; ===== TSX FALLBACK PATTERNS =====
+; Emergency fallback for JSX elements - last resort pattern
+; This pattern may be overly broad and impact index size in high-volume projects
+; Consider tuning or disabling for large codebases
+(jsx_element) @definition.emergency.jsx_any_element
+
+; Emergency fallback for JSX self-closing elements - last resort pattern
+; This pattern may be overly broad and impact index size in high-volume projects
+; Consider tuning or disabling for large codebases
+(jsx_self_closing_element) @definition.emergency.jsx_any_self_closing
+
+; Any Function Returning JSX (critical for React components)
+(arrow_function
+  body: (jsx_element)) @definition.jsx_arrow_component
+
+(arrow_function
+  body: (parenthesized_expression
+    (jsx_element))) @definition.jsx_arrow_component_parens
+
 ; ===== REACT IMPORTS =====
 ; React import detection
 (import_statement

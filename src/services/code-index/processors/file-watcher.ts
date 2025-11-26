@@ -32,7 +32,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { sanitizeErrorMessage } from "../shared/validation-helpers"
 import { Package } from "../../../shared/package"
-import { createOutputChannelLogger, type LogFunction } from "../../../utils/outputChannelLogger"
+import { Logger } from "../../../shared/logger"
 
 /**
  * Implementation of the file watcher interface
@@ -92,9 +92,9 @@ export class FileWatcher implements IFileWatcher {
 		batchSegmentThreshold?: number,
 		graphIndexer?: IGraphIndexer,
 		private readonly stateManager?: any, // CodeIndexStateManager - optional for backward compatibility
-		private readonly outputChannel?: vscode.OutputChannel,
+		private readonly logger?: Logger,
 	) {
-		this.log = outputChannel ? createOutputChannelLogger(outputChannel) : () => {}
+		this.log = this.logger
 		this.bm25Index = bm25Index
 		this.graphIndexer = graphIndexer
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
@@ -117,7 +117,7 @@ export class FileWatcher implements IFileWatcher {
 		}
 	}
 
-	private readonly log: LogFunction
+	private readonly log?: Logger
 
 	/**
 	 * Initializes the file watcher

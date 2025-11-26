@@ -17,6 +17,11 @@ import {
 	MAX_CHARS_TOLERANCE_FACTOR,
 	SEMANTIC_MAX_CHARS,
 	ABSOLUTE_MAX_CHARS,
+	ENABLE_DETAILED_AST_LOGGING,
+	MAX_AST_LOG_DEPTH,
+	MAX_CONTENT_PREVIEW_CHARS,
+	ENABLE_EMERGENCY_FALLBACK,
+	MIN_EMERGENCY_FALLBACK_CHARS,
 } from "../constants"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -393,7 +398,8 @@ export class CodeParser implements ICodeParser {
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 						location: "parseContent:loadParser",
 					})
-					return []
+					logger.warn(`Parser load failed for ${ext}, falling back to chunking`, "CodeParser")
+					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 				}
 			} else {
 				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
@@ -428,7 +434,8 @@ export class CodeParser implements ICodeParser {
 					logger.error(errorMsg, "CodeParser")
 					logger.error(`Stack: ${error instanceof Error ? error.stack : "N/A"}`, "CodeParser")
 					// Return empty array - graceful degradation
-					return []
+					logger.warn(`WASM directory unavailable, falling back to chunking for ${filePath}`, "CodeParser")
+					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 				}
 
 				const loadPromise = loadRequiredLanguageParsers([filePath], wasmDir, this.metricsCollector)
@@ -486,7 +493,8 @@ export class CodeParser implements ICodeParser {
 						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
 						location: "parseContent:loadParser",
 					})
-					return []
+					logger.warn(`Parser loading failed for ${ext}, falling back to chunking`, "CodeParser")
+					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 				} finally {
 					this.pendingLoads.delete(ext)
 				}
@@ -500,8 +508,9 @@ export class CodeParser implements ICodeParser {
 				`Available parsers in loadedParsers: ${Object.keys(this.loadedParsers).join(", ")}`,
 				"CodeParser",
 			)
-			logger.warn(`Suggestion: Check if WASM files are present for ${ext} extension`, "CodeParser")
-			return []
+			logger.warn(`No WASM parser for ${ext}, forcing fallback chunking`, "CodeParser")
+			this.metricsCollector?.recordParserMetric(ext, "fallback")
+			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 		}
 
 		logger.debug(`Attempting to parse ${filePath} with ${ext} parser`, "CodeParser")
@@ -518,6 +527,52 @@ export class CodeParser implements ICodeParser {
 			} else {
 				logger.warn(`Parser returned null tree for ${filePath}`, "CodeParser")
 			}
+
+			// AST structure diagnostics
+			if (ENABLE_DETAILED_AST_LOGGING && tree && tree.rootNode) {
+				// Log the first 10 child node types of the root
+				const rootChildren = tree.rootNode.children.slice(0, 10)
+				logger.debug(
+					`Root node children types: ${rootChildren
+						.filter((c) => c !== null)
+						.map((c) => c!.type)
+						.join(", ")}`,
+					"CodeParser",
+				)
+
+				// Log tree's text length vs content length to detect parsing issues
+				const treeTextLength = tree.rootNode.text.length
+				const contentLength = content.length
+				logger.debug(
+					`Tree text length: ${treeTextLength}, Content length: ${contentLength}, Match: ${treeTextLength === contentLength}`,
+					"CodeParser",
+				)
+
+				// Add recursive function to log AST structure up to MAX_AST_LOG_DEPTH levels deep (only in debug mode)
+				const logASTStructure = (node: Node, depth: number, maxDepth: number) => {
+					if (depth > maxDepth) return
+
+					const indent = "  ".repeat(depth)
+					const nodeInfo = `${indent}${node.type} (${node.startPosition.row}:${node.startPosition.column}-${node.endPosition.row}:${node.endPosition.column})`
+					logger.debug(nodeInfo, "CodeParser")
+
+					// Log first few children to avoid too much output
+					const childrenToLog = node.children.slice(0, 5)
+					childrenToLog.forEach((child) => {
+						if (child) {
+							logASTStructure(child, depth + 1, maxDepth)
+						}
+					})
+
+					if (node.children.length > 5) {
+						logger.debug(`${indent}  ... and ${node.children.length - 5} more children`, "CodeParser")
+					}
+				}
+
+				// Log AST structure up to MAX_AST_LOG_DEPTH levels deep
+				logger.debug(`AST structure for ${filePath} (up to ${MAX_AST_LOG_DEPTH} levels):`, "CodeParser")
+				logASTStructure(tree.rootNode, 0, MAX_AST_LOG_DEPTH)
+			}
 		} catch (e) {
 			logger.error(
 				`Error parsing ${filePath} with ${ext} parser: ${e instanceof Error ? e.message : String(e)}`,
@@ -528,14 +583,43 @@ export class CodeParser implements ICodeParser {
 				"CodeParser",
 			)
 			this.metricsCollector?.recordParserMetric(ext, "parseFailed")
-			return []
+			logger.warn(`Tree parsing failed for ${filePath}, falling back to chunking`, "CodeParser")
+			this.metricsCollector?.recordParserMetric(ext, "fallback")
+			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 		}
 
 		// We don't need to get the query string from languageQueries since it's already loaded
 		// in the language object
 		logger.debug(`Executing query for ${ext} on ${filePath}`, "CodeParser")
-		const captures = tree ? language.query.captures(tree.rootNode) : []
-		logger.debug(`Query captures for ${filePath}: ${captures.length}`, "CodeParser")
+
+		// Query execution diagnostics
+		let captures: any[] = []
+		if (tree && language.query) {
+			try {
+				// Log the query pattern count
+				logger.debug(`Query has ${language.query.patternCount} patterns`, "CodeParser")
+
+				// Log the query capture names
+				if (language.query.captureNames && language.query.captureNames.length > 0) {
+					logger.debug(`Query capture names: ${language.query.captureNames.join(", ")}`, "CodeParser")
+				} else {
+					logger.debug(`Query has no capture names defined`, "CodeParser")
+				}
+
+				// Execute the query with try-catch to detect runtime errors
+				captures = language.query.captures(tree.rootNode)
+				logger.debug(`Query captures for ${filePath}: ${captures.length}`, "CodeParser")
+			} catch (error) {
+				logger.error(
+					`Query execution error for ${filePath}: ${error instanceof Error ? error.message : String(error)}`,
+					"CodeParser",
+				)
+				captures = []
+			}
+		} else {
+			logger.debug(`Skipping query execution - tree: ${!!tree}, query: ${!!language?.query}`, "CodeParser")
+			captures = []
+		}
 
 		// Log capture results details
 		if (captures.length > 0) {
@@ -561,6 +645,76 @@ export class CodeParser implements ICodeParser {
 			logger.debug(`  - Content length: ${content.length} characters`, "CodeParser")
 			logger.debug(`  - MIN_BLOCK_CHARS threshold: ${MIN_BLOCK_CHARS}`, "CodeParser")
 
+			// Enhanced diagnostics for empty captures
+			// Log the first MAX_CONTENT_PREVIEW_CHARS characters of file content (sanitized)
+			const contentPreview = content
+				.slice(0, MAX_CONTENT_PREVIEW_CHARS)
+				.replace(/[\r\n\t]/g, " ")
+				.trim()
+			logger.debug(
+				`  - Content preview (first ${MAX_CONTENT_PREVIEW_CHARS} chars): "${contentPreview}"`,
+				"CodeParser",
+			)
+
+			// Log the tree structure summary (node types present)
+			if (tree && tree.rootNode) {
+				const nodeTypeCounts = new Map<string, number>()
+				const collectNodeTypesWithCounts = (node: Node) => {
+					nodeTypeCounts.set(node.type, (nodeTypeCounts.get(node.type) || 0) + 1)
+					node.children.forEach((child) => {
+						if (child) collectNodeTypesWithCounts(child)
+					})
+				}
+				collectNodeTypesWithCounts(tree.rootNode)
+
+				// Sort by count descending
+				const sortedNodeTypes = Array.from(nodeTypeCounts.entries())
+					.sort((a, b) => b[1] - a[1])
+					.slice(0, 20) // Top 20 most common
+
+				logger.debug(
+					`Top node types in AST: ${sortedNodeTypes.map(([type, count]) => `${type}(${count})`).join(", ")}`,
+					"CodeParser",
+				)
+			}
+
+			// Log why fallback chunking is being triggered
+			logger.debug(`  - Reason for fallback: No query captures found`, "CodeParser")
+
+			// Add comparison: Expected node types in query vs Found node types in tree
+			if (language.query && language.query.captureNames && tree && tree.rootNode) {
+				const expectedNodeTypes = language.query.captureNames.filter((name) => !name.startsWith("@")).join(", ")
+				const actualNodeTypes = new Set<string>()
+				const collectActualTypes = (node: Node) => {
+					actualNodeTypes.add(node.type)
+					node.children.forEach((child) => {
+						if (child) collectActualTypes(child)
+					})
+				}
+				collectActualTypes(tree.rootNode)
+				const actualNodeTypesList = Array.from(actualNodeTypes).sort()
+
+				logger.debug(`  - Expected node types in query: [${expectedNodeTypes}]`, "CodeParser")
+				logger.debug(`  - Found node types in tree: [${actualNodeTypesList.join(", ")}]`, "CodeParser")
+			}
+
+			// Query pattern analysis
+			if (language.query) {
+				// Extract node type patterns from query string (simplified regex approach)
+				const queryString = language.query.toString() || ""
+				const nodeTypePattern = /\((\w+)/g
+				const queryNodeTypes = new Set<string>()
+				let match
+				while ((match = nodeTypePattern.exec(queryString)) !== null) {
+					queryNodeTypes.add(match[1])
+				}
+
+				logger.debug(
+					`Query expects these node types: ${Array.from(queryNodeTypes).slice(0, 20).join(", ")}`,
+					"CodeParser",
+				)
+			}
+
 			// Record telemetry for empty captures to help refine fallback behavior
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
 				error: `No captures found for file: ${filePath} (extension: ${ext}, content length: ${content.length})`,
@@ -573,19 +727,9 @@ export class CodeParser implements ICodeParser {
 				contentLargeEnough: content.length >= MIN_BLOCK_CHARS,
 			})
 
-			// Trigger fallback chunking immediately for empty captures if content is sufficient
-			if (content.length >= MIN_BLOCK_CHARS) {
-				logger.debug(
-					`Triggering fallback chunking for ${filePath} due to empty captures (content length: ${content.length}, threshold: ${MIN_BLOCK_CHARS})`,
-					"CodeParser",
-				)
-				this.metricsCollector?.recordParserMetric(ext, "fallback")
-				return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
-			}
-
-			// Don't immediately return - let the method continue to handle empty captures
-			// in the later phase designed for fallback behavior
-			// This preserves the semantic contract of parseContent() for callers
+			// Note: We don't trigger fallback chunking immediately for empty captures anymore
+			// Instead, we let the method continue to handle empty captures in the later phase
+			// This ensures consistent control flow and allows the emergency fallback logic to apply
 		}
 
 		const results: CodeBlock[] = []
@@ -597,16 +741,21 @@ export class CodeParser implements ICodeParser {
 		const testMetadata = this.detectTestFile(filePath, tree, ext)
 
 		// Process captures if not empty
-		const queue: Node[] = Array.from(captures).map((capture) => capture.node)
+		// Filter and prioritize captures to ensure specific patterns take precedence over emergency patterns
+		const filteredCaptures = this.prioritizeCaptures(captures)
+		const queue: Node[] = Array.from(filteredCaptures).map((capture: any) => capture.node)
 
-		// Handle empty captures case - record diagnostics but don't immediately return
+		// Handle empty captures case - record diagnostics but continue processing
 		// This allows later phases to handle fallback behavior as designed
 		if (queue.length === 0 && captures.length === 0) {
 			logger.debug(`Empty captures queue for ${filePath}`, "CodeParser")
 			// Continue processing - the empty queue will skip the while loop
-			// and the method will return an empty results array, preserving the
-			// semantic contract for callers expecting empty arrays when no structured blocks are found
+			// and the method will apply fallback chunking or emergency fallback later
 		}
+
+		// Track MIN_BLOCK_CHARS filtering statistics
+		let minBlockFilteredCount = 0
+		let smallestFilteredSize = Infinity
 
 		while (queue.length > 0) {
 			const currentNode = queue.shift()!
@@ -703,7 +852,7 @@ export class CodeParser implements ICodeParser {
 					const start_line = adjustedStartLine // Use adjusted start line (includes comments)
 					const end_line = currentNode.endPosition.row + 1
 					const contentToUse = contentWithComments // Use content with comments
-					const contentPreview = contentToUse.slice(0, 100)
+					const contentPreview = contentToUse.slice(0, MAX_CONTENT_PREVIEW_CHARS)
 					const segmentHash = createHash("sha256")
 						.update(`${filePath}-${start_line}-${end_line}-${contentToUse.length}-${contentPreview}`)
 						.digest("hex")
@@ -779,8 +928,73 @@ export class CodeParser implements ICodeParser {
 						})
 					}
 				}
+			} else {
+				// Track MIN_BLOCK_CHARS filtering diagnostics
+				minBlockFilteredCount++
+				if (currentNode.text.length < smallestFilteredSize) {
+					smallestFilteredSize = currentNode.text.length
+				}
+				logger.debug(
+					`Filtered node below MIN_BLOCK_CHARS: type=${currentNode.type}, size=${currentNode.text.length} chars, threshold=${MIN_BLOCK_CHARS}`,
+					"CodeParser",
+				)
 			}
 			// Nodes smaller than minBlockChars are ignored
+		}
+
+		// Track MIN_BLOCK_CHARS filtering statistics
+		if (minBlockFilteredCount > 0) {
+			logger.debug(
+				`MIN_BLOCK_CHARS filtering summary for ${filePath}: filtered ${minBlockFilteredCount} nodes, smallest=${smallestFilteredSize} chars, threshold=${MIN_BLOCK_CHARS}`,
+				"CodeParser",
+			)
+		}
+
+		// Fallback chunking: If no blocks were created from captures and content is sufficient, use fallback chunking
+		if (results.length === 0 && content.length >= MIN_BLOCK_CHARS) {
+			logger.debug(
+				`Applying fallback chunking for ${filePath} due to empty captures (content length: ${content.length}, threshold: ${MIN_BLOCK_CHARS})`,
+				"CodeParser",
+			)
+			this.metricsCollector?.recordParserMetric(ext, "fallback")
+			const fallbackResults = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+			results.push(...fallbackResults)
+		}
+
+		// Emergency fallback: If no blocks were created and file has content, create one block for entire file
+		if (results.length === 0 && content.trim().length > 0) {
+			// Check if emergency fallback is enabled and content meets minimum threshold
+			if (!ENABLE_EMERGENCY_FALLBACK || content.length < MIN_EMERGENCY_FALLBACK_CHARS) {
+				logger.debug(
+					`Emergency fallback skipped for ${filePath}: ENABLE_EMERGENCY_FALLBACK=${ENABLE_EMERGENCY_FALLBACK}, content.length=${content.length}, MIN_EMERGENCY_FALLBACK_CHARS=${MIN_EMERGENCY_FALLBACK_CHARS}`,
+					"CodeParser",
+				)
+				return results
+			}
+
+			logger.warn(
+				`Emergency fallback at parseContent level: No blocks created for ${filePath} (${content.length} chars). Creating single block.`,
+				"CodeParser",
+			)
+
+			const segmentHash = createHash("sha256")
+				.update(`${filePath}-emergency-parseContent-${content.length}`)
+				.digest("hex")
+
+			if (!seenSegmentHashes.has(segmentHash)) {
+				seenSegmentHashes.add(segmentHash)
+				results.push({
+					file_path: filePath,
+					identifier: null,
+					type: "emergency_fallback_full_file",
+					start_line: 1,
+					end_line: content.split("\n").length,
+					content: content,
+					segmentHash,
+					fileHash,
+				})
+				logger.info(`Emergency fallback created 1 block for ${filePath} at parseContent level`, "CodeParser")
+			}
 		}
 
 		return results
@@ -991,9 +1205,32 @@ export class CodeParser implements ICodeParser {
 		fileHash: string,
 		seenSegmentHashes: Set<string>,
 	): CodeBlock[] {
+		const ext = path.extname(filePath).slice(1).toLowerCase()
+
+		// Diagnostics for why fallback was triggered
 		logger.debug(`Starting fallback chunking for ${filePath}`, "CodeParser")
+
+		// Log if it's due to empty captures
+		const isDueToEmptyCaptures = true // This method is called when captures are empty
+		if (isDueToEmptyCaptures) {
+			logger.debug(`Fallback reason: Empty query captures`, "CodeParser")
+		}
+
+		// Log if it's due to unsupported extension
+		const isUnsupportedExtension = shouldUseFallbackChunking(`.${ext}`)
+		if (isUnsupportedExtension) {
+			logger.debug(`Fallback reason: Unsupported extension ${ext}`, "CodeParser")
+		}
+
+		// Log content details and expected chunk count
+		const lineCount = content.split("\n").length
+		const expectedChunkCount = Math.ceil(content.length / MIN_FALLBACK_CHUNK_CHARS)
 		logger.debug(
-			`File details: content length=${content.length}, lines=${content.split("\n").length}, MIN_FALLBACK_CHUNK_CHARS=${MIN_FALLBACK_CHUNK_CHARS}`,
+			`File details: content length=${content.length}, lines=${lineCount}, MIN_FALLBACK_CHUNK_CHARS=${MIN_FALLBACK_CHUNK_CHARS}`,
+			"CodeParser",
+		)
+		logger.debug(
+			`Expected chunk count: ~${expectedChunkCount} chunks (content length / MIN_FALLBACK_CHUNK_CHARS)`,
 			"CodeParser",
 		)
 
@@ -1005,7 +1242,7 @@ export class CodeParser implements ICodeParser {
 			"fallback_chunk",
 			seenSegmentHashes,
 			1,
-			MIN_FALLBACK_CHUNK_CHARS,
+			MIN_FALLBACK_CHUNK_CHARS, // Use the constant instead of hardcoded value
 		)
 
 		logger.debug(`Fallback chunking completed: created ${chunks.length} blocks for ${filePath}`, "CodeParser")
@@ -1015,7 +1252,40 @@ export class CodeParser implements ICodeParser {
 				"CodeParser",
 			)
 		} else {
-			logger.debug(`First block sample: ${chunks[0].content.slice(0, 100)}...`, "CodeParser")
+			logger.debug(
+				`First block sample: ${chunks[0].content.slice(0, MAX_CONTENT_PREVIEW_CHARS)}...`,
+				"CodeParser",
+			)
+		}
+
+		// Emergency fallback: If fallback chunking returns 0 blocks, create a single block for the entire file
+		if (chunks.length === 0 && content.trim().length > 0) {
+			// Check if emergency fallback is enabled and content meets minimum threshold
+			if (!ENABLE_EMERGENCY_FALLBACK || content.length < MIN_EMERGENCY_FALLBACK_CHARS) {
+				logger.debug(
+					`Emergency fallback skipped for ${filePath}: ENABLE_EMERGENCY_FALLBACK=${ENABLE_EMERGENCY_FALLBACK}, content.length=${content.length}, MIN_EMERGENCY_FALLBACK_CHARS=${MIN_EMERGENCY_FALLBACK_CHARS}`,
+					"CodeParser",
+				)
+				return chunks
+			}
+
+			logger.warn(`Emergency fallback: Creating single block for entire file ${filePath}`, "CodeParser")
+			const segmentHash = createHash("sha256").update(`${filePath}-emergency-${content.length}`).digest("hex")
+
+			if (!seenSegmentHashes.has(segmentHash)) {
+				seenSegmentHashes.add(segmentHash)
+				chunks.push({
+					file_path: filePath,
+					identifier: null,
+					type: "emergency_fallback",
+					start_line: 1,
+					end_line: lines.length,
+					content: content,
+					segmentHash,
+					fileHash,
+				})
+				logger.info(`Emergency fallback created 1 block for ${filePath}`, "CodeParser")
+			}
 		}
 
 		return chunks
@@ -1219,6 +1489,34 @@ export class CodeParser implements ICodeParser {
 			"class", // Generic class type
 		]
 		return classTypes.includes(node.type)
+	}
+
+	/**
+	 * Prioritizes captures to ensure specific patterns take precedence over emergency patterns
+	 * Emergency patterns (prefixed with "emergency.") are only used when no specific patterns match
+	 * @param captures Array of query captures
+	 * @returns Filtered and prioritized captures
+	 */
+	private prioritizeCaptures(captures: any[]): any[] {
+		// Separate emergency and specific captures
+		const emergencyCaptures: any[] = []
+		const specificCaptures: any[] = []
+
+		captures.forEach((capture) => {
+			if (capture.name && capture.name.startsWith("definition.emergency.")) {
+				emergencyCaptures.push(capture)
+			} else {
+				specificCaptures.push(capture)
+			}
+		})
+
+		// If we have specific captures, only use those
+		if (specificCaptures.length > 0) {
+			return specificCaptures
+		}
+
+		// If no specific captures, use emergency captures as last resort
+		return emergencyCaptures
 	}
 
 	/**

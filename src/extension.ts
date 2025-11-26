@@ -112,7 +112,11 @@ export async function activate(context: vscode.ExtensionContext) {
 			if (manager) {
 				codeIndexManagers.push(manager)
 
-				// Initialize in background; do not block extension activation
+				// Initialize in background (loads configuration, prepares services)
+				// Auto-starts indexing ONLY if:
+				// 1. Feature is enabled (roo-cline.codeIndex.enabled = true)
+				// 2. Feature is configured (embedder + Qdrant configured)
+				// 3. Indexing was running when extension/IDE was last closed
 				void manager.initialize(contextProxy).catch((error) => {
 					const message = error instanceof Error ? error.message : String(error)
 					outputChannel.appendLine(
@@ -383,6 +387,15 @@ export async function activate(context: vscode.ExtensionContext) {
 // This method is called when your extension is deactivated.
 export async function deactivate() {
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
+
+	// Use the public disposeAll() method to properly clean up all CodeIndexManager instances
+	try {
+		CodeIndexManager.disposeAll()
+	} catch (error) {
+		outputChannel.appendLine(
+			`Failed to dispose CodeIndexManager instances: ${error instanceof Error ? error.message : String(error)}`,
+		)
+	}
 
 	if (cloudService && CloudService.hasInstance()) {
 		try {

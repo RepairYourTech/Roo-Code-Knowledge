@@ -112,128 +112,144 @@ export function copyPaths(copyPaths: [string, string, CopyPathOptions?][], srcDi
 		}
 	})
 }
+interface WasmSource {
+	/** Directory name in node_modules */
+	dirName: string
+	/** Glob pattern to find WASM files relative to the directory */
+	pattern: string
+	/** Destination directory (relative to distDir) */
+	destination: string
+	/** Whether this WASM source is optional (logs error and continues) or required (throws) */
+	isOptional?: boolean
+}
 
-export function copyWasms(srcDir: string, distDir: string): void {
+export function copyWasms(srcDir: string, distDir: string): boolean {
 	const nodeModulesDir = path.join(srcDir, "node_modules")
-	const servicesDir = path.join(distDir, "services", "tree-sitter")
+	let hasErrors = false
 
-	// Create the services/tree-sitter directory
-	mkdirp.sync(servicesDir)
-	console.log(`[copyWasms] Created directory: ${servicesDir}`)
+	// Define WASM sources to copy
+	const wasmSources: WasmSource[] = [
+		{
+			dirName: "tree-sitter-wasms",
+			pattern: "out/*.wasm",
+			destination: "services/tree-sitter",
+			isOptional: false, // tree-sitter-wasms is required for core functionality
+		},
+		{
+			dirName: "web-tree-sitter",
+			pattern: "tree-sitter.wasm",
+			destination: "services/tree-sitter",
+			isOptional: true, // web-tree-sitter can be optional as a fallback
+		},
+		{
+			dirName: "tiktoken",
+			pattern: "tiktoken_bg.wasm",
+			destination: "", // root of dist directory
+			isOptional: true, // tiktoken is optional for tokenization functionality
+		},
+	]
 
-	// Copy WASM files from tree-sitter-wasms
-	const treeSitterWasmsDir = path.join(nodeModulesDir, "tree-sitter-wasms")
-	if (fs.existsSync(treeSitterWasmsDir)) {
-		const wasmFiles = glob.sync("out/*.wasm", { cwd: treeSitterWasmsDir })
+	for (const source of wasmSources) {
+		const sourceDir = path.join(nodeModulesDir, source.dirName)
 
-		wasmFiles.forEach((wasmFile) => {
-			const srcPath = path.join(treeSitterWasmsDir, wasmFile)
-			const destPath = path.join(servicesDir, path.basename(wasmFile))
-
-			try {
-				fs.copyFileSync(srcPath, destPath)
-				console.log(`[copyWasms] Copied: ${srcPath} -> ${destPath}`)
-
-				// Verify the file was copied successfully
-				if (fs.existsSync(destPath)) {
-					const srcStats = fs.statSync(srcPath)
-					const destStats = fs.statSync(destPath)
-					if (srcStats.size === destStats.size) {
-						console.log(`[copyWasms] Verified: ${destPath} (${destStats.size} bytes)`)
-					} else {
-						console.error(`[copyWasms] Verification failed: Size mismatch for ${destPath}`)
-					}
-				} else {
-					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
-				}
-			} catch (error) {
-				console.error(
-					`[copyWasms] Failed to copy ${srcPath} to ${destPath}:`,
-					error instanceof Error ? error.message : "Unknown error",
+		if (!fs.existsSync(sourceDir)) {
+			const message = `[copyWasms] Source directory not found: ${sourceDir}`
+			if (source.isOptional) {
+				console.error(message)
+				continue
+			} else {
+				const error = new Error(
+					`${message}. This directory is required for the build to succeed. Please ensure the ${source.dirName} package is installed.`,
 				)
+				throw error
 			}
-		})
+		}
 
-		console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from tree-sitter-wasms`)
-	} else {
-		console.error(`[copyWasms] Source directory not found: ${treeSitterWasmsDir}`)
+		// Create destination directory if needed
+		const destDir = path.join(distDir, source.destination)
+		const existed = fs.existsSync(destDir)
+		mkdirp.sync(destDir)
+		if (!existed) {
+			console.log(`[copyWasms] Created directory: ${destDir}`)
+		}
+
+		try {
+			const wasmFiles = glob.sync(source.pattern, { cwd: sourceDir })
+
+			if (wasmFiles.length === 0) {
+				const message = `[copyWasms] No WASM files found in ${sourceDir} matching pattern "${source.pattern}"`
+				if (source.isOptional) {
+					console.warn(message)
+					continue
+				} else {
+					throw new Error(`${message}. This may indicate a corrupted installation of ${source.dirName}.`)
+				}
+			}
+
+			for (const wasmFile of wasmFiles) {
+				const srcPath = path.join(sourceDir, wasmFile)
+				const destPath = path.join(destDir, path.basename(wasmFile))
+
+				// Check if file already exists from a previous source
+				if (fs.existsSync(destPath)) {
+					console.warn(`[copyWasms] Warning: Overwriting existing file at ${destPath}`)
+				}
+
+				try {
+					fs.copyFileSync(srcPath, destPath)
+					console.log(`[copyWasms] Copied: ${srcPath} -> ${destPath}`)
+
+					// Verify the file was copied successfully
+					if (fs.existsSync(destPath)) {
+						const srcStats = fs.statSync(srcPath)
+						const destStats = fs.statSync(destPath)
+						if (srcStats.size === destStats.size) {
+							console.log(`[copyWasms] Verified: ${destPath} (${destStats.size} bytes)`)
+						} else {
+							const errorMessage = `[copyWasms] Verification failed: Size mismatch for ${destPath} (expected: ${srcStats.size}, actual: ${destStats.size})`
+							if (source.isOptional) {
+								console.error(errorMessage)
+								hasErrors = true
+							} else {
+								throw new Error(errorMessage)
+							}
+						}
+					} else {
+						const errorMessage = `[copyWasms] Verification failed: File not found at ${destPath} after copy`
+						if (source.isOptional) {
+							console.error(errorMessage)
+							hasErrors = true
+						} else {
+							throw new Error(errorMessage)
+						}
+					}
+				} catch (error) {
+					const errorMessage = `[copyWasms] Failed to copy ${srcPath} to ${destPath}: ${error instanceof Error ? error.message : "Unknown error"}`
+					if (source.isOptional) {
+						console.error(errorMessage)
+						hasErrors = true
+					} else {
+						throw new Error(errorMessage)
+					}
+				}
+			}
+
+			console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from ${source.dirName}`)
+		} catch (error) {
+			if (error instanceof Error) {
+				throw error
+			}
+			const errorMessage = `[copyWasms] Unexpected error processing ${source.dirName}: ${error}`
+			if (source.isOptional) {
+				console.error(errorMessage)
+				hasErrors = true
+			} else {
+				throw new Error(errorMessage)
+			}
+		}
 	}
 
-	// Copy WASM files from web-tree-sitter
-	const webTreeSitterDir = path.join(nodeModulesDir, "web-tree-sitter")
-	if (fs.existsSync(webTreeSitterDir)) {
-		const wasmFiles = glob.sync("lib/*.wasm", { cwd: webTreeSitterDir })
-
-		wasmFiles.forEach((wasmFile) => {
-			const srcPath = path.join(webTreeSitterDir, wasmFile)
-			const destPath = path.join(servicesDir, path.basename(wasmFile))
-
-			try {
-				fs.copyFileSync(srcPath, destPath)
-				console.log(`[copyWasms] Copied: ${srcPath} -> ${destPath}`)
-
-				// Verify the file was copied successfully
-				if (fs.existsSync(destPath)) {
-					const srcStats = fs.statSync(srcPath)
-					const destStats = fs.statSync(destPath)
-					if (srcStats.size === destStats.size) {
-						console.log(`[copyWasms] Verified: ${destPath} (${destStats.size} bytes)`)
-					} else {
-						console.error(`[copyWasms] Verification failed: Size mismatch for ${destPath}`)
-					}
-				} else {
-					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
-				}
-			} catch (error) {
-				console.error(
-					`[copyWasms] Failed to copy ${srcPath} to ${destPath}:`,
-					error instanceof Error ? error.message : "Unknown error",
-				)
-			}
-		})
-
-		console.log(`[copyWasms] Copied ${wasmFiles.length} WASM files from web-tree-sitter`)
-	} else {
-		console.error(`[copyWasms] Source directory not found: ${webTreeSitterDir}`)
-	}
-
-	// Copy tiktoken WASM file to dist directory root
-	const tiktokenDir = path.join(nodeModulesDir, "tiktoken")
-	if (fs.existsSync(tiktokenDir)) {
-		const tiktokenWasmFiles = glob.sync("*.wasm", { cwd: tiktokenDir })
-
-		tiktokenWasmFiles.forEach((wasmFile) => {
-			const srcPath = path.join(tiktokenDir, wasmFile)
-			const destPath = path.join(distDir, wasmFile)
-
-			try {
-				fs.copyFileSync(srcPath, destPath)
-				console.log(`[copyWasms] Copied tiktoken: ${srcPath} -> ${destPath}`)
-
-				// Verify the file was copied successfully
-				if (fs.existsSync(destPath)) {
-					const srcStats = fs.statSync(srcPath)
-					const destStats = fs.statSync(destPath)
-					if (srcStats.size === destStats.size) {
-						console.log(`[copyWasms] Verified tiktoken: ${destPath} (${destStats.size} bytes)`)
-					} else {
-						console.error(`[copyWasms] Verification failed: Size mismatch for tiktoken ${destPath}`)
-					}
-				} else {
-					console.error(`[copyWasms] Verification failed: File not found at ${destPath}`)
-				}
-			} catch (error) {
-				console.error(
-					`[copyWasms] Failed to copy tiktoken ${srcPath} to ${destPath}:`,
-					error instanceof Error ? error.message : "Unknown error",
-				)
-			}
-		})
-
-		console.log(`[copyWasms] Copied ${tiktokenWasmFiles.length} tiktoken WASM files`)
-	} else {
-		console.error(`[copyWasms] Source directory not found: ${tiktokenDir}`)
-	}
+	return !hasErrors // Return success status
 }
 
 export function copyLocales(srcDir: string, distDir: string): void {

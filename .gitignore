@@ -49,3 +49,6 @@ logs
 
 # Qdrant
 qdrant_storage/
+
+# Tree-sitter WASM files are committed to ensure reliable builds
+# They are downloaded once via 'pnpm download-wasms' and checked in

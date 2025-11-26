@@ -11,23 +11,56 @@ export const MAX_BLOCK_CHARS = 5000
  * During fallback chunking, this can filter out small but valid code snippets. If too many valid
  * blocks are being filtered, check the logs for filtered chunk counts and consider adjusting.
  *
+ * When files generate 0 blocks, check the logs for 'MIN_BLOCK_CHARS filtering' messages to see if valid blocks are being filtered.
+ * Enable detailed diagnostics with ROO_CODE_DETAILED_AST_LOGGING=true environment variable.
+ *
  * The logging in parser.ts tracks filtered chunks with messages like:
  * - "MIN_BLOCK_CHARS filtering: X chunks filtered out (smallest: Y chars, threshold: 10)"
  * - "High number of filtered chunks (X) - consider lowering MIN_BLOCK_CHARS threshold from 10"
  */
 export const MIN_BLOCK_CHARS = 10
 /**
- * Minimum character threshold for fallback chunking (10 characters).
+ * Minimum character threshold for fallback chunking (1 character).
  *
- * This allows for different thresholds between semantic parsing and fallback chunking.
- * Default is the same as MIN_BLOCK_CHARS but can be adjusted independently if needed.
+ * This is intentionally lower than MIN_BLOCK_CHARS to ensure fallback chunking
+ * can generate blocks even for very small files when tree-sitter parsing fails.
  *
- * Fallback chunking is used when semantic parsing fails or for unsupported file types,
- * so a more lenient threshold might be appropriate for some use cases.
+ * Fallback chunking is used when:
+ * - Semantic parsing fails (no WASM parser available)
+ * - Query captures return 0 results
+ * - Unsupported file types
+ *
+ * The actual minimum used in _performFallbackChunking is 1 character (line 1245 in parser.ts),
+ * so this constant now matches the implementation.
+ *
+ * Note: Emergency fallback uses the same threshold (MIN_EMERGENCY_FALLBACK_CHARS = 1)
+ * when all else fails.
  */
-export const MIN_FALLBACK_CHUNK_CHARS = 10
+export const MIN_FALLBACK_CHUNK_CHARS = 1
+export const ENABLE_DETAILED_AST_LOGGING = process.env.ROO_CODE_DETAILED_AST_LOGGING === "true" // Controls whether to log full AST structures
+export const MAX_AST_LOG_DEPTH = 3 // Maximum depth for AST structure logging
+export const MAX_CONTENT_PREVIEW_CHARS = 200 // Maximum characters to show in content previews
 export const MIN_CHUNK_REMAINDER_CHARS = 200 // Minimum characters for the *next* chunk after a split
 export const MAX_CHARS_TOLERANCE_FACTOR = 1.5 // 50% tolerance for max chars (increased from 1.15 for Phase 3)
+
+/**
+ * Enable emergency fallback that creates a single block for the entire file
+ * when both semantic parsing and fallback chunking fail to generate any blocks.
+ *
+ * This ensures that NO file is ever skipped during indexing, even if queries
+ * return 0 captures and fallback chunking fails.
+ *
+ * Set to false only for debugging to identify files that would otherwise be skipped.
+ */
+export const ENABLE_EMERGENCY_FALLBACK = process.env.ROO_CODE_DISABLE_EMERGENCY_FALLBACK !== "true"
+
+/**
+ * Minimum character threshold for emergency fallback blocks.
+ * Files smaller than this will not trigger emergency fallback.
+ *
+ * This prevents indexing of truly empty or trivial files.
+ */
+export const MIN_EMERGENCY_FALLBACK_CHARS = 1
 
 // Phase 3: Intelligent Chunking - Semantic boundary limits
 export const SEMANTIC_MAX_CHARS = 3000 // Maximum size for complete semantic units (functions, classes)

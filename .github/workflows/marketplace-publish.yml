@@ -1,92 +1,157 @@
 name: Publish Extension
 
 on:
-  pull_request:
-    types: [closed]
-  workflow_dispatch:
+    pull_request:
+        types: [closed]
+    workflow_dispatch:
 
 env:
-  GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
+    GIT_REF: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || 'main' }}
 
 jobs:
-  publish-extension:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # Required for pushing tags.
-    if: >
-        ( github.event_name == 'pull_request' &&
-        github.event.pull_request.base.ref == 'main' &&
-        contains(github.event.pull_request.title, 'Changeset version bump') ) ||
-        github.event_name == 'workflow_dispatch'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ env.GIT_REF }}
-      - name: Setup Node.js and pnpm
-        uses: ./.github/actions/setup-node-pnpm
-      - name: Configure Git
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-      - name: Create .env file
-        run: echo "POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}" >> .env
-      - name: Package Extension
-        run: |
-          current_package_version=$(node -p "require('./src/package.json').version")
-          pnpm vsix
+    publish-extension:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write # Required for pushing tags.
+        if: >
+            ( github.event_name == 'pull_request' &&
+            github.event.pull_request.base.ref == 'main' &&
+            contains(github.event.pull_request.title, 'Changeset version bump') ) ||
+            github.event_name == 'workflow_dispatch'
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+              with:
+                  ref: ${{ env.GIT_REF }}
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+            - name: Verify WASM files
+              run: |
+                  if [ ! -d "src/services/tree-sitter" ]; then
+                    echo "❌ WASM directory not found"
+                    exit 1
+                  fi
 
-          # Save VSIX contents to a temporary file to avoid broken pipe issues.
-          unzip -l bin/roo-cline-${current_package_version}.vsix > /tmp/roo-code-vsix-contents.txt
+                  # Check that the directory contains essential WASM files
+                  if [ ! -f "src/services/tree-sitter/tree-sitter.wasm" ]; then
+                    echo "❌ Core tree-sitter.wasm file not found in src/services/tree-sitter"
+                    echo ""
+                    echo "To fix this:"
+                    echo "1. Run 'pnpm download-wasms' locally to update WASM binaries"
+                    echo "2. Commit the updated WASM files to the repository"
+                    echo "3. Ensure src/services/tree-sitter/tree-sitter.wasm is present"
+                    exit 1
+                  fi
 
-          # Check for required files.
-          grep -q "extension/package.json" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/package.nls.json" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/dist/extension.js" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/webview-ui/audio/celebration.wav" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/webview-ui/build/assets/index.js" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/assets/codicons/codicon.ttf" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q "extension/assets/vscode-material-icons/icons/3d.svg" /tmp/roo-code-vsix-contents.txt || exit 1
-          grep -q ".env" /tmp/roo-code-vsix-contents.txt || exit 1
-          
-          # Clean up temporary file.
-          rm /tmp/roo-code-vsix-contents.txt
-      - name: Create and Push Git Tag
-        run: |
-          current_package_version=$(node -p "require('./src/package.json').version")
-          git tag -a "v${current_package_version}" -m "Release v${current_package_version}"
-          git push origin "v${current_package_version}" --no-verify
-          echo "Successfully created and pushed git tag v${current_package_version}"
-      - name: Publish Extension
-        env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
-          OVSX_PAT: ${{ secrets.OVSX_PAT }}
-        run: |
-          current_package_version=$(node -p "require('./src/package.json').version")
-          pnpm --filter roo-cline publish:marketplace
-          echo "Successfully published version $current_package_version to VS Code Marketplace"
-      - name: Create GitHub Release
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          current_package_version=$(node -p "require('./src/package.json').version")
+                  # Count and verify WASM files are present
+                  WASM_COUNT=$(find src/services/tree-sitter -name '*.wasm' | wc -l)
+                  echo "Found $WASM_COUNT WASM files"
 
-          # Extract changelog for current version
-          echo "Extracting changelog for version ${current_package_version}"
-          changelog_content=$(sed -n "/## \\[${current_package_version}\\]/,/## \\[/p" CHANGELOG.md | sed '$d')
+                  # Check for any WASM files (not empty directory)
+                  if [ "$WASM_COUNT" -eq 0 ]; then
+                    echo "❌ No WASM files found in src/services/tree-sitter"
+                    echo ""
+                    echo "To fix this:"
+                    echo "1. Run 'pnpm download-wasms' locally to update WASM binaries"
+                    echo "2. Commit the updated WASM files to the repository"
+                    echo "3. Ensure the directory contains at least one .wasm file"
+                    exit 1
+                  fi
 
-          # If changelog extraction failed, use a default message
-          if [ -z "$changelog_content" ]; then
-            echo "Warning: No changelog section found for version ${current_package_version}"
-            changelog_content="Release v${current_package_version}"
-          else
-            echo "Found changelog section for version ${current_package_version}"
-          fi
+                  # Log discovered WASM files for observability
+                  echo "📋 Discovered WASM files:"
+                  find src/services/tree-sitter -name '*.wasm' | head -20 | while read file; do
+                    echo "  - $(basename "$file")"
+                  done
 
-          # Create release with changelog content
-          gh release create "v${current_package_version}" \
-            --title "Release v${current_package_version}" \
-            --notes "$changelog_content" \
-            --target ${{ env.GIT_REF }} \
-            bin/roo-cline-${current_package_version}.vsix
-          echo "Successfully created GitHub Release v${current_package_version}"
+                  # If there are more than 20 files, show a summary
+                  if [ "$WASM_COUNT" -gt 20 ]; then
+                    echo "  ... and $((WASM_COUNT - 20)) more files"
+                  fi
+
+                  echo "✅ WASM files verified (found $WASM_COUNT files, including tree-sitter.wasm)"
+            - name: Configure Git
+              run: |
+                  git config user.name "github-actions[bot]"
+                  git config user.email "github-actions[bot]@users.noreply.github.com"
+            - name: Create .env file
+              run: echo "POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}" >> .env
+            - name: Package Extension
+              run: |
+                  current_package_version=$(node -p "require('./src/package.json').version")
+                  pnpm vsix
+
+                  # Save VSIX contents to a temporary file to avoid broken pipe issues.
+                  unzip -l bin/roo-cline-${current_package_version}.vsix > /tmp/roo-code-vsix-contents.txt
+
+                  # Check for required files.
+                  grep -q "extension/package.json" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/package.nls.json" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/dist/extension.js" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/webview-ui/audio/celebration.wav" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/webview-ui/build/assets/index.js" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/assets/codicons/codicon.ttf" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q "extension/assets/vscode-material-icons/icons/3d.svg" /tmp/roo-code-vsix-contents.txt || exit 1
+                  grep -q ".env" /tmp/roo-code-vsix-contents.txt || exit 1
+
+                  # Validate WASM files are present in the VSIX package
+                  echo "🔍 Checking for WASM files in VSIX package..."
+                  WASM_FILES_IN_VSIX=$(grep "extension/dist/services/tree-sitter/.*\.wasm" /tmp/roo-code-vsix-contents.txt || true)
+
+                  if [ -z "$WASM_FILES_IN_VSIX" ]; then
+                    echo "❌ No WASM files found in VSIX package!"
+                    echo "Expected pattern: extension/dist/services/tree-sitter/*.wasm"
+                    echo "This indicates that WASM files were not included in the packaged extension."
+                    echo "Please check:"
+                    echo "  - esbuild configuration includes WASM files"
+                    echo "  - .vscodeignore does not exclude WASM files"
+                    echo "  - build process correctly copies WASM files to dist/"
+                    exit 1
+                  fi
+
+                  echo "✅ WASM files found in VSIX package:"
+                  echo "$WASM_FILES_IN_VSIX" | while read -r line; do
+                    echo "  - $line"
+                  done
+
+                  # Clean up temporary file.
+                  rm /tmp/roo-code-vsix-contents.txt
+            - name: Create and Push Git Tag
+              run: |
+                  current_package_version=$(node -p "require('./src/package.json').version")
+                  git tag -a "v${current_package_version}" -m "Release v${current_package_version}"
+                  git push origin "v${current_package_version}" --no-verify
+                  echo "Successfully created and pushed git tag v${current_package_version}"
+            - name: Publish Extension
+              env:
+                  VSCE_PAT: ${{ secrets.VSCE_PAT }}
+                  OVSX_PAT: ${{ secrets.OVSX_PAT }}
+              run: |
+                  current_package_version=$(node -p "require('./src/package.json').version")
+                  pnpm --filter roo-cline publish:marketplace
+                  echo "Successfully published version $current_package_version to VS Code Marketplace"
+            - name: Create GitHub Release
+              env:
+                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  current_package_version=$(node -p "require('./src/package.json').version")
+
+                  # Extract changelog for current version
+                  echo "Extracting changelog for version ${current_package_version}"
+                  changelog_content=$(sed -n "/## \\[${current_package_version}\\]/,/## \\[/p" CHANGELOG.md | sed '$d')
+
+                  # If changelog extraction failed, use a default message
+                  if [ -z "$changelog_content" ]; then
+                    echo "Warning: No changelog section found for version ${current_package_version}"
+                    changelog_content="Release v${current_package_version}"
+                  else
+                    echo "Found changelog section for version ${current_package_version}"
+                  fi
+
+                  # Create release with changelog content
+                  gh release create "v${current_package_version}" \
+                    --title "Release v${current_package_version}" \
+                    --notes "$changelog_content" \
+                    --target ${{ env.GIT_REF }} \
+                    bin/roo-cline-${current_package_version}.vsix
+                  echo "Successfully created GitHub Release v${current_package_version}"

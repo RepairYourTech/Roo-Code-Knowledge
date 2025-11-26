@@ -58,6 +58,7 @@ export const commandIds = [
 	"testNeo4jConnection",
 	"testEmbeddingProvider",
 	"dumpIndexingDiagnostics",
+	"downloadTreeSitterWasms",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

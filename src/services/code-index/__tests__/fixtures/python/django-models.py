@@ -13,6 +13,7 @@ Tests:
 from django.db import models
 from django.contrib.auth.models import AbstractUser
 from django.utils import timezone
+from django.db.models import F
 from typing import Optional
 
 
@@ -140,9 +141,10 @@ class Post(TimeStampedModel):
         self.save(update_fields=['status', 'published_at'])
     
     def increment_views(self) -> None:
-        """Increment view count"""
-        self.views_count += 1
-        self.save(update_fields=['views_count'])
+        """Increment view count atomically"""
+        BlogPost.objects.filter(pk=self.pk).update(views_count=F('views_count') + 1)
+        # Optionally refresh the instance if you need the updated value in memory
+        self.refresh_from_db(fields=['views_count'])
     
     @property
     def is_published(self) -> bool:

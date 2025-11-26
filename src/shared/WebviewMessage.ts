@@ -134,6 +134,10 @@ export interface WebviewMessage {
 		| "clearIndexData"
 		| "indexingStatusUpdate"
 		| "indexCleared"
+		| "getCodeIndexLogLevel"
+		| "setCodeIndexLogLevel"
+		| "codeIndexLogLevel"
+		| "codeIndexLogLevelChanged"
 		| "focusPanelRequest"
 		| "openExternal"
 		| "showOutput"
@@ -218,6 +222,7 @@ export interface WebviewMessage {
 	settings?: any
 	url?: string // For openExternal
 	mpItem?: MarketplaceItem
+	logLevel?: "off" | "error" | "warn" | "info" | "debug" | "trace"
 	mpInstallOptions?: InstallMarketplaceItemOptions
 	config?: Record<string, any> // Add config to the payload
 	visibility?: ShareVisibility // For share visibility

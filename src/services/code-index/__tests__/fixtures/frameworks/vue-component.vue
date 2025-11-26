@@ -41,10 +41,10 @@
 				</ul>
 
 				<div class="pagination">
-					<button @click="previousPage" :disabled="currentPage === 1">Previous</button>
+					<button @click="previousPage" :disabled="currentPage === 1 || totalPages === 0">Previous</button>
 					<span v-if="totalPages > 0">Page {{ currentPage }} of {{ totalPages }}</span>
 					<span v-else>No results</span>
-					<button @click="nextPage" :disabled="currentPage === totalPages">Next</button>
+					<button @click="nextPage" :disabled="currentPage === totalPages || totalPages === 0">Next</button>
 				</div>
 			</section>
 		</template>

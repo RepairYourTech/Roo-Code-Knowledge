@@ -39,6 +39,38 @@ export default `
 (class_declaration
   name: (type_identifier) @name.definition.class) @definition.class
 
+; ===== COMMON TYPESCRIPT PATTERNS =====
+
+; Variable Declarations with Arrow Functions (critical for React components)
+(variable_declaration
+  (variable_declarator
+    name: (identifier) @name.definition.function
+    value: (arrow_function))) @definition.arrow_function
+
+; Exported Variable Declarations
+(export_statement
+  (lexical_declaration
+    (variable_declarator
+      name: (identifier) @name.definition.export))) @definition.export
+
+; Const Declarations (catch-all for any const)
+(lexical_declaration
+  (variable_declarator
+    name: (identifier) @name.definition.const)) @definition.const
+
+; Interface Declarations
+(interface_declaration
+  name: (type_identifier) @name.definition.interface) @definition.interface
+
+; Type Alias Declarations
+(type_alias_declaration
+  name: (type_identifier) @name.definition.type) @definition.type
+
+; Emergency fallback for statement blocks - last resort pattern
+; This pattern may be overly broad and impact index size in high-volume projects
+; Consider tuning or disabling for large codebases
+(statement_block) @definition.emergency.statement_block
+
 ; ===== TESTING FRAMEWORK PATTERNS FOR TYPESCRIPT =====
 
 ; Jest/Vitest/Mocha - Test suite and test case patterns
@@ -241,7 +273,10 @@ export default `
 (call_expression
   function: (identifier) @test.util_func
   (#match? @test.util_func "^(render|screen|fireEvent|userEvent|waitFor|act)$")) @definition.test_utility
-(arrow_function) @definition.lambda
+; Emergency fallback for arrow functions - last resort pattern
+; This pattern may be overly broad and impact index size in high-volume projects
+; Consider tuning or disabling for large codebases
+(arrow_function) @definition.emergency.lambda
 
 ; Switch statements and case clauses
 (switch_statement) @definition.switch

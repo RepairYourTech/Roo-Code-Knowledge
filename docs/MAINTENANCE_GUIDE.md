@@ -800,7 +800,7 @@ daily_maintenance() {
     # Optimize databases
     curl -X POST http://localhost:7474/db/data/transaction/commit \
          -H "Content-Type: application/json" \
-         -d '{"statements": ["CALL dbms.optimize()"]}'
+         -d '{"statements": ["CALL db.checkpoint()"]}'
 
     # Check disk space
     df -h /var/lib/code-index
