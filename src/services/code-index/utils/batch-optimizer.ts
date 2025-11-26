@@ -220,7 +220,7 @@ export class AdaptiveBatchOptimizer {
 		const maxItemsByTokens =
 			avgTokensPerItem > 0 ? Math.floor(this.maxTokenLimit / avgTokensPerItem) : this.config.maxBatchSize
 		const maxItemsByItemLimit =
-			avgTokensPerItem > 0 ? Math.floor(this.maxItemLimit / avgTokensPerItem) : this.config.maxBatchSize
+			avgTokensPerItem > 0 ? Math.floor(this.maxItemTokens / avgTokensPerItem) : this.config.maxBatchSize
 
 		// Use the more restrictive limit
 		const tokenLimitedSize = Math.min(maxItemsByTokens, maxItemsByItemLimit, this.config.maxBatchSize)
@@ -371,7 +371,7 @@ export class AdaptiveBatchOptimizer {
 								this.config.minBatchSize,
 								Math.round(
 									(this.performanceHistory[this.performanceHistory.length - 1].throughput *
-										this.config.targetProcessingTime) /
+										this.config.targetLatency) /
 										1000,
 								),
 							),

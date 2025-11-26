@@ -874,8 +874,8 @@ describe("CodeIndexManager - Neo4j Initialization and Error Handling", () => {
 			// Reset and reinitialize to simulate recovery
 			CodeIndexManager.disposeAll()
 
-			// Mock CodeIndexStateManager constructor for this test
-			vi.mocked(CodeIndexStateManager).mockImplementation(() => mockStateManager)
+			// Mock CodeIndexManager getInstance method for this test
+			const getInstanceSpy = vi.spyOn(CodeIndexManager, "getInstance").mockReturnValue(mockStateManager as any)
 
 			manager = CodeIndexManager.getInstance(mockContext)!
 

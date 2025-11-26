@@ -5,9 +5,11 @@ import { logger } from "../shared/logger"
 import { MetricsCollector } from "../code-index/utils/metrics-collector"
 import { getWasmDirectory } from "./get-wasm-directory"
 
+// Helper function to check if we're in development mode
+const isDevelopment = process.env.NODE_ENV === "development"
+
 // Helper function to check strict WASM loading mode
 function getStrictWasmLoading(): boolean {
-	const isDevelopment = process.env.NODE_ENV === "development"
 	return (
 		process.env.ROO_CODE_STRICT_WASM_LOADING === "true" ||
 		(isDevelopment && process.env.ROO_CODE_STRICT_WASM_LOADING !== "false")

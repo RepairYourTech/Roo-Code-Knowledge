@@ -2037,6 +2037,7 @@ export class Neo4jService implements INeo4jService {
 				}
 
 				// Check if type starts with a letter and contains only valid characters
+				let processedType = type
 				if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(type)) {
 					const sanitizedType = type.replace(/[^a-zA-Z0-9_]/g, "_")
 
@@ -2051,14 +2052,16 @@ export class Neo4jService implements INeo4jService {
 					}
 
 					console.warn(`[Neo4jService] Relationship type '${type}' sanitized to '${finalType}'`)
-					type = finalType
+					processedType = finalType
 				}
 
 				// Ensure type doesn't exceed Neo4j limits (max 100,000 characters for identifiers)
-				if (type.length > 1000) {
+				if (processedType.length > 1000) {
 					// Reasonable limit for practical use
-					console.warn(`[Neo4jService] Relationship type '${type.substring(0, 50)}...' too long, truncating`)
-					type = type.substring(0, 1000)
+					console.warn(
+						`[Neo4jService] Relationship type '${processedType.substring(0, 50)}...' too long, truncating`,
+					)
+					processedType = processedType.substring(0, 1000)
 				}
 
 				await tx.run(
@@ -2066,7 +2069,7 @@ export class Neo4jService implements INeo4jService {
 						UNWIND $relationships AS rel
 						MATCH (from:CodeNode {id: rel.fromId})
 						MATCH (to:CodeNode {id: rel.toId})
-						MERGE (from)-[r:${type}]->(to)
+						MERGE (from)-[r:${processedType}]->(to)
 						SET r += rel.metadata
 					`,
 					{

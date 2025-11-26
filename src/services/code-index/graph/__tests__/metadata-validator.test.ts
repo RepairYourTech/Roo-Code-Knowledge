@@ -195,7 +195,7 @@ describe("MetadataValidator", () => {
 
 		it("should truncate strings exceeding MAX_METADATA_STRING_LENGTH", () => {
 			const options: MetadataValidationOptions = {
-				maxStringLenth: 10,
+				maxStringLength: 10,
 			}
 			validator = new MetadataValidator(options)
 			const metadata = { longString: "this is a very long string" }

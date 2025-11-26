@@ -1358,8 +1358,8 @@ export class QualityMetricsService implements IQualityMetricsService {
 			/false\s*\|\|\s*true/, // false || true
 			/1\s*===\s*0/, // 1 === 0
 			/0\s*===\s*1/, // 0 === 1
-			/"[^"]*"\s*===\s*"(?!\1)[^"]*"/, // string === different string (negative lookahead)
-			/'[^']*'\s*===\s*'(?!\1)[^']*'/, // single quote string === different string
+			/"[^"]*"\s*===\s*"[^"]*"/, // string === different string
+			/'[^']*'\s*===\s*'[^']*'/, // single quote string === different string
 		]
 
 		for (const pattern of unreachablePatterns) {
