@@ -51,4 +51,10 @@ logs
 qdrant_storage/
 
 # Tree-sitter WASM files are committed to ensure reliable builds
-# They are downloaded once via 'pnpm download-wasms' and checked in
+# They are downloaded once via 'pnpm regenerate-wasms' and checked in
+
+# Static WASM files are committed to eliminate download dependencies
+# These files (~44MB) are bundled in the extension package
+!src/wasms/**/*.wasm
+!src/wasms/tree-sitter/*.wasm
+!src/wasms/tiktoken/*.wasm

@@ -1,24 +1,13 @@
 import * as path from "path"
 import * as vscode from "vscode"
-import { getWasmDirectory } from "./get-wasm-directory"
+import { getWasmDirectory, invalidateWasmDirectoryCache } from "./get-wasm-directory"
+import { diagnoseWasmSetup, validateWasmDirectory, DiagnosticReport } from "./wasm-diagnostics"
+import { logger } from "../shared/logger"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import { MetricsCollector } from "../code-index/utils/metrics-collector"
 
-// Define MetricsCollector interface
-interface MetricsCollector {
-	recordParserMetric?: (
-		extension: string,
-		status:
-			| "loadAttempt"
-			| "loadSuccess"
-			| "loadFailure"
-			| "parseAttempt"
-			| "parseSuccess"
-			| "parseFailed"
-			| "captures"
-			| "fallback",
-		count?: number,
-		error?: string,
-	) => void
-}
+const TROUBLESHOOTING_URL = "https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files"
 
 export interface LanguageParser {
 	parser: any
@@ -39,10 +28,35 @@ function getStrictWasmLoading(): boolean {
 	return config.get("treeSitterStrictWasmLoading", false)
 }
 
-async function loadLanguage(langName: string, sourceDirectory?: string) {
+async function loadLanguage(langName: string, sourceDirectory?: string, metricsCollector?: MetricsCollector) {
+	const startTime = Date.now()
+
 	try {
-		const wasmDirectory = getWasmDirectory()
+		// Capture telemetry for load attempt
+		try {
+			TelemetryService.instance.captureWasmLoadAttempt(langName)
+		} catch (e) {
+			logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+		}
+
+		// Record load attempt metric
+		if (metricsCollector) {
+			metricsCollector.recordParserMetric(langName, "loadAttempt")
+		}
+
+		let wasmDirectory: string
+		try {
+			wasmDirectory = getWasmDirectory()
+		} catch (error) {
+			logger.debug(
+				`Failed to locate WASM directory: ${error instanceof Error ? error.message : String(error)}`,
+				"LanguageParser",
+			)
+			throw new Error(`Cannot locate tree-sitter WASM files. See troubleshooting guide: ${TROUBLESHOOTING_URL}`)
+		}
 		const { Parser } = require("web-tree-sitter")
+
+		logger.debug(`Attempting to load language: ${langName}`, "LanguageParser")
 
 		// For development or when sourceDirectory is provided, try to load from local path
 		if (process.env.NODE_ENV === "development" || sourceDirectory) {
@@ -51,10 +65,32 @@ async function loadLanguage(langName: string, sourceDirectory?: string) {
 
 			try {
 				const language = await Parser.Language.load(languagePath)
+				logger.debug(`Successfully loaded ${langName}.wasm from ${languagePath}`, "LanguageParser")
+
+				// Record success metrics
+				if (metricsCollector) {
+					metricsCollector.recordParserMetric(langName, "loadSuccess")
+				}
+
+				// Capture telemetry for success
+				try {
+					TelemetryService.instance.captureWasmLoadSuccess(langName, languagePath, Date.now() - startTime)
+				} catch (e) {
+					logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+				}
+
 				return language
 			} catch (error) {
 				// Fall back to node_modules if local loading fails
-				console.warn(`Failed to load ${langName}.wasm from ${languagePath}:`, error)
+				logger.warn(
+					`Failed to load ${langName}.wasm from ${languagePath}, falling back to node_modules: ${error instanceof Error ? error.message : String(error)}`,
+					"LanguageParser",
+				)
+
+				// Record fallback metric
+				if (metricsCollector) {
+					metricsCollector.recordParserMetric(langName, "fallback")
+				}
 			}
 		}
 
@@ -64,121 +100,120 @@ async function loadLanguage(langName: string, sourceDirectory?: string) {
 				`@tree-sitter-grammars/tree-sitter-${langName}/tree-sitter-${langName}.wasm`,
 			)
 			const language = await Parser.Language.load(packagePath)
+			logger.debug(`Successfully loaded ${langName}.wasm from node_modules`, "LanguageParser")
+
+			// Record success metrics
+			if (metricsCollector) {
+				metricsCollector.recordParserMetric(langName, "loadSuccess")
+			}
+
+			// Capture telemetry for success
+			try {
+				TelemetryService.instance.captureWasmLoadSuccess(langName, packagePath, Date.now() - startTime)
+			} catch (e) {
+				logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+			}
+
 			return language
 		} catch (error) {
 			// Try alternative package name
+			logger.debug(`Trying alternative package name for ${langName}`, "LanguageParser")
 			const altPackagePath = require.resolve(`tree-sitter-${langName}/tree-sitter-${langName}.wasm`)
 			const language = await Parser.Language.load(altPackagePath)
+			logger.debug(`Successfully loaded ${langName}.wasm from alternative package`, "LanguageParser")
+
+			// Record success metrics
+			if (metricsCollector) {
+				metricsCollector.recordParserMetric(langName, "loadSuccess")
+			}
+
+			// Capture telemetry for success
+			try {
+				TelemetryService.instance.captureWasmLoadSuccess(langName, altPackagePath, Date.now() - startTime)
+			} catch (e) {
+				logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+			}
+
 			return language
 		}
 	} catch (error) {
-		console.error(`Failed to load language ${langName}:`, error)
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		logger.error(`Failed to load language ${langName}: ${errorMessage}`, "LanguageParser")
+
+		// Record failure metrics
+		if (metricsCollector) {
+			metricsCollector.recordParserMetric(langName, "loadFailure", 1, errorMessage)
+		}
+
+		// Capture telemetry for failure
+		try {
+			TelemetryService.instance.captureWasmLoadFailure(langName, errorMessage, true)
+		} catch (e) {
+			logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+		}
+
 		return null
 	}
-}
-
-function diagnoseWasmSetup(_sourceDirectory?: string) {
-	const report = {
-		wasmDirectoryExists: false,
-		wasmDirectory: getWasmDirectory(),
-		wasmFiles: [] as string[],
-		missingWasms: [] as string[],
-		expectedLanguages: [
-			"javascript",
-			"typescript",
-			"tsx",
-			"python",
-			"rust",
-			"go",
-			"cpp",
-			"c",
-			"c_sharp",
-			"ruby",
-			"java",
-			"php",
-			"swift",
-			"kotlin",
-			"css",
-			"html",
-			"ocaml",
-			"scala",
-			"solidity",
-			"toml",
-			"xml",
-			"yaml",
-			"vue",
-			"lua",
-			"systemrdl",
-			"tlaplus",
-			"zig",
-			"ejs",
-			"erb",
-			"elisp",
-			"elixir",
-		],
-	}
-
-	try {
-		const fs = require("fs")
-
-		// Check if WASM directory exists
-		try {
-			const stats = fs.statSync(report.wasmDirectory)
-			report.wasmDirectoryExists = stats.isDirectory()
-		} catch (error) {
-			report.wasmDirectoryExists = false
-		}
-
-		// List existing WASM files
-		if (report.wasmDirectoryExists) {
-			try {
-				report.wasmFiles = fs.readdirSync(report.wasmDirectory).filter((file: string) => file.endsWith(".wasm"))
-			} catch (error) {
-				report.wasmFiles = []
-			}
-		}
-
-		// Check for missing WASM files
-		if (report.wasmDirectoryExists) {
-			report.expectedLanguages.forEach((lang) => {
-				const expectedFile = `${lang}.wasm`
-				if (!report.wasmFiles.includes(expectedFile)) {
-					report.missingWasms.push(expectedFile)
-				}
-			})
-		}
-
-		// Additional diagnostic info
-		try {
-			const webTreeSitterPath = require.resolve("web-tree-sitter")
-			report.wasmFiles.push(`web-tree-sitter found at: ${webTreeSitterPath}`)
-		} catch (error) {
-			report.missingWasms.push("web-tree-sitter package not found")
-		}
-	} catch (error) {
-		report.missingWasms.push(`Error during diagnosis: ${error}`)
-	}
-
-	return report
 }
 
 export async function loadRequiredLanguageParsers(
 	filesToParse: string[],
 	sourceDirectory?: string,
-	_metricsCollector?: MetricsCollector,
+	metricsCollector?: MetricsCollector,
 ): Promise<{ [key: string]: LanguageParser }> {
 	const { Parser } = require("web-tree-sitter")
 
+	// Note: If implementing WASM downloads in this file, call invalidateWasmDirectoryCache()
+	// after any successful download operation to ensure the cache is refreshed
+
 	// Run diagnostics once before initializing parsers
 	if (!hasRunDiagnostics) {
-		// If critical WASM files are missing, handle based on strict mode
-		const downloadInstructions = `Missing tree-sitter WASM files in ${getWasmDirectory()}.
-Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WASM Files' to install them.`
+		let wasmDirectory: string | undefined
+		try {
+			wasmDirectory = getWasmDirectory()
+		} catch (error) {
+			logger.debug(
+				`Failed to locate WASM directory for diagnostics: ${error instanceof Error ? error.message : String(error)}`,
+				"LanguageParser",
+			)
+			// Let diagnoseWasmSetup handle the resolution
+		}
+		const diagnosticReport = diagnoseWasmSetup(wasmDirectory)
 
-		if (getStrictWasmLoading()) {
-			throw new Error(`Strict mode enabled. ${downloadInstructions}`)
-		} else {
-			console.warn(downloadInstructions)
+		// Capture telemetry for diagnostic run
+		try {
+			TelemetryService.instance.captureWasmDiagnosticRun(
+				diagnosticReport.isHealthy,
+				diagnosticReport.missingCriticalFiles.length,
+				diagnosticReport.totalFiles,
+				Math.round(diagnosticReport.totalSize / 1024),
+			)
+		} catch (e) {
+			logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+		}
+
+		// If critical WASM files are missing, handle based on strict mode
+		if (!diagnosticReport.isHealthy) {
+			const downloadInstructions = `Missing tree-sitter WASM files in ${diagnosticReport.wasmDirectory}.
+See troubleshooting guide: ${TROUBLESHOOTING_URL}`
+
+			if (getStrictWasmLoading()) {
+				throw new Error(`Strict mode enabled. ${downloadInstructions}`)
+			} else {
+				logger.warn(downloadInstructions, "LanguageParser")
+			}
+		}
+
+		// Check if WASM directory exists and suggest running download command if it doesn't
+		if (!diagnosticReport.wasmDirectoryExists) {
+			const downloadInstructions = `WASM directory not found at ${diagnosticReport.wasmDirectory}.
+See troubleshooting guide: ${TROUBLESHOOTING_URL}`
+
+			if (getStrictWasmLoading()) {
+				throw new Error(`Strict mode enabled. ${downloadInstructions}`)
+			} else {
+				logger.warn(downloadInstructions, "LanguageParser")
+			}
 		}
 
 		hasRunDiagnostics = true
@@ -216,7 +251,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 		scala: "scala",
 		sol: "solidity",
 		toml: "toml",
-		xml: "xml",
+		// Note: xml extension removed - requires separate @tree-sitter-grammars/tree-sitter-xml package
 		yaml: "yaml",
 		yml: "yaml",
 		vue: "vue",
@@ -231,10 +266,41 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 		exs: "elixir",
 	}
 
-	// Initialize Parser once
+	// Initialize Parser once with validation and improved error handling
+	let wasmDirectory: string
+	try {
+		wasmDirectory = getWasmDirectory()
+	} catch (error) {
+		logger.debug(
+			`Failed to locate WASM directory: ${error instanceof Error ? error.message : String(error)}`,
+			"LanguageParser",
+		)
+		throw new Error(`Cannot locate tree-sitter WASM files. See troubleshooting guide: ${TROUBLESHOOTING_URL}`)
+	}
+
+	// Validate WASM directory before Parser.init()
+	const validationResult = validateWasmDirectory(wasmDirectory)
+	if (!validationResult.isValid) {
+		const errorMsg = `WASM directory validation failed. Missing critical files: ${validationResult.missingCriticalFiles.join(", ")}`
+		if (getStrictWasmLoading()) {
+			throw new Error(`Strict mode enabled. ${errorMsg}. See troubleshooting guide: ${TROUBLESHOOTING_URL}`)
+		} else {
+			logger.warn(`${errorMsg}. Continuing in non-strict mode.`, "LanguageParser")
+		}
+	}
+
 	await Parser.init({
 		locateFile: (scriptName: string, _scriptDirectory: string) => {
-			return path.join(getWasmDirectory(), scriptName)
+			const fullPath = path.join(wasmDirectory, scriptName)
+			logger.debug(`Tree-sitter requesting file: ${scriptName}, full path: ${fullPath}`, "LanguageParser")
+
+			// Check if the file exists and log a warning if it doesn't
+			const fs = require("fs")
+			if (!fs.existsSync(fullPath)) {
+				logger.warn(`Tree-sitter requested file that doesn't exist: ${fullPath}`, "LanguageParser")
+			}
+
+			return fullPath
 		},
 	})
 
@@ -249,12 +315,12 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 		}
 
 		try {
-			const language = await loadLanguage(parserKey, sourceDirectory)
+			const language = await loadLanguage(parserKey, sourceDirectory, metricsCollector)
 			if (!language) {
 				if (getStrictWasmLoading()) {
 					throw new Error(`Failed to load language: ${parserKey}`)
 				} else {
-					console.warn(`Failed to load language: ${parserKey}`)
+					logger.warn(`Failed to load language: ${parserKey}`, "LanguageParser")
 					continue
 				}
 			}
@@ -268,6 +334,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 				switch (ext) {
 					case "json":
 						query = language.query("(object (_) @pair)")
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "ts":
 					case "tsx":
@@ -276,12 +343,14 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(class_declaration name: (identifier) @class-name)
 							(interface_declaration name: (identifier) @interface-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "py":
 						query = language.query(`
 							(function_definition name: (identifier) @function-name)
 							(class_definition name: (identifier) @class-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "rs":
 						query = language.query(`
@@ -289,6 +358,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(struct_item name: (type_identifier) @struct-name)
 							(enum_item name: (type_identifier) @enum-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "go":
 						query = language.query(`
@@ -296,6 +366,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(struct_type name: (type_identifier) @struct-name)
 							(interface_type name: (type_identifier) @interface-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "cpp":
 					case "hpp":
@@ -304,6 +375,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(class_specifier name: (type_identifier) @class-name)
 							(struct_specifier name: (type_identifier) @struct-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "c":
 					case "h":
@@ -311,6 +383,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(function_definition name: (identifier) @function-name)
 							(struct_specifier name: (type_identifier) @struct-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "cs":
 						query = language.query(`
@@ -318,6 +391,7 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(class_declaration name: (identifier) @class-name)
 							(interface_declaration name: (identifier) @interface-name)
 						`)
+						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
 						break
 					case "rb":
 						query = language.query(`
@@ -394,12 +468,6 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 							(table (bare_key) @table-name)
 						`)
 						break
-					case "xml":
-						query = language.query(`
-							(element) @element
-							(attribute (attribute_name) @attribute-name)
-						`)
-						break
 					case "yaml":
 					case "yml":
 						query = language.query(`
@@ -465,12 +533,18 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 						`)
 				}
 			} catch (queryError) {
-				console.warn(`Failed to create query for ${parserKey}:`, queryError)
+				logger.warn(
+					`Failed to create query for ${parserKey}: ${queryError instanceof Error ? queryError.message : String(queryError)}`,
+					"LanguageParser",
+				)
 				// Create a minimal fallback query
 				try {
 					query = language.query(`(identifier) @identifier`)
 				} catch (fallbackError) {
-					console.warn(`Failed to create fallback query for ${parserKey}:`, fallbackError)
+					logger.warn(
+						`Failed to create fallback query for ${parserKey}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+						"LanguageParser",
+					)
 					// Continue without a query
 					query = null
 				}
@@ -483,20 +557,72 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 			// Test the parser on a simple snippet to ensure it works
 			if (query && query !== null) {
 				try {
+					// Record parse attempt metric
+					if (metricsCollector) {
+						metricsCollector.recordParserMetric(parserKey, "parseAttempt")
+					}
+
+					// Capture telemetry for parse attempt
+					try {
+						TelemetryService.instance.captureWasmParseAttempt(parserKey)
+					} catch (e) {
+						logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+					}
+
 					const testCode = getTestCodeForLanguage(parserKey)
 					if (testCode) {
 						const testTree = parser.parse(testCode)
+						let captures = []
 						if (query) {
-							query.captures(testTree.rootNode)
+							captures = query.captures(testTree.rootNode)
+
+							// Record captures metric
+							if (metricsCollector) {
+								metricsCollector.recordParserMetric(parserKey, "captures", captures.length)
+							}
 						}
+
+						// Record parse success metric
+						if (metricsCollector) {
+							metricsCollector.recordParserMetric(parserKey, "parseSuccess")
+						}
+
+						// Capture telemetry for parse success
+						try {
+							TelemetryService.instance.captureWasmParseSuccess(parserKey, captures.length)
+						} catch (e) {
+							logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+						}
+
+						logger.debug(
+							`Parser test successful for ${parserKey} with ${captures.length} captures`,
+							"LanguageParser",
+						)
 						// If there are no captures, it might be fine depending on the test code
 					}
 				} catch (testError) {
-					console.warn(`Parser test failed for ${parserKey}, but continuing:`, testError)
+					const errorMessage = testError instanceof Error ? testError.message : String(testError)
+					logger.warn(
+						`Parser test failed for ${parserKey}, but continuing: ${errorMessage}`,
+						"LanguageParser",
+					)
+
+					// Record parse failure metric
+					if (metricsCollector) {
+						metricsCollector.recordParserMetric(parserKey, "parseFailed", 1, errorMessage)
+					}
+
+					// Capture telemetry for parse failure
+					try {
+						TelemetryService.instance.captureWasmParseFailure(parserKey, errorMessage)
+					} catch (e) {
+						logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+					}
 				}
 			}
 		} catch (error) {
-			console.error(`Failed to load parser for ${parserKey}:`, error)
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			logger.error(`Failed to load parser for ${parserKey}: ${errorMessage}`, "LanguageParser")
 			if (getStrictWasmLoading()) {
 				throw error
 			}
@@ -507,17 +633,16 @@ Please run 'pnpm download-wasms' or use VSCode command 'Download Tree-sitter WAS
 
 	// Log loaded parsers for debugging
 	const loadedParserKeys = Object.keys(parsers)
-	console.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`)
+	logger.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`, "LanguageParser")
 
 	// Final strict-mode check: ensure at least one parser was loaded when we had input files to process
 	if (getStrictWasmLoading() && filesToParse.length > 0 && Object.keys(parsers).length === 0) {
-		const wasmDir = getWasmDirectory()
-		const diag = diagnoseWasmSetup(wasmDir)
+		const diagnosticReport = diagnoseWasmSetup()
 		throw new Error(`
 No language parsers loaded in strict mode.
-WASM Dir: ${wasmDir}
-Diagnostics: ${JSON.stringify(diag, null, 2)}
-Fix: Run 'pnpm download-wasms' or VSCode command 'Download Tree-sitter WASM Files'.`)
+WASM Dir: ${diagnosticReport.wasmDirectory}
+Diagnostics: ${JSON.stringify(diagnosticReport, null, 2)}
+See troubleshooting guide: ${TROUBLESHOOTING_URL}`)
 	}
 
 	return parsers
@@ -544,7 +669,6 @@ function getTestCodeForLanguage(parserKey: string): string {
 		scala: "def test: Boolean = true",
 		solidity: "function test() public pure returns (bool) { return true; }",
 		toml: '[test]\nkey = "value"',
-		xml: "<test>content</test>",
 		yaml: "test: true",
 		lua: "function test() return true end",
 		el: "(defun test () t)",
@@ -597,7 +721,6 @@ export function getParserLoadStatus(): Map<string, { loaded: boolean; error?: st
 		"scala",
 		"sol",
 		"toml",
-		"xml",
 		"yaml",
 		"yml",
 		"vue",

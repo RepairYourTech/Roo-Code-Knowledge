@@ -348,6 +348,95 @@ export class TelemetryService {
 	}
 
 	/**
+	 * Captures a WASM load attempt event
+	 * @param language The language being loaded
+	 */
+	public captureWasmLoadAttempt(language: string): void {
+		this.captureEvent(TelemetryEventName.WASM_LOAD_ATTEMPT, { language })
+	}
+
+	/**
+	 * Captures a WASM load success event
+	 * @param language The language that was successfully loaded
+	 * @param wasmFile The path to the WASM file that was loaded
+	 * @param loadTimeMs The time it took to load the WASM file in milliseconds
+	 */
+	public captureWasmLoadSuccess(language: string, wasmFile: string, loadTimeMs: number): void {
+		this.captureEvent(TelemetryEventName.WASM_LOAD_SUCCESS, {
+			language,
+			wasmFile,
+			loadTimeMs,
+		})
+	}
+
+	/**
+	 * Captures a WASM load failure event
+	 * @param language The language that failed to load
+	 * @param errorMessage The error message describing the failure
+	 * @param fallbackUsed Whether a fallback method was attempted
+	 */
+	public captureWasmLoadFailure(language: string, errorMessage: string, fallbackUsed: boolean): void {
+		this.captureEvent(TelemetryEventName.WASM_LOAD_FAILURE, {
+			language,
+			errorMessage,
+			fallbackUsed,
+		})
+	}
+
+	/**
+	 * Captures a WASM parse attempt event
+	 * @param language The language being parsed
+	 */
+	public captureWasmParseAttempt(language: string): void {
+		this.captureEvent(TelemetryEventName.WASM_PARSE_ATTEMPT, { language })
+	}
+
+	/**
+	 * Captures a WASM parse success event
+	 * @param language The language that was successfully parsed
+	 * @param captureCount The number of captures found during parsing
+	 */
+	public captureWasmParseSuccess(language: string, captureCount: number): void {
+		this.captureEvent(TelemetryEventName.WASM_PARSE_SUCCESS, {
+			language,
+			captureCount,
+		})
+	}
+
+	/**
+	 * Captures a WASM parse failure event
+	 * @param language The language that failed to parse
+	 * @param errorMessage The error message describing the failure
+	 */
+	public captureWasmParseFailure(language: string, errorMessage: string): void {
+		this.captureEvent(TelemetryEventName.WASM_PARSE_FAILURE, {
+			language,
+			errorMessage,
+		})
+	}
+
+	/**
+	 * Captures a WASM diagnostic run event
+	 * @param isHealthy Whether the WASM setup is healthy
+	 * @param missingCriticalFiles The number of missing critical files
+	 * @param totalFiles The total number of files found
+	 * @param totalSizeKB The total size of all files in kilobytes
+	 */
+	public captureWasmDiagnosticRun(
+		isHealthy: boolean,
+		missingCriticalFiles: number,
+		totalFiles: number,
+		totalSizeKB: number,
+	): void {
+		this.captureEvent(TelemetryEventName.WASM_DIAGNOSTIC_RUN, {
+			isHealthy,
+			missingCriticalFiles,
+			totalFiles,
+			totalSizeKB,
+		})
+	}
+
+	/**
 	 * Checks if telemetry is currently enabled
 	 * @returns Whether telemetry is enabled
 	 */

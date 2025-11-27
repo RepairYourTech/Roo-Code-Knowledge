@@ -61,23 +61,80 @@ async function main() {
 			},
 		},
 		{
-			name: "copyWasms",
+			name: "copyStaticWasms",
 			setup(build) {
-				console.log("[copyWasms] Plugin registered")
-				build.onEnd(async () => {
-					console.log("[copyWasms] Plugin executing - copying WASM files")
-					try {
-						const success = await copyWasms(srcDir, distDir)
-						if (!success) {
-							console.warn("[copyWasms] Completed with errors for optional WASM sources")
-						} else {
-							console.log("[copyWasms] Completed successfully")
-						}
-					} catch (error) {
-						console.error("[copyWasms] Failed to copy required WASM files:", error instanceof Error ? error.message : "Unknown error")
-						// Re-throw the error to fail the build
-						throw error
+				build.onEnd(() => {
+					console.log("[copyStaticWasms] Plugin executing - copying static WASM files")
+					
+					// Source and destination paths
+					const treeSitterSrcDir = path.join(srcDir, "wasms", "tree-sitter")
+					const treeSitterDestDir = path.join(distDir, "services", "tree-sitter")
+					const tiktokenSrcPath = path.join(srcDir, "wasms", "tiktoken", "tiktoken_bg.wasm")
+					const tiktokenDestPath = path.join(distDir, "tiktoken_bg.wasm")
+					
+					// Create destination directories
+					fs.mkdirSync(treeSitterDestDir, { recursive: true })
+					
+					// Copy tree-sitter WASMs (required)
+					if (!fs.existsSync(treeSitterSrcDir)) {
+						throw new Error(`Tree-sitter WASM source directory not found: ${treeSitterSrcDir}. ` +
+							`Please run 'pnpm regenerate-wasms' to download required WASM files.`)
 					}
+					
+					const treeSitterFiles = fs.readdirSync(treeSitterSrcDir).filter(file => file.endsWith('.wasm'))
+					if (treeSitterFiles.length === 0) {
+						throw new Error(`No tree-sitter WASM files found in: ${treeSitterSrcDir}. ` +
+							`Please run 'pnpm regenerate-wasms' to download required WASM files.`)
+					}
+					
+					console.log(`[copyStaticWasms] Copying ${treeSitterFiles.length} tree-sitter WASM files...`)
+					for (const file of treeSitterFiles) {
+						const srcPath = path.join(treeSitterSrcDir, file)
+						const destPath = path.join(treeSitterDestDir, file)
+						
+						// Verify source file exists and has content
+						if (!fs.existsSync(srcPath)) {
+							throw new Error(`Required tree-sitter WASM file not found: ${srcPath}`)
+						}
+						
+						const srcStats = fs.statSync(srcPath)
+						if (srcStats.size < 1024) {
+							throw new Error(`Required tree-sitter WASM file too small (likely corrupted): ${srcPath} (${srcStats.size} bytes)`)
+						}
+						
+						// Copy file
+						fs.copyFileSync(srcPath, destPath)
+						
+						// Verify copy
+						const destStats = fs.statSync(destPath)
+						if (destStats.size !== srcStats.size) {
+							throw new Error(`Copy verification failed for ${file}: source size ${srcStats.size} bytes, destination size ${destStats.size} bytes`)
+						}
+						
+						const sizeKB = Math.round(destStats.size / 1024)
+						console.log(`[copyStaticWasms] Copied ${file} (${sizeKB} KB)`)
+					}
+					
+					// Copy tiktoken WASM (optional)
+					if (fs.existsSync(tiktokenSrcPath)) {
+						const srcStats = fs.statSync(tiktokenSrcPath)
+						if (srcStats.size < 1024) {
+							console.warn(`[copyStaticWasms] Skipping tiktoken WASM (too small, likely corrupted): ${tiktokenSrcPath} (${srcStats.size} bytes)`)
+						} else {
+							fs.copyFileSync(tiktokenSrcPath, tiktokenDestPath)
+							const destStats = fs.statSync(tiktokenDestPath)
+							if (destStats.size !== srcStats.size) {
+								console.warn(`[copyStaticWasms] Tiktoken copy verification failed: source size ${srcStats.size} bytes, destination size ${destStats.size} bytes`)
+							} else {
+								const sizeKB = Math.round(destStats.size / 1024)
+								console.log(`[copyStaticWasms] Copied tiktoken_bg.wasm (${sizeKB} KB)`)
+							}
+						}
+					} else {
+						console.log(`[copyStaticWasms] Optional tiktoken WASM not found at: ${tiktokenSrcPath}`)
+					}
+					
+					console.log("[copyStaticWasms] Completed successfully")
 				})
 			},
 		},
@@ -142,16 +199,62 @@ async function main() {
 		
 		// Verify WASM files were copied after build
 		const servicesDir = path.join(distDir, "services", "tree-sitter")
+		let totalSize = 0
+		let wasmFiles = []
+		
 		if (fs.existsSync(servicesDir)) {
-			const wasmFiles = fs.readdirSync(servicesDir).filter(file => file.endsWith('.wasm'))
+			wasmFiles = fs.readdirSync(servicesDir).filter(file => file.endsWith('.wasm'))
 			console.log(`[build-verification] Found ${wasmFiles.length} WASM files in ${servicesDir}`)
 			wasmFiles.forEach(file => {
 				const filePath = path.join(servicesDir, file)
 				const stats = fs.statSync(filePath)
+				totalSize += stats.size
 				console.log(`[build-verification] ${file} (${stats.size} bytes)`)
 			})
 		} else {
 			console.warn(`[build-verification] WASM directory not found: ${servicesDir}`)
+		}
+		
+		// Check for critical files
+		const criticalFiles = [
+			{ path: path.join(servicesDir, "tree-sitter.wasm"), name: "tree-sitter.wasm", minSize: 170000, maxSize: 210000 },
+			{ path: path.join(servicesDir, "tree-sitter-javascript.wasm"), name: "tree-sitter-javascript.wasm", minSize: 100000 },
+			{ path: path.join(servicesDir, "tree-sitter-typescript.wasm"), name: "tree-sitter-typescript.wasm", minSize: 100000 },
+			{ path: path.join(servicesDir, "tree-sitter-python.wasm"), name: "tree-sitter-python.wasm", minSize: 100000 },
+			{ path: path.join(distDir, "tiktoken_bg.wasm"), name: "tiktoken_bg.wasm", minSize: 5000000, maxSize: 6000000 },
+		]
+		
+		let allCriticalFilesPresent = true
+		for (const file of criticalFiles) {
+			if (fs.existsSync(file.path)) {
+				const stats = fs.statSync(file.path)
+				const sizeKB = Math.round(stats.size / 1024)
+				
+				if (stats.size < 1024) {
+					console.error(`[build-verification] ❌ Critical file too small: ${file.name} (${sizeKB} KB, likely corrupted)`)
+					allCriticalFilesPresent = false
+				} else if (file.minSize && stats.size < file.minSize) {
+					console.error(`[build-verification] ❌ Critical file too small: ${file.name} (${sizeKB} KB, expected at least ${Math.round(file.minSize / 1024)} KB)`)
+					allCriticalFilesPresent = false
+				} else if (file.maxSize && stats.size > file.maxSize) {
+					console.error(`[build-verification] ❌ Critical file too large: ${file.name} (${sizeKB} KB, expected at most ${Math.round(file.maxSize / 1024)} KB)`)
+					allCriticalFilesPresent = false
+				} else {
+					console.log(`[build-verification] ✅ Critical file verified: ${file.name} (${sizeKB} KB)`)
+				}
+			} else {
+				console.error(`[build-verification] ❌ Required critical file missing: ${file.name}`)
+				allCriticalFilesPresent = false
+			}
+		}
+		
+		if (allCriticalFilesPresent) {
+			const totalSizeMB = totalSize / (1024 * 1024)
+			console.log(`[build-verification] ✅ All critical WASM files present (${wasmFiles.length} total, ${totalSizeMB.toFixed(2)} MB)`)
+		} else {
+			const totalSizeMB = totalSize / (1024 * 1024)
+			console.error(`[build-verification] ❌ Build failed: Missing or invalid critical WASM files (${wasmFiles.length} found, ${totalSizeMB.toFixed(2)} MB)`)
+			process.exit(1)
 		}
 	}
 }

@@ -611,8 +611,26 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			},
 			async (progressToken) => {
 				try {
-					// Import the new download module
+					// Import the necessary modules
 					const { downloadTreeSitterWasms } = await import("../services/tree-sitter/download-wasms")
+					const { diagnoseWasmSetup, formatDiagnosticReport } = await import(
+						"../services/tree-sitter/wasm-diagnostics"
+					)
+
+					// Run pre-download diagnostics
+					outputChannel.appendLine("[DownloadTreeSitterWasms] Running pre-download diagnostics...")
+					let wasmDirectory: string | undefined
+					try {
+						const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
+						wasmDirectory = getWasmDirectory()
+					} catch (error) {
+						outputChannel.appendLine(
+							"[DownloadTreeSitterWasms] Could not determine WASM directory for diagnostics",
+						)
+					}
+					const beforeDiagnostics = diagnoseWasmSetup(wasmDirectory)
+					outputChannel.appendLine("[DownloadTreeSitterWasms] Pre-download state:")
+					outputChannel.appendLine(formatDiagnosticReport(beforeDiagnostics))
 
 					// Get the extension path from context
 					const extensionPath = context.extensionUri.fsPath
@@ -624,13 +642,46 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 						outputChannel,
 					})
 
-					if (result.success) {
+					// Run post-download diagnostics
+					outputChannel.appendLine("[DownloadTreeSitterWasms] Running post-download diagnostics...")
+					const afterDiagnostics = diagnoseWasmSetup(wasmDirectory)
+					outputChannel.appendLine("[DownloadTreeSitterWasms] Post-download state:")
+					outputChannel.appendLine(formatDiagnosticReport(afterDiagnostics))
+
+					// Compare before and after states
+					const filesDownloaded = afterDiagnostics.totalFiles - beforeDiagnostics.totalFiles
+					const sizeIncrease = afterDiagnostics.totalSize - beforeDiagnostics.totalSize
+					const criticalFixed =
+						beforeDiagnostics.missingCriticalFiles.length - afterDiagnostics.missingCriticalFiles.length
+
+					if (result.success && afterDiagnostics.isHealthy) {
 						// Show success message with details
-						const message = `Successfully downloaded ${result.successCount}/${result.totalExpected} Tree-sitter WASM files (${(result.totalSize / 1024 / 1024).toFixed(2)} MB). Restart the extension or reload the window for changes to take effect.`
-						await vscode.window.showInformationMessage(message)
+						const message = `Successfully downloaded ${result.successCount}/${result.totalExpected} Tree-sitter WASM files (${(result.totalSize / 1024 / 1024).toFixed(2)} MB). ${criticalFixed} critical files fixed.`
+						const reloadAction = await vscode.window.showInformationMessage(message, "Reload Window")
+
+						if (reloadAction === "Reload Window") {
+							await vscode.commands.executeCommand("workbench.action.reloadWindow")
+						}
+
 						outputChannel.appendLine(`[DownloadTreeSitterWasms] Success: ${message}`)
+					} else if (result.success) {
+						// Show partial success message with remaining issues
+						const remainingIssues =
+							afterDiagnostics.missingCriticalFiles.length > 0
+								? ` Still missing ${afterDiagnostics.missingCriticalFiles.length} critical files: ${afterDiagnostics.missingCriticalFiles.join(", ")}`
+								: ""
+
+						const message = `Downloaded ${result.successCount}/${result.totalExpected} files (${filesDownloaded} new, ${(sizeIncrease / 1024 / 1024).toFixed(2)} MB).${remainingIssues}`
+
+						const reloadAction = await vscode.window.showWarningMessage(message, "Reload Window")
+
+						if (reloadAction === "Reload Window") {
+							await vscode.commands.executeCommand("workbench.action.reloadWindow")
+						}
+
+						outputChannel.appendLine(`[DownloadTreeSitterWasms] Partial success: ${message}`)
 					} else {
-						// Show partial success message
+						// Show failure message
 						const message = `Downloaded ${result.successCount}/${result.totalExpected} files. Some parsing functionality may be limited. Check output channel for details.`
 						await vscode.window.showWarningMessage(message)
 						outputChannel.appendLine(`[DownloadTreeSitterWasms] Partial success: ${message}`)
@@ -638,19 +689,144 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 				} catch (error) {
 					const errorMessage = error instanceof Error ? error.message : String(error)
 
+					// Run diagnostics to help with troubleshooting
+					try {
+						let errorWasmDirectory: string | undefined
+						try {
+							const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
+							errorWasmDirectory = getWasmDirectory()
+						} catch (error) {
+							outputChannel.appendLine(
+								"[DownloadTreeSitterWasms] Could not determine WASM directory for error diagnostics",
+							)
+						}
+						const { diagnoseWasmSetup, formatDiagnosticReport } = await import(
+							"../services/tree-sitter/wasm-diagnostics"
+						)
+						const errorDiagnostics = diagnoseWasmSetup(errorWasmDirectory)
+						outputChannel.appendLine("[DownloadTreeSitterWasms] Error state diagnostics:")
+						outputChannel.appendLine(formatDiagnosticReport(errorDiagnostics))
+					} catch (diagError) {
+						outputChannel.appendLine(`[DownloadTreeSitterWasms] Could not run diagnostics: ${diagError}`)
+					}
+
 					// Log error to output channel
 					outputChannel.appendLine(`[DownloadTreeSitterWasms] Error: ${errorMessage}`)
 					if (error instanceof Error && error.stack) {
 						outputChannel.appendLine(`Stack trace: ${error.stack}`)
 					}
 
-					// Show error message to user
-					await vscode.window.showErrorMessage(
-						`Failed to download Tree-sitter WASM files: ${errorMessage}. Please check the output channel for more details.`,
+					// Show enhanced error message with troubleshooting suggestions
+					const errorActions = ["View Output Channel", "Manual Download Instructions"]
+					const errorAction = await vscode.window.showErrorMessage(
+						`Failed to download Tree-sitter WASM files: ${errorMessage}. Check your internet connection, firewall settings, or proxy configuration.`,
+						...errorActions,
 					)
+
+					if (errorAction === "Manual Download Instructions") {
+						await vscode.env.openExternal(
+							vscode.Uri.parse(
+								"https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files",
+							),
+						)
+					}
 				}
 			},
 		)
+	},
+
+	checkWasmSetup: async () => {
+		try {
+			// Import necessary modules
+			const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
+			const { diagnoseWasmSetup, formatDiagnosticReport } = await import(
+				"../services/tree-sitter/wasm-diagnostics"
+			)
+			const { TelemetryService } = await import("@roo-code/telemetry")
+			const { TelemetryEventName } = await import("@roo-code/types")
+
+			// Get WASM directory
+			let wasmDirectory: string | undefined
+			try {
+				wasmDirectory = getWasmDirectory()
+			} catch (error) {
+				outputChannel.appendLine("[CheckWasmSetup] Could not determine WASM directory")
+			}
+
+			// Run diagnostics
+			outputChannel.appendLine("[CheckWasmSetup] Running WASM diagnostics...")
+			const diagnosticReport = diagnoseWasmSetup(wasmDirectory)
+			const formattedReport = formatDiagnosticReport(diagnosticReport)
+
+			// Log to output channel
+			outputChannel.appendLine("\n" + formattedReport)
+			outputChannel.show()
+
+			// Capture telemetry
+			try {
+				TelemetryService.instance.captureWasmDiagnosticRun(
+					diagnosticReport.isHealthy,
+					diagnosticReport.missingCriticalFiles.length,
+					diagnosticReport.totalFiles,
+					Math.round(diagnosticReport.totalSize / 1024),
+				)
+			} catch (e) {
+				outputChannel.appendLine(`[CheckWasmSetup] Telemetry capture failed: ${e}`)
+			}
+
+			// Show user-friendly message based on health status
+			if (diagnosticReport.isHealthy) {
+				const action = await vscode.window.showInformationMessage(
+					`✅ WASM setup is healthy! ${diagnosticReport.totalFiles} files (${(diagnosticReport.totalSize / 1024 / 1024).toFixed(2)} MB) loaded successfully.`,
+					"View Details",
+				)
+				if (action === "View Details") {
+					outputChannel.show()
+				}
+			} else {
+				// Show warning with recommendations
+				const recommendations = diagnosticReport.recommendations.join("\n• ")
+				const actions = ["View Details", "Download WASM Files", "Troubleshooting Guide"]
+				const action = await vscode.window.showWarningMessage(
+					`⚠️ WASM setup has issues. ${diagnosticReport.missingCriticalFiles.length} critical files missing.`,
+					...actions,
+				)
+
+				if (action === "View Details") {
+					outputChannel.show()
+				} else if (action === "Download WASM Files") {
+					await vscode.commands.executeCommand("roo-code.downloadTreeSitterWasms")
+				} else if (action === "Troubleshooting Guide") {
+					await vscode.env.openExternal(
+						vscode.Uri.parse(
+							"https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files",
+						),
+					)
+				}
+			}
+		} catch (error) {
+			const errorMessage = error instanceof Error ? error.message : String(error)
+			outputChannel.appendLine(`[CheckWasmSetup] Error: ${errorMessage}`)
+			if (error instanceof Error && error.stack) {
+				outputChannel.appendLine(`Stack trace: ${error.stack}`)
+			}
+
+			const action = await vscode.window.showErrorMessage(
+				`Failed to check WASM setup: ${errorMessage}`,
+				"View Output",
+				"Troubleshooting Guide",
+			)
+
+			if (action === "View Output") {
+				outputChannel.show()
+			} else if (action === "Troubleshooting Guide") {
+				await vscode.env.openExternal(
+					vscode.Uri.parse(
+						"https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files",
+					),
+				)
+			}
+		}
 	},
 })
 

@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { CommandIds, type CommandId as CommandsCommandId } from "./commands.js"
 
 /**
  * CodeAction
@@ -26,42 +27,12 @@ export type TerminalActionPromptType = `TERMINAL_${TerminalActionName}`
  * Command
  */
 
-export const commandIds = [
-	"activationCompleted",
+// Re-export CommandId from commands.ts for backward compatibility
+export type CommandId = CommandsCommandId
 
-	"plusButtonClicked",
-	"promptsButtonClicked",
-	"mcpButtonClicked",
-	"historyButtonClicked",
-	"marketplaceButtonClicked",
-	"popoutButtonClicked",
-	"cloudButtonClicked",
-	"settingsButtonClicked",
-
-	"openInNewTab",
-
-	"showHumanRelayDialog",
-	"registerHumanRelayCallback",
-	"unregisterHumanRelayCallback",
-	"handleHumanRelayResponse",
-
-	"newTask",
-
-	"setCustomStoragePath",
-	"importSettings",
-
-	"focusInput",
-	"acceptInput",
-	"focusPanel",
-	"toggleAutoApprove",
-	"testQdrantConnection",
-	"testNeo4jConnection",
-	"testEmbeddingProvider",
-	"dumpIndexingDiagnostics",
-	"downloadTreeSitterWasms",
-] as const
-
-export type CommandId = (typeof commandIds)[number]
+// Keep the old commandIds array for backward compatibility but mark as deprecated
+/** @deprecated Use CommandIds from commands.ts instead */
+export const commandIds = Object.values(CommandIds) as readonly string[]
 
 /**
  * Language

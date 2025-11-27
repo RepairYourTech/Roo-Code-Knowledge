@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-    </details>
+      </details>
 
 ---
 
@@ -151,23 +151,64 @@ If you prefer to install the VSIX package manually:
 
 ---
 
-## Tree-Sitter WASM Files
+## WASM Files
 
-The code indexing feature requires tree-sitter WASM files for parsing various programming languages. These files are committed to the repository in `src/services/tree-sitter/` for reliable builds.
+This extension bundles tree-sitter and tiktoken WASM files (~44MB) directly in the repository for zero network dependency during builds and runtime.
 
-### If WASM files are missing:
+### Static WASM Files
+
+WASM files are stored in:
+
+- `src/wasms/tree-sitter/` - Tree-sitter language parsers (~43MB)
+- `src/wasms/tiktoken/` - Tiktoken tokenization (~5.58MB)
+
+These files are committed to the repository and copied during the build process.
+
+### Regenerating WASM Files
+
+To update WASM files (e.g., when updating tree-sitter or tiktoken versions):
 
 ```bash
-pnpm download-wasms
+cd src
+pnpm setup-static-wasms  # Downloads, validates, and copies WASM files to static directories
+
+
+# Commit the updated files
+git add src/wasms/
+git commit -m "chore: update WASM files"
 ```
 
-This downloads ~30 language parsers (~5-10MB total) from the `tree-sitter-wasms` package.
+The `setup-static-wasms` script:
+
+1. Downloads the latest WASM files using `pnpm regenerate-wasms`
+2. Validates the downloaded files using `pnpm check-wasms`
+3. Copies tree-sitter WASM files from `dist/services/tree-sitter/` to `src/wasms/tree-sitter/`
+4. Copies tiktoken WASM file from `node_modules/tiktoken/` to `src/wasms/tiktoken/`
+5. Fails fast if any source directories are missing or empty
+
+For manual control, you can run the steps individually:
+
+```bash
+cd src
+pnpm regenerate-wasms  # Downloads latest WASM files (tiktoken goes directly to src/wasms/tiktoken/)
+pnpm check-wasms        # Validates WASM files
+cp dist/services/tree-sitter/*.wasm wasms/tree-sitter/  # Only needed for tree-sitter
+```
 
 ### Verifying WASM files:
 
 ```bash
 pnpm --filter roo-cline check-wasms
 ```
+
+### Why Bundle WASM Files?
+
+- **Zero network dependency**: Builds and extension loading don't require internet access
+- **Reliability**: No CDN failures or download timeouts
+- **Performance**: Instant startup, no download delays
+- **Reproducibility**: Exact WASM versions are locked in the repository
+
+**Trade-off**: Repository size increases by ~44MB, but this is acceptable for the reliability and performance benefits.
 
 ---
 

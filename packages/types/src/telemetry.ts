@@ -80,6 +80,15 @@ export enum TelemetryEventName {
 	GRAPH_RELATIONSHIPS_CREATED = "Graph Relationships Created",
 	GRAPH_INDEXING_ERROR = "Graph Indexing Error",
 	GRAPH_FILE_INDEXED = "Graph File Indexed",
+
+	// Tree-sitter WASM Events
+	WASM_LOAD_ATTEMPT = "WASM Load Attempt",
+	WASM_LOAD_SUCCESS = "WASM Load Success",
+	WASM_LOAD_FAILURE = "WASM Load Failure",
+	WASM_PARSE_ATTEMPT = "WASM Parse Attempt",
+	WASM_PARSE_SUCCESS = "WASM Parse Success",
+	WASM_PARSE_FAILURE = "WASM Parse Failure",
+	WASM_DIAGNOSTIC_RUN = "WASM Diagnostic Run",
 }
 
 /**
@@ -243,6 +252,35 @@ export const rooCodeTelemetryEventSchema = z.discriminatedUnion("type", [
 			cacheReadTokens: z.number().optional(),
 			cacheWriteTokens: z.number().optional(),
 			cost: z.number().optional(),
+		}),
+	}),
+	z.object({
+		type: z.enum([
+			TelemetryEventName.WASM_LOAD_ATTEMPT,
+			TelemetryEventName.WASM_LOAD_SUCCESS,
+			TelemetryEventName.WASM_LOAD_FAILURE,
+			TelemetryEventName.WASM_PARSE_ATTEMPT,
+			TelemetryEventName.WASM_PARSE_SUCCESS,
+			TelemetryEventName.WASM_PARSE_FAILURE,
+		]),
+		properties: z.object({
+			...telemetryPropertiesSchema.shape,
+			language: z.string(),
+			wasmFile: z.string().optional(),
+			errorMessage: z.string().optional(),
+			loadTimeMs: z.number().optional(),
+			fallbackUsed: z.boolean().optional(),
+			captureCount: z.number().optional(),
+		}),
+	}),
+	z.object({
+		type: z.literal(TelemetryEventName.WASM_DIAGNOSTIC_RUN),
+		properties: z.object({
+			...telemetryPropertiesSchema.shape,
+			isHealthy: z.boolean(),
+			missingCriticalFiles: z.array(z.string()),
+			totalFiles: z.number(),
+			totalSizeKB: z.number(),
 		}),
 	}),
 ])

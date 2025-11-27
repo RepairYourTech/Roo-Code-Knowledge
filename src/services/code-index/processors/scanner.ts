@@ -7,7 +7,7 @@ import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../sha
 import { getWorkspacePathForContext } from "../../../utils/path"
 import { scannerExtensions } from "../shared/supported-extensions"
 import * as vscode from "vscode"
-import { MAX_CONTENT_PREVIEW_CHARS } from "../constants"
+import { MAX_CONTENT_PREVIEW_CHARS, GEMINI_MAX_BATCH_ITEMS } from "../constants"
 import {
 	CodeBlock,
 	ICodeParser,
@@ -407,7 +407,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		this.verboseLogging = verboseLogging || false
 
 		// Initialize adaptive batch optimizer
-		this.batchOptimizer = new AdaptiveBatchOptimizer(MAX_BATCH_TOKENS, MAX_ITEM_TOKENS, {
+		this.batchOptimizer = new AdaptiveBatchOptimizer(MAX_BATCH_TOKENS, MAX_ITEM_TOKENS, GEMINI_MAX_BATCH_ITEMS, {
 			minBatchSize: 5,
 			maxBatchSize: 100,
 			targetLatency: 2000, // 2 seconds
@@ -1330,6 +1330,80 @@ export class DirectoryScanner implements IDirectoryScanner {
 						// Step 5: Upsert points to Qdrant
 						this.log?.info(`[DirectoryScanner] Upserting ${points.length} points to Qdrant for batch`)
 						await this.qdrantClient.upsertPoints(points)
+
+						// Report indexed blocks to orchestrator
+						if (onBlocksIndexed) {
+							onBlocksIndexed(points.length)
+						}
+
+						// Step 5.5: Index into Neo4j (if enabled)
+						if (this.graphIndexer && !this.isCircuitBreakerOpen("transactionErrors")) {
+							try {
+								await this.waitForTransactionSlot()
+								await this.incrementActiveTransactions()
+
+								try {
+									this.log?.info(
+										`[DirectoryScanner] Indexing ${fileBlocks.length} blocks into Neo4j for ${filePath}`,
+									)
+
+									// Report start of Neo4j indexing for this file
+									this.stateManager.reportNeo4jIndexingProgress(
+										this.neo4jCumulativeFilesProcessed,
+										this.neo4jTotalFilesToProcess,
+										"indexing",
+										`Indexing graph for ${path.basename(filePath)}`,
+									)
+
+									if (this.graphIndexer) {
+										await this.graphIndexer.indexBlocks(fileBlocks)
+										this.log?.info(
+											`[DirectoryScanner] Successfully indexed blocks into Neo4j for ${filePath}`,
+										)
+									} else {
+										this.log?.warn(
+											`[DirectoryScanner] GraphIndexer is undefined, skipping Neo4j indexing for ${filePath}`,
+										)
+									}
+
+									this.neo4jCumulativeFilesProcessed++
+
+									// Report completion for this file
+									this.stateManager.reportNeo4jIndexingProgress(
+										this.neo4jCumulativeFilesProcessed,
+										this.neo4jTotalFilesToProcess,
+										"indexing",
+									)
+
+									this.resetCircuitBreaker("transactionErrors")
+								} catch (graphError: any) {
+									this.log?.error(
+										`[DirectoryScanner] Neo4j indexing failed for ${filePath}:`,
+										graphError,
+									)
+									this.log?.error(
+										`[DirectoryScanner] Neo4j indexing failed for ${filePath}:`,
+										graphError,
+									)
+									const errorMessage =
+										graphError instanceof Error ? graphError.message : String(graphError)
+									this.log?.info(
+										`[DirectoryScanner] Neo4j indexing failed for ${filePath}: ${errorMessage}`,
+									)
+
+									// Update circuit breaker but don't fail the batch since Qdrant succeeded
+									this.updateCircuitBreaker("transactionErrors")
+
+									TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+										error: sanitizeErrorMessage(errorMessage),
+										location: "processBatch:graphIndex",
+										filePath: filePath,
+									})
+								}
+							} finally {
+								await this.decrementActiveTransactions()
+							}
+						}
 
 						// Step 6: Update cache hash for successfully processed file
 						// Only update if batch didn't fail (transaction coordination)

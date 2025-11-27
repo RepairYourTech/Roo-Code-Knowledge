@@ -148,7 +148,7 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 
 			// Log extraction summary
-			this.log?.info(`[GraphIndexer] Extracted ${allNodes.length} nodes from ${blocks.length} blocks`)
+			this.log?.info(`[GraphIndexer] Extracted ${allNodes.length} nodes from blocks`)
 			this.log?.info(`[GraphIndexer] Node types: ${this.extractNodeTypes(allNodes).join(", ")}`)
 
 			// Extract all relationships from all blocks
@@ -159,12 +159,24 @@ export class GraphIndexer implements IGraphIndexer {
 			}
 
 			// Log extraction summary
-			this.log?.info(
-				`[GraphIndexer] Extracted ${allRelationships.length} relationships from ${blocks.length} blocks`,
-			)
-			this.log?.info(
-				`[GraphIndexer] Relationship types: ${this.extractRelationshipTypes(allRelationships).join(", ")}`,
-			)
+			this.log?.info(`[GraphIndexer] Extracted ${allRelationships.length} relationships from blocks`)
+			if (allRelationships.length > 0) {
+				this.log?.info(
+					`[GraphIndexer] Relationship types: ${this.extractRelationshipTypes(allRelationships).join(", ")}`,
+				)
+			} else {
+				this.log?.info(`[GraphIndexer] No relationships extracted. Checking sample block metadata...`)
+				if (blocks.length > 0) {
+					const sample = blocks[0]
+					this.log?.info(
+						`[GraphIndexer] Sample block: ${JSON.stringify({
+							type: sample.type,
+							imports: sample.imports?.length,
+							symbolMetadata: sample.symbolMetadata,
+						})}`,
+					)
+				}
+			}
 
 			// Create nodes first, then relationships in the same transaction context
 			// This improves consistency and reduces transaction overhead

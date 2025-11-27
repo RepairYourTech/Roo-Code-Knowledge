@@ -1416,7 +1416,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		return await this.executeWithRetry("performIndexMaintenance", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				// Get all indexes
 				const indexResult = await session.run("CALL db.indexes()")
@@ -1711,7 +1711,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		await this.executeWithRetry("upsertNodes", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				// Batch upsert for better performance
 				await session.run(
@@ -1854,7 +1854,7 @@ export class Neo4jService implements INeo4jService {
 		}
 
 		await this.executeWithRetry("createRelationship", async () => {
-			const session = await this.getSession()
+			const session = await this.getSession(neo4j.session.WRITE)
 			try {
 				// Sanitize metadata to ensure all values are primitives or arrays of primitives
 				const sanitizedMetadata = this.sanitizeMetadata(relationship.metadata)
@@ -1899,7 +1899,7 @@ export class Neo4jService implements INeo4jService {
 
 		for (const [type, rels] of relationshipsByType.entries()) {
 			await this.executeWithRetry(`createRelationships_${type}`, async () => {
-				const session = await this.getSession()
+				const session = await this.getSession(neo4j.session.WRITE)
 				try {
 					// Validate relationships if enabled and filter out invalid ones
 					let validRels = rels
@@ -1926,7 +1926,7 @@ export class Neo4jService implements INeo4jService {
 						`
 									UNWIND $relationships AS rel
 									MATCH (from:CodeNode {id: rel.fromId})
-									MATCH (to:CodeNode {id: rel.toId})
+									MERGE (to:CodeNode {id: rel.toId})
 									MERGE (from)-[r:${type}]->(to)
 									SET r += rel.metadata
 								`,
@@ -2010,6 +2010,10 @@ export class Neo4jService implements INeo4jService {
 			relationshipsByType.set(rel.type, existing)
 		}
 
+		this.log?.info(
+			`[Neo4jService] Processing ${relationships.length} relationships in transaction. Types: ${Array.from(relationshipsByType.keys()).join(", ")}`,
+		)
+
 		for (const [type, rels] of relationshipsByType.entries()) {
 			try {
 				// Validate relationships if enabled and filter out invalid ones
@@ -2068,7 +2072,7 @@ export class Neo4jService implements INeo4jService {
 					`
 						UNWIND $relationships AS rel
 						MATCH (from:CodeNode {id: rel.fromId})
-						MATCH (to:CodeNode {id: rel.toId})
+						MERGE (to:CodeNode {id: rel.toId})
 						MERGE (from)-[r:${processedType}]->(to)
 						SET r += rel.metadata
 					`,

@@ -52,6 +52,7 @@ export class AdaptiveBatchOptimizer {
 	private readonly config: BatchOptimizationConfig
 	private readonly maxTokenLimit: number
 	private readonly maxItemTokens: number
+	private readonly maxBatchItems: number // API-specific item limit
 
 	// Performance tracking
 	private totalBatchesProcessed = 0
@@ -59,13 +60,19 @@ export class AdaptiveBatchOptimizer {
 	private totalProcessingTime = 0
 	private totalItemsProcessed = 0
 
-	constructor(maxTokenLimit: number, maxItemTokens: number, config: Partial<BatchOptimizationConfig> = {}) {
+	constructor(
+		maxTokenLimit: number,
+		maxItemTokens: number,
+		maxBatchItems: number,
+		config: Partial<BatchOptimizationConfig> = {},
+	) {
 		this.maxTokenLimit = maxTokenLimit
 		this.maxItemTokens = maxItemTokens
+		this.maxBatchItems = maxBatchItems // Store API-specific item limit
 
 		this.config = {
 			minBatchSize: 5,
-			maxBatchSize: 100,
+			maxBatchSize: Math.min(config.maxBatchSize || 100, maxBatchItems), // Never exceed API-specific limit
 			targetLatency: 2000, // 2 seconds
 			targetThroughput: 50, // 50 items per second
 			adjustmentFactor: 0.2, // 20% adjustment
@@ -280,7 +287,15 @@ export class AdaptiveBatchOptimizer {
 		const adjustment = 1 + this.config.adjustmentFactor * (recommendedSize > currentBatchSize ? 1 : -1)
 		const adjustedSize = Math.round(currentBatchSize * adjustment)
 
-		return Math.max(this.config.minBatchSize, Math.min(this.config.maxBatchSize, adjustedSize))
+		// CRITICAL: Apply all constraints: min, API-specific, generic max
+		return Math.max(
+			this.config.minBatchSize,
+			Math.min(
+				this.config.maxBatchSize,
+				this.maxBatchItems, // Ensure we never exceed API-specific limit
+				adjustedSize,
+			),
+		)
 	}
 
 	/**

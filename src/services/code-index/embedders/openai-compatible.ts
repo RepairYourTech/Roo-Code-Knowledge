@@ -172,8 +172,8 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 				}
 
 				// Check both token limit AND item count limit
-				// Gemini has a strict limit of 100 items per batch
-				if (currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS && currentBatch.length < this.maxBatchItems) {
+				// Gemini has a strict limit of 100 items per batch - prioritize API-specific item limit
+				if (currentBatch.length < this.maxBatchItems && currentBatchTokens + itemTokens <= MAX_BATCH_TOKENS) {
 					currentBatch.push(text)
 					currentBatchTokens += itemTokens
 					processedIndices.push(i)

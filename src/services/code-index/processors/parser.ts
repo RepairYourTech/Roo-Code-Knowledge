@@ -812,6 +812,7 @@ export class CodeParser implements ICodeParser {
 								filePath,
 								fileHash,
 								seenSegmentHashes,
+								fileImports,
 							)
 							results.push(...chunkedBlocks)
 						}
@@ -830,6 +831,7 @@ export class CodeParser implements ICodeParser {
 								filePath,
 								fileHash,
 								seenSegmentHashes,
+								fileImports,
 							)
 							results.push(...chunkedBlocks)
 						}
@@ -959,7 +961,13 @@ export class CodeParser implements ICodeParser {
 				"CodeParser",
 			)
 			this.metricsCollector?.recordParserMetric(ext, "fallback")
-			const fallbackResults = this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+			const fallbackResults = this._performFallbackChunking(
+				filePath,
+				content,
+				fileHash,
+				seenSegmentHashes,
+				fileImports,
+			)
 			results.push(...fallbackResults)
 		}
 
@@ -1013,6 +1021,7 @@ export class CodeParser implements ICodeParser {
 		seenSegmentHashes: Set<string>,
 		baseStartLine: number = 1, // 1-based start line of the *first* line in the `lines` array
 		minBlockChars: number = MIN_BLOCK_CHARS, // Allow overriding the minimum threshold
+		imports?: ImportInfo[],
 	): CodeBlock[] {
 		const chunks: CodeBlock[] = []
 		let currentChunkLines: string[] = []
@@ -1045,6 +1054,7 @@ export class CodeParser implements ICodeParser {
 						content: chunkContent,
 						segmentHash,
 						fileHash,
+						imports,
 					})
 					logger.debug(
 						`Created chunk: lines ${startLine}-${endLine}, length: ${chunkContent.length} chars`,
@@ -1088,6 +1098,7 @@ export class CodeParser implements ICodeParser {
 					content: segment,
 					segmentHash,
 					fileHash,
+					imports,
 				})
 			}
 		}
@@ -1206,6 +1217,7 @@ export class CodeParser implements ICodeParser {
 		content: string,
 		fileHash: string,
 		seenSegmentHashes: Set<string>,
+		imports?: ImportInfo[],
 	): CodeBlock[] {
 		const ext = path.extname(filePath).slice(1).toLowerCase()
 
@@ -1245,6 +1257,7 @@ export class CodeParser implements ICodeParser {
 			seenSegmentHashes,
 			1,
 			MIN_FALLBACK_CHUNK_CHARS, // Use the constant instead of hardcoded value
+			imports,
 		)
 
 		logger.debug(`Fallback chunking completed: created ${chunks.length} blocks for ${filePath}`, "CodeParser")
@@ -1298,6 +1311,7 @@ export class CodeParser implements ICodeParser {
 		filePath: string,
 		fileHash: string,
 		seenSegmentHashes: Set<string>,
+		imports?: ImportInfo[],
 	): CodeBlock[] {
 		const lines = node.text.split("\n")
 		const baseStartLine = node.startPosition.row + 1
@@ -1308,6 +1322,8 @@ export class CodeParser implements ICodeParser {
 			node.type, // Use the node's type
 			seenSegmentHashes,
 			baseStartLine,
+			MIN_BLOCK_CHARS,
+			imports,
 		)
 	}
 

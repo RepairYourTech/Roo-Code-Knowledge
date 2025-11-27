@@ -1,189 +1,162 @@
-import * as esbuild from "esbuild"
-import * as fs from "fs"
-import * as path from "path"
-import { fileURLToPath } from "url"
+#!/usr/bin/env node
 
-import { getGitSha, copyPaths, copyLocales, copyWasms, generatePackageJson } from "@roo-code/build"
+import { build } from 'esbuild'
+import path from 'path'
+import fs from 'fs'
+import { fileURLToPath } from 'url'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
-async function main() {
-	const name = "extension-nightly"
-	const production = process.argv.includes("--production")
-	const minify = production
-	const sourcemap = !production
-
-	const overrideJson = JSON.parse(fs.readFileSync(path.join(__dirname, "package.nightly.json"), "utf8"))
-	console.log(`[${name}] name: ${overrideJson.name}`)
-	console.log(`[${name}] version: ${overrideJson.version}`)
-
-	const gitSha = getGitSha()
-	console.log(`[${name}] gitSha: ${gitSha}`)
-
-	/**
-	 * @type {import('esbuild').BuildOptions}
-	 */
-	const buildOptions = {
-		bundle: true,
-		minify,
-		sourcemap,
-		logLevel: "silent",
-		format: "cjs",
-		sourcesContent: false,
-		platform: "node",
-		define: {
-			"process.env.PKG_NAME": '"roo-code-nightly"',
-			"process.env.PKG_VERSION": `"${overrideJson.version}"`,
-			"process.env.PKG_OUTPUT_CHANNEL": '"Roo-Code-Nightly"',
-			...(gitSha ? { "process.env.PKG_SHA": `"${gitSha}"` } : {}),
-		},
-	}
-
-	const srcDir = path.join(__dirname, "..", "..", "src")
-	const buildDir = path.join(__dirname, "build")
-	const distDir = path.join(buildDir, "dist")
-
-	console.log(`[${name}] srcDir: ${srcDir}`)
-	console.log(`[${name}] buildDir: ${buildDir}`)
-	console.log(`[${name}] distDir: ${distDir}`)
-
-	if (fs.existsSync(distDir)) {
-		console.log(`[${name}] Cleaning dist directory: ${distDir}`)
-		fs.rmSync(distDir, { recursive: true, force: true })
-	}
-
-	/**
-	 * @type {import('esbuild').Plugin[]}
-	 */
-	const plugins = [
-		{
-			name: "copyPaths",
-			setup(build) {
-				build.onEnd(async () => {
-					await copyPaths(
-						[
-							["../README.md", "README.md"],
-							["../CHANGELOG.md", "CHANGELOG.md"],
-							["../LICENSE", "LICENSE"],
-							["../.env", ".env", { optional: true }],
-							[".vscodeignore", ".vscodeignore"],
-							["assets", "assets"],
-							["integrations", "integrations"],
-							["node_modules/vscode-material-icons/generated", "assets/vscode-material-icons"],
-							["../webview-ui/audio", "webview-ui/audio"],
-						],
-						srcDir,
-						buildDir,
-					)
-				})
-			},
-		},
-		{
-			name: "generatePackageJson",
-			setup(build) {
-				build.onEnd(async () => {
-					const packageJson = JSON.parse(fs.readFileSync(path.join(srcDir, "package.json"), "utf8"))
-
-					const generatedPackageJson = generatePackageJson({
-						packageJson,
-						overrideJson,
-						substitution: ["roo-cline", "roo-code-nightly"],
-					})
-
-					fs.writeFileSync(path.join(buildDir, "package.json"), JSON.stringify(generatedPackageJson, null, 2))
-					console.log(`[generatePackageJson] Generated package.json`)
-
-					let count = 0
-
-					fs.readdirSync(path.join(srcDir)).forEach((file) => {
-						if (file.startsWith("package.nls")) {
-							fs.copyFileSync(path.join(srcDir, file), path.join(buildDir, file))
-							count++
-						}
-					})
-
-					console.log(`[generatePackageJson] Copied ${count} package.nls*.json files to ${buildDir}`)
-
-					const nlsPkg = JSON.parse(fs.readFileSync(path.join(srcDir, "package.nls.json"), "utf8"))
-
-					const nlsNightlyPkg = JSON.parse(
-						fs.readFileSync(path.join(__dirname, "package.nls.nightly.json"), "utf8"),
-					)
-
-					fs.writeFileSync(
-						path.join(buildDir, "package.nls.json"),
-						JSON.stringify({ ...nlsPkg, ...nlsNightlyPkg }, null, 2),
-					)
-
-					console.log(`[generatePackageJson] Generated package.nls.json`)
-				})
-			},
-		},
-		{
-			name: "copyWasms",
-			setup(build) {
-				build.onEnd(async () => {
-					try {
-						const success = await copyWasms(srcDir, distDir)
-						if (!success) {
-							console.warn(`[${name}] [copyWasms] Completed with errors for optional WASM sources`)
-						} else {
-							console.log(`[${name}] [copyWasms] Completed successfully`)
-						}
-					} catch (error) {
-						console.error(`[${name}] [copyWasms] Failed to copy required WASM files:`, error instanceof Error ? error.message : "Unknown error")
-						// Re-throw the error to fail the build
-						throw error
-					}
-				})
-			},
-		},
-		{
-			name: "copyLocales",
-			setup(build) {
-				build.onEnd(async () => {
-					await copyLocales(srcDir, distDir)
-				})
-			},
-		},
-	]
-
-	/**
-	 * @type {import('esbuild').BuildOptions}
-	 */
-	const extensionBuildOptions = {
-		...buildOptions,
-		plugins,
-		entryPoints: [path.join(srcDir, "extension.ts")],
-		outfile: path.join(distDir, "extension.js"),
-		external: ["vscode"],
-	}
-
-	/**
-	 * @type {import('esbuild').BuildOptions}
-	 */
-	const workerBuildOptions = {
-		...buildOptions,
-		entryPoints: [path.join(srcDir, "workers", "countTokens.ts")],
-		outdir: path.join(distDir, "workers"),
-	}
-
-	const [extensionBuildContext, workerBuildContext] = await Promise.all([
-		esbuild.context(extensionBuildOptions),
-		esbuild.context(workerBuildOptions),
-	])
-
-	await Promise.all([
-		extensionBuildContext.rebuild(),
-		extensionBuildContext.dispose(),
-
-		workerBuildContext.rebuild(),
-		workerBuildContext.dispose(),
-	])
+// Configuration for the nightly build
+const nightlyConfig = {
+    name: 'roo-code-nightly',
+    displayName: 'Roo Code (Nightly)',
+    description: 'Roo Code (AI-powered coding assistant) - Nightly build',
+    publisher: 'RooVeterinaryInc',
+    version: '4.123.0-nightly',
+    repository: {
+        type: 'git',
+        url: 'https://github.com/RooVeterinaryInc/roo-cline.git'
+    }
 }
 
-main().catch((e) => {
-	console.error(e)
-	process.exit(1)
-})
+async function runNightlyBuild() {
+    console.log('🚀 Starting nightly VSCode extension build...')
+    
+    try {
+        // Clean build directory
+        const buildDir = path.join(__dirname, 'build')
+        if (fs.existsSync(buildDir)) {
+            fs.rmSync(buildDir, { recursive: true, force: true })
+        }
+        fs.mkdirSync(buildDir, { recursive: true })
+
+        // Get the root project directory
+        const rootDir = path.join(__dirname, '../..')
+        const srcDir = path.join(rootDir, 'src')
+        const distDir = path.join(buildDir, 'dist')
+
+        console.log('📦 Building extension with ESBuild...')
+
+        // Build the extension
+        await build({
+            entryPoints: [path.join(srcDir, 'extension.ts')],
+            bundle: true,
+            outfile: path.join(buildDir, 'dist/extension.js'),
+            platform: 'node',
+            target: 'node20',
+            format: 'cjs',
+            sourcemap: true,
+            external: ['vscode'],
+            define: {
+                'process.env.NODE_ENV': '"production"',
+                'process.env.IS_NIGHTLY': 'true'
+            },
+            loader: {
+                '.ts': 'ts'
+            },
+            tsconfig: path.join(rootDir, 'tsconfig.json'),
+            plugins: [
+                {
+                    name: 'copy-files',
+                    setup(build) {
+                        build.onEnd(async () => {
+                            console.log('📋 Copying additional files...')
+                            
+                            // Copy package.json and modify for nightly
+                            const packageJsonPath = path.join(srcDir, 'package.json')
+                            if (fs.existsSync(packageJsonPath)) {
+                                const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'))
+                                
+                                // Update for nightly build
+                                packageJson.name = nightlyConfig.name
+                                packageJson.displayName = nightlyConfig.displayName
+                                packageJson.description = nightlyConfig.description
+                                packageJson.publisher = nightlyConfig.publisher
+                                packageJson.version = nightlyConfig.version
+                                packageJson.repository = nightlyConfig.repository
+                                packageJson.nightly = true
+                                
+                                // Remove development dependencies from final package
+                                delete packageJson.devDependencies
+                                
+                                fs.writeFileSync(
+                                    path.join(buildDir, 'package.json'),
+                                    JSON.stringify(packageJson, null, 2)
+                                )
+                            }
+
+                            // Copy other necessary files
+                            const filesToCopy = [
+                                'LICENSE',
+                                'README.md',
+                                'CHANGELOG.md'
+                            ]
+
+                            filesToCopy.forEach(file => {
+                                const srcPath = path.join(rootDir, file)
+                                const destPath = path.join(buildDir, file)
+                                if (fs.existsSync(srcPath)) {
+                                    fs.copyFileSync(srcPath, destPath)
+                                }
+                            })
+
+                            // Copy locales directory if it exists
+                            const localesSrc = path.join(rootDir, 'locales')
+                            if (fs.existsSync(localesSrc)) {
+                                const localesDest = path.join(buildDir, 'locales')
+                                copyDirectory(localesSrc, localesDest)
+                            }
+
+                            // Copy WASM files
+                            const wasmSrc = path.join(srcDir, 'services', 'tree-sitter')
+                            const wasmDest = path.join(distDir, 'services', 'tree-sitter')
+                            if (fs.existsSync(wasmSrc)) {
+                                copyDirectory(wasmSrc, wasmDest)
+                                console.log('✅ WASM files copied successfully')
+                            }
+
+                            // Copy other assets if they exist
+                            const assetsSrc = path.join(srcDir, 'assets')
+                            if (fs.existsSync(assetsSrc)) {
+                                const assetsDest = path.join(distDir, 'assets')
+                                copyDirectory(assetsSrc, assetsDest)
+                            }
+
+                            console.log('✅ Build completed successfully!')
+                        })
+                    }
+                }
+            ]
+        })
+
+        console.log('📦 Build process initiated...')
+        
+    } catch (error) {
+        console.error('❌ Build failed:', error)
+        process.exit(1)
+    }
+}
+
+function copyDirectory(src, dest) {
+    if (!fs.existsSync(dest)) {
+        fs.mkdirSync(dest, { recursive: true })
+    }
+    
+    const entries = fs.readdirSync(src, { withFileTypes: true })
+    
+    for (const entry of entries) {
+        const srcPath = path.join(src, entry.name)
+        const destPath = path.join(dest, entry.name)
+        
+        if (entry.isDirectory()) {
+            copyDirectory(srcPath, destPath)
+        } else {
+            fs.copyFileSync(srcPath, destPath)
+        }
+    }
+}
+
+// Run the build
+runNightlyBuild().catch(console.error)

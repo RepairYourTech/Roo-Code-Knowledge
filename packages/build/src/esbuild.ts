@@ -258,6 +258,239 @@ export function copyWasms(srcDir: string, distDir: string): boolean {
 	return !hasErrors // Return success status
 }
 
+export function copyStaticWasms(srcDir: string, distDir: string): boolean {
+	// Define static WASM sources
+	const staticWasmSources: WasmSource[] = [
+		{
+			dirName: "wasms/tree-sitter",
+			pattern: "*.wasm",
+			destination: "services/tree-sitter",
+			isOptional: false, // tree-sitter is required for core functionality
+		},
+		{
+			dirName: "wasms/tiktoken",
+			pattern: "tiktoken_bg.wasm",
+			destination: "", // root of dist directory
+			isOptional: true, // tiktoken is optional for tokenization functionality
+		},
+	]
+
+	let hasErrors = false
+	let hasValidStaticSources = false
+	let requiredSourceFailed = false
+
+	for (const source of staticWasmSources) {
+		const sourceDir = path.join(srcDir, source.dirName)
+
+		if (!fs.existsSync(sourceDir)) {
+			console.warn(`[copyStaticWasms] Static source directory not found: ${sourceDir}`)
+			if (source.isOptional) {
+				console.warn(`[copyStaticWasms] Optional source ${source.dirName} is missing, continuing...`)
+				continue
+			} else {
+				console.error(`[copyStaticWasms] Required source ${source.dirName} is missing`)
+				requiredSourceFailed = true
+				continue
+			}
+		}
+
+		// Check if directory is empty
+		try {
+			const files = fs.readdirSync(sourceDir)
+			const wasmFiles = files.filter((file) => file.endsWith(".wasm"))
+
+			if (wasmFiles.length === 0) {
+				console.warn(`[copyStaticWasms] No WASM files found in static directory: ${sourceDir}`)
+				if (source.isOptional) {
+					console.warn(`[copyStaticWasms] Optional source ${source.dirName} is empty, continuing...`)
+					continue
+				} else {
+					console.error(`[copyStaticWasms] Required source ${source.dirName} is empty`)
+					requiredSourceFailed = true
+					continue
+				}
+			}
+		} catch (error) {
+			console.warn(`[copyStaticWasms] Error reading static directory ${sourceDir}: ${error}`)
+			if (source.isOptional) {
+				console.warn(`[copyStaticWasms] Optional source ${source.dirName} had read errors, continuing...`)
+				continue
+			} else {
+				console.error(`[copyStaticWasms] Required source ${source.dirName} had read errors`)
+				requiredSourceFailed = true
+				continue
+			}
+		}
+
+		// If we get here, the source is valid
+		hasValidStaticSources = true
+
+		// Create destination directory if needed
+		const destDir = path.join(distDir, source.destination)
+		const existed = fs.existsSync(destDir)
+		mkdirp.sync(destDir)
+		if (!existed) {
+			console.log(`[copyStaticWasms] Created directory: ${destDir}`)
+		}
+
+		try {
+			const wasmFiles = glob.sync(source.pattern, { cwd: sourceDir })
+
+			if (wasmFiles.length === 0) {
+				const message = `[copyStaticWasms] No WASM files found in ${sourceDir} matching pattern "${source.pattern}"`
+				if (source.isOptional) {
+					console.warn(message)
+					continue
+				} else {
+					throw new Error(`${message}. This may indicate the static WASM files are missing.`)
+				}
+			}
+
+			for (const wasmFile of wasmFiles) {
+				const srcPath = path.join(sourceDir, wasmFile)
+				const destPath = path.join(destDir, path.basename(wasmFile))
+
+				// Check if file already exists from a previous source
+				if (fs.existsSync(destPath)) {
+					console.warn(`[copyStaticWasms] Warning: Overwriting existing file at ${destPath}`)
+				}
+
+				try {
+					fs.copyFileSync(srcPath, destPath)
+					console.log(`[copyStaticWasms] Copied: ${srcPath} -> ${destPath}`)
+
+					// Verify the file was copied successfully
+					if (fs.existsSync(destPath)) {
+						const srcStats = fs.statSync(srcPath)
+						const destStats = fs.statSync(destPath)
+						if (srcStats.size === destStats.size) {
+							console.log(`[copyStaticWasms] Verified: ${destPath} (${destStats.size} bytes)`)
+						} else {
+							const errorMessage = `[copyStaticWasms] Verification failed: Size mismatch for ${destPath} (expected: ${srcStats.size}, actual: ${destStats.size})`
+							if (source.isOptional) {
+								console.error(errorMessage)
+								hasErrors = true
+							} else {
+								throw new Error(errorMessage)
+							}
+						}
+					} else {
+						const errorMessage = `[copyStaticWasms] Verification failed: File not found at ${destPath} after copy`
+						if (source.isOptional) {
+							console.error(errorMessage)
+							hasErrors = true
+						} else {
+							throw new Error(errorMessage)
+						}
+					}
+				} catch (error) {
+					const errorMessage = `[copyStaticWasms] Failed to copy ${srcPath} to ${destPath}: ${error instanceof Error ? error.message : "Unknown error"}`
+					if (source.isOptional) {
+						console.error(errorMessage)
+						hasErrors = true
+					} else {
+						throw new Error(errorMessage)
+					}
+				}
+			}
+
+			console.log(`[copyStaticWasms] Copied ${wasmFiles.length} WASM files from ${source.dirName}`)
+		} catch (error) {
+			if (error instanceof Error) {
+				if (source.isOptional) {
+					console.error(error)
+					hasErrors = true
+				} else {
+					throw error
+				}
+			} else {
+				const errorMessage = `[copyStaticWasms] Unexpected error processing ${source.dirName}: ${error}`
+				if (source.isOptional) {
+					console.error(errorMessage)
+					hasErrors = true
+				} else {
+					throw new Error(errorMessage)
+				}
+			}
+		}
+	}
+
+	// Check if we need to fall back to copyWasms
+	if (!hasValidStaticSources) {
+		console.warn(`[copyStaticWasms] No valid static sources found. Falling back to copyWasms as a last resort.`)
+		console.warn(`[copyStaticWasms] Build is using node_modules instead of committed WASMs.`)
+		return copyWasms(srcDir, distDir)
+	}
+
+	// If required sources failed, throw an error
+	if (requiredSourceFailed) {
+		throw new Error(
+			`[copyStaticWasms] Required static WASM files are missing. Please regenerate them using the setup scripts.`,
+		)
+	}
+
+	// Validate critical files are present
+	const criticalFiles = [
+		{
+			path: path.join(distDir, "services", "tree-sitter", "tree-sitter.wasm"),
+			name: "tree-sitter.wasm",
+			minSize: 170000,
+			maxSize: 210000,
+		},
+		{
+			path: path.join(distDir, "services", "tree-sitter", "tree-sitter-javascript.wasm"),
+			name: "tree-sitter-javascript.wasm",
+			minSize: 100000,
+		},
+		{
+			path: path.join(distDir, "services", "tree-sitter", "tree-sitter-typescript.wasm"),
+			name: "tree-sitter-typescript.wasm",
+			minSize: 100000,
+		},
+		{
+			path: path.join(distDir, "services", "tree-sitter", "tree-sitter-python.wasm"),
+			name: "tree-sitter-python.wasm",
+			minSize: 100000,
+		},
+		{ path: path.join(distDir, "tiktoken_bg.wasm"), name: "tiktoken_bg.wasm", minSize: 5000000, maxSize: 6000000 },
+	]
+
+	for (const file of criticalFiles) {
+		if (!fs.existsSync(file.path)) {
+			if (file.name === "tiktoken_bg.wasm") {
+				console.warn(`[copyStaticWasms] Optional critical file missing: ${file.name}`)
+			} else {
+				throw new Error(`[copyStaticWasms] Required critical file missing: ${file.name} at ${file.path}`)
+			}
+		} else {
+			const stats = fs.statSync(file.path)
+			const sizeKB = Math.round(stats.size / 1024)
+
+			if (stats.size < 1024) {
+				throw new Error(
+					`[copyStaticWasms] Critical file too small: ${file.name} (${sizeKB} KB, likely corrupted)`,
+				)
+			}
+
+			if (file.minSize && stats.size < file.minSize) {
+				throw new Error(
+					`[copyStaticWasms] Critical file too small: ${file.name} (${sizeKB} KB, expected at least ${Math.round(file.minSize / 1024)} KB)`,
+				)
+			}
+
+			if (file.maxSize && stats.size > file.maxSize) {
+				throw new Error(
+					`[copyStaticWasms] Critical file too large: ${file.name} (${sizeKB} KB, expected at most ${Math.round(file.maxSize / 1024)} KB)`,
+				)
+			}
+
+			console.log(`[copyStaticWasms] Critical file verified: ${file.name} (${sizeKB} KB)`)
+		}
+	}
+
+	return !hasErrors // Return success status
+}
+
 export function copyLocales(srcDir: string, distDir: string): void {
 	const srcLocaleDir = path.join(srcDir, "i18n", "locales")
 	const destDir = path.join(distDir, "i18n", "locales")
