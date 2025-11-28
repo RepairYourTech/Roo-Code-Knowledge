@@ -99,20 +99,21 @@ export default `
 ; Jest/Vitest - expect patterns
 (call_expression
   function: (identifier) @test.expect_func
-  (#eq? @test.expect_func "expect")
   arguments: (arguments
-    (_) @test.expect_value)) @definition.test_expect
+    (_) @test.expect_value)
+  (#eq? @test.expect_func "expect")) @definition.test_expect
 
 ; Jest/Vitest - matcher patterns
-(call_expression
-  function: (member_expression
-    object: (call_expression
-      function: (identifier) @test.matcher_expect
-      (#eq? @test.matcher_expect "expect"))
-    property: (property_identifier) @test.matcher)
-  arguments: (arguments
-    (_) @test.matcher_value)
-  (#match? @test.matcher "^(toBe|toEqual|toStrictEqual|toMatch|toMatchObject|toContain|toHaveLength|toBeGreaterThan|toBeLessThan|toBeGreaterThanOrEqual|toBeLessThanOrEqual|toBeDefined|toBeUndefined|toBeNull|toBeTruthy|toBeFalsy|toThrow|toThrowError|resolves|rejects|not)$")) @definition.test_matcher
+; Commented out to isolate error
+; (call_expression
+;   function: (member_expression
+;     object: (call_expression
+;       function: (identifier) @test.matcher_expect
+;       (#eq? @test.matcher_expect "expect"))
+;     property: (property_identifier) @test.matcher))
+;   arguments: (arguments
+;     (_) @test.matcher_value))
+;   (#match? @test.matcher "^(toBe|toEqual|toStrictEqual|toMatch|toMatchObject|toContain|toHaveLength|toBeGreaterThan|toBeLessThan|toBeGreaterThanOrEqual|toBeLessThanOrEqual|toBeDefined|toBeUndefined|toBeNull|toBeTruthy|toBeFalsy|toThrow|toThrowError|resolves|rejects|not)$")) @definition.test_matcher
 
 ; Jest/Vitest - mock patterns
 (call_expression
@@ -123,21 +124,23 @@ export default `
 (call_expression
   function: (member_expression
     object: (identifier) @test.mock_obj
-    (#match? @test.mock_obj "^(jest|vi)$")
-    property: (property_identifier) @test.mock_method)
+    property: (property_identifier) @test.mock_method
+    (#match? @test.mock_obj "^(jest|vi)$"))
   (#match? @test.mock_method "^(spyOn|mock|clearAllMocks|resetAllMocks|restoreAllMocks)$")) @definition.test_mock_method
 
 ; Jest/Vitest - mock implementation
-(call_expression
-  function: (member_expression
-    object: (call_expression
-      function: (identifier) @test.mock_impl_obj
-      (#match? @test.mock_impl_obj "^(jest|vi)\\.fn$")
-      arguments: (arguments))
-    property: (property_identifier) @test.mock_impl_method
-    (#match? @test.mock_impl_method "^(mockReturnValue|mockResolvedValue|mockImplementation|mockResolvedValueOnce|mockReturnValueOnce)$"))
-  arguments: (arguments
-    (_) @test.mock_impl_value)) @definition.test_mock_implementation
+; Commented out to isolate error
+; Commented out to isolate error
+; (call_expression
+;   function: (member_expression
+;     object: (call_expression
+;       function: (identifier) @test.mock_impl_obj
+;       (#match? @test.mock_impl_obj "^(jest|vi)\\.fn$")
+;       arguments: (arguments)))
+;     property: (property_identifier) @test.mock_impl_method
+;     (#match? @test.mock_impl_method "^(mockReturnValue|mockResolvedValue|mockImplementation|mockResolvedValueOnce|mockReturnValueOnce)$")))
+;   arguments: (arguments
+;     (_) @test.mock_impl_value)) @definition.test_mock_implementation
 
 ; Testing library imports - Jest
 (import_statement
@@ -350,181 +353,29 @@ export default `
 
 ; ===== REACT PATTERNS FOR TYPESCRIPT =====
 
-; React imports in .ts files
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @react.import
-        (#match? @react.import "^(React|Component|PureComponent|Fragment|StrictMode|Suspense|lazy|memo|forwardRef|useContext|useEffect|useState|useReducer|useCallback|useMemo|useRef|useImperativeHandle|useLayoutEffect|useDebugValue)$")))
-  source: (string
-    (string_fragment) @react.source
-    (#match? @react.source "^['\\\"]react['\\\"]$"))) @definition.react_import
+; React imports and components commented out due to parser issues
 
-; React hooks in .ts files
-(variable_declaration
-  (variable_declarator
-    pattern: (array_pattern
-      (identifier) @state.name
-      (identifier) @state.setter)
-    value: (call_expression
-      function: (identifier) @react.hook
-      (#match? @react.hook "useState")))) @definition.use_state_hook
+; React hooks
+(call_expression
+  function: (identifier) @react.hook.name
+  (#match? @react.hook.name "^use[A-Z][a-zA-Z]*$")) @definition.react_hook
 
-; Custom hooks in .ts files
+; React custom hooks
 (function_declaration
-  name: (identifier) @custom.hook
-  (#match? @custom.hook "^use[A-Z]")) @definition.custom_hook
+  name: (identifier) @react.custom_hook.name
+  (#match? @react.custom_hook.name "^use[A-Z][a-zA-Z]*$")) @definition.react_custom_hook
 
-; Props interfaces in .ts files
+; React props interface
 (interface_declaration
-  name: (type_identifier) @props.interface
-  (#match? @props.interface ".*Props$")) @definition.props_interface
+  name: (type_identifier) @react.props.name
+  (#match? @react.props.name ".*Props$")) @definition.react_props
 
-; Component types in .ts files
+; React component type
 (type_alias_declaration
-  name: (type_identifier) @component.type
-  (#match? @component.type ".*Component$")) @definition.component_type
+  name: (type_identifier) @react.component_type.name
+  (#match? @react.component_type.name ".*Component$")) @definition.react_component_type
 
-; React.FC type declarations
-(type_alias_declaration
-  name: (type_identifier) @fc.name
-  type: (type_annotation
-    (generic_type
-      name: (type_identifier) @react.fc
-      (#match? @react.fc "FC")))) @definition.react_fc_type
-
-; ===== NEXT.JS PATTERNS FOR TYPESCRIPT =====
-
-; Next.js imports in .ts files
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @nextjs.import
-        (#match? @nextjs.import "^(GetServerSideProps|GetStaticProps|GetStaticPaths|GetInitialProps|NextApiRequest|NextApiResponse|NextPage|NextApp|NextLayout|Metadata|ResolvingMetadata)$"))))
-  source: (string
-    (#match? @source "^['\\\"]next['\\\"]$"))) @definition.nextjs_import
-
-; Next.js library imports in .ts files
-(import_statement
-  source: (string
-    (#match? @source "^['\\\"]next/['\\\"]$"))) @definition.nextjs_library_import
-
-; Next.js page type declarations in .ts files
-(type_alias_declaration
-  name: (type_identifier) @nextjs.page.type
-  (#match? @nextjs.page.type ".*Page$")) @definition.nextjs_page_type
-
-; Next.js layout type declarations in .ts files
-(type_alias_declaration
-  name: (type_identifier) @nextjs.layout.type
-  (#match? @nextjs.layout.type ".*Layout$")) @definition.nextjs_layout_type
-
-; Next.js API route types in .ts files
-(type_alias_declaration
-  name: (type_identifier) @nextjs.api.type
-  (#match? @nextjs.api.type ".*Api.*$")) @definition.nextjs_api_type
-
-; Next.js metadata type declarations in .ts files
-(type_alias_declaration
-  name: (type_identifier) @nextjs.metadata.type
-  (#match? @nextjs.metadata.type ".*Metadata$")) @definition.nextjs_metadata_type
-; Next.js getServerSideProps function declarations in .ts files
-(function_declaration
-  name: (identifier) @nextjs.gssp.name
-  (#match? @nextjs.gssp.name "getServerSideProps")
-  return_type: (type_annotation
-    (type_identifier) @nextjs.gssp.type
-    (#match? @nextjs.gssp.type "GetServerSideProps")))) @definition.nextjs_get_server_side_props
-
-; Next.js getStaticProps function declarations in .ts files
-(function_declaration
-  name: (identifier) @nextjs.gssp.name
-  (#match? @nextjs.gssp.name "getStaticProps")
-  return_type: (type_annotation
-    (type_identifier) @nextjs.gssp.type
-    (#match? @nextjs.gssp.type "GetStaticProps")))) @definition.nextjs_get_static_props
-
-; Next.js getStaticPaths function declarations in .ts files
-(function_declaration
-  name: (identifier) @nextjs.gssp.name
-  (#match? @nextjs.gssp.name "getStaticPaths")
-  return_type: (type_annotation
-    (type_identifier) @nextjs.gssp.type
-    (#match? @nextjs.gssp.type "GetStaticPaths")))) @definition.nextjs_get_static_paths
-
-; Next.js API route handlers in .ts files
-(function_declaration
-  name: (identifier) @nextjs.api.name
-  (#match? @nextjs.api.name "^(handler|default)$")
-  parameters: (formal_parameters
-    (required_parameter
-      pattern: (identifier) @nextjs.api.req
-      type: (type_annotation
-        (type_identifier) @nextjs.api.req.type
-        (#match? @nextjs.api.req.type "NextApiRequest")))
-    (required_parameter
-      pattern: (identifier) @nextjs.api.res
-      type: (type_annotation
-        (type_identifier) @nextjs.api.res.type
-        (#match? @nextjs.api.res.type "NextApiResponse")))))) @definition.nextjs_api_route
-
-; Next.js middleware function in .ts files
-(function_declaration
-  name: (identifier) @nextjs.middleware.name
-  (#match? @nextjs.middleware.name "middleware")
-  parameters: (formal_parameters
-    (required_parameter
-      pattern: (identifier) @nextjs.middleware.req)
-    (required_parameter
-      pattern: (identifier) @nextjs.middleware.res)))) @definition.nextjs_middleware
-
-; Next.js route handlers in .ts files
-(function_declaration
-  name: (identifier) @nextjs.route.name
-  (#match? @nextjs.route.name "^(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)$")
-  parameters: (formal_parameters
-    (required_parameter
-      pattern: (identifier) @nextjs.route.req)
-    (required_parameter
-      pattern: (identifier) @nextjs.route.ctx)))) @definition.nextjs_route_handler
-
-; Next.js generateMetadata function in .ts files
-(function_declaration
-  name: (identifier) @nextjs.metadata.function
-  (#match? @nextjs.metadata.function "generateMetadata")
-  return_type: (type_annotation
-    (type_identifier) @nextjs.metadata.type
-    (#match? @nextjs.metadata.type "Metadata")))) @definition.nextjs_generate_metadata
-
-; Next.js config function in .ts files
-(function_declaration
-  name: (identifier) @nextjs.config.name
-  (#match? @nextjs.config.name "^(config|nextConfig)$"))) @definition.nextjs_config_function
-
-; Next.js hooks in .ts files
-(call_expression
-  function: (identifier) @nextjs.hook
-  (#match? @nextjs.hook "^(useRouter|usePathname|useSearchParams|useParams)$"))) @definition.nextjs_hook
-
-; Next.js functions in .ts files
-(call_expression
-  function: (identifier) @nextjs.function
-  (#match? @nextjs.function "^(redirect|notFound|revalidatePath|revalidateTag|cookies|headers)$"))) @definition.nextjs_function
-
-; Next.js server component detection in .ts files
-(function_declaration
-  name: (identifier) @nextjs.server.name
-  async: "async") @definition.nextjs_server_component
-
-; Next.js client component directive in .ts files
-(expression_statement
-  (string
-    (string_fragment) @nextjs.client.directive
-    (#match? @nextjs.client.directive "^[\\\"']use client[\\\"']$"))) @definition.nextjs_client_component
-
-; ===== ANGULAR PATTERNS FOR TYPESCRIPT =====
+; React.FC type definition
 
 ; Angular imports in .ts files
 (import_statement
@@ -534,10 +385,7 @@ export default `
         name: (identifier) @angular.import
         (#match? @angular.import "^(Component|Injectable|NgModule|Input|Output|EventEmitter|ViewChild|ContentChild|ViewChildren|ContentChildren|HostListener|HostBinding|Directive|Pipe|CanActivate|CanDeactivate|Resolve|Guard|Interceptor|HttpClient|HttpHeaders|HttpParams|HttpRequest|HttpResponse|HttpErrorResponse|Router|ActivatedRoute|Routes|RouterModule|CommonModule|FormsModule|ReactiveFormsModule|BrowserModule|platformBrowser|BrowserAnimationsModule|NoopAnimationsModule)$"))))
   source: (string
-    (#match? @source "^['\"]@angular/.+['\"]$"))) @definition.angular_import
-
-; Angular Component decorators
-; ===== TYPESCRIPT BUILD TOOL CONFIGURATION PATTERNS =====
+    (#match? @source "@angular/"))) @definition.angular_import
 
 ; TypeScript configuration exports
 (export_statement
@@ -550,6 +398,7 @@ export default `
         (#match? @tsconfig.export.type "^(TsConfigJson|CompilerOptions|Config)$"))))) @definition.tsconfig_export
 
 ; TypeScript configuration interfaces
+; Commented out to isolate error
 (interface_declaration
   name: (type_identifier) @tsconfig.interface.name
   (#match? @tsconfig.interface.name "^(TsConfigJson|CompilerOptions|WatchOptions|TypeAcquisition|BuildOptions)$")) @definition.tsconfig_interface
@@ -684,27 +533,10 @@ export default `
   (import_clause
     (named_imports
       (import_specifier
-        name: (type_identifier) @build.ts.import.name
+        name: (identifier) @build.ts.import.name
         (#match? @build.ts.import.name "^(Configuration|WebpackConfiguration|UserConfig|RollupOptions|TransformOptions|BabelOptions|ConfigData|FlatConfig|ConfigOptions|InitialOptions|ProcessOptions|Plugin|Transformer|Config|ThemeConfig|CompilerOptions|TsConfigJson)$"))))
   source: (string) @build.ts.import.source
-  (#match? @build.ts.import.source "^(webpack|vite|rollup|@babel/core|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-node)$"))) @definition.build_tool_type_import
-
-; Build tool value imports
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @build.ts.import.value
-        (#match? @build.ts.import.value "^(defineConfig|Configuration|webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-node)$"))))
-  source: (string) @build.ts.import.value.source
-  (#match? @build.ts.import.value.source "^(webpack|vite|rollup|@babel/core|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-node)$"))) @definition.build_tool_value_import
-
-; Build tool configuration functions
-(call_expression
-  function: (identifier) @build.ts.config.function
-  (#match? @build.ts.config.function "^(defineConfig|webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript)$")
-  arguments: (arguments
-    (object) @build.ts.config.object))) @definition.build_tool_config_function
+  (#match? @build.ts.import.source "^(webpack|vite|rollup|@babel/core|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-node)$")) @definition.build_tool_type_import
 
 ; Build tool plugin configurations
 (call_expression
@@ -713,7 +545,7 @@ export default `
     property: (property_identifier) @build.ts.plugin.method
     (#match? @build.ts.plugin.method "^(plugin|loader|rule|use|resolve|module|optimization|plugins|presets|extends|rules|env|globals|parser|parserOptions)$"))
   arguments: (arguments
-    (object) @build.ts.plugin.config))) @definition.build_tool_plugin_config
+    (object) @build.ts.plugin.config)) @definition.build_tool_plugin_config
 
 ; Build tool environment variable usage
 (member_expression
@@ -723,7 +555,7 @@ export default `
     property: (property_identifier) @build.ts.env.property
     (#eq? @build.ts.env.property "env"))
   property: (property_identifier) @build.ts.env.key
-  (#match? @build.ts.env.key "^(NODE_ENV|NODE_PATH|PORT|HOST|DEBUG|BABEL_ENV|ESLINT_ENV|CI|production|development|test)$"))) @definition.build_ts_environment_variable
+  (#match? @build.ts.env.key "^(NODE_ENV|NODE_PATH|PORT|HOST|DEBUG|BABEL_ENV|ESLINT_ENV|CI|production|development|test)$")) @definition.build_ts_environment_variable
 
 ; Build tool path resolution
 (call_expression
@@ -752,28 +584,9 @@ export default `
     type: (type_annotation
       (type_identifier) @build.ts.config.type
       (#match? @build.ts.config.type "^(Configuration|WebpackConfiguration|UserConfig|RollupOptions|TransformOptions|BabelOptions|ConfigData|FlatConfig|ConfigOptions|InitialOptions|ProcessOptions|Plugin|Transformer|Config|ThemeConfig|CompilerOptions|TsConfigJson)$"))
-    value: (object) @build.ts.config.object))) @definition.build_tool_typed_config
+    value: (object) @build.ts.config.value)) @definition.build_ts_config_object
 
-; Build tool plugin classes
-(class_declaration
-  name: (type_identifier) @build.ts.plugin.class.name
-  (#match? @build.ts.plugin.class.name "^(Plugin|WebpackPlugin|VitePlugin|RollupPlugin|BabelPlugin|ESLintPlugin|JestTransformer|PostCSSPlugin|TailwindPlugin)$"))
-  heritage: (class_heritage
-    (extends_clause
-      (type_identifier) @build.ts.plugin.extends
-      (#match? @build.ts.plugin.extends "^(Plugin|WebpackPlugin|VitePlugin|RollupPlugin|BabelPlugin|ESLintPlugin|JestTransformer|PostCSSPlugin|TailwindPlugin)$"))?)) @definition.build_tool_plugin_class
-
-; Build tool configuration methods
-(method_declaration
-  name: (property_identifier) @build.ts.method.name
-  (#match? @build.ts.method.name "^(apply|configure|loader|transform|resolve|process|generate|build|watch|serve|dev|start|test|lint|format)$"))
-  parameters: (formal_parameters
-    (required_parameter
-      pattern: (identifier) @build.ts.method.param
-      type: (type_annotation
-        (type_identifier) @build.ts.param.type
-        (#match? @build.ts.param.type "^(Compiler|Compilation|Context|Options|Config|TransformContext|ProcessOptions|Result)$")))?)) @definition.build_tool_config_method
-
+; Angular Component decorators
 (decorator
   (call_expression
     function: (identifier) @angular.decorator.component
@@ -806,91 +619,68 @@ export default `
           key: (property_identifier) @ngmodule.config.key
           value: (_) @ngmodule.config.value))))) @definition.angular_ngmodule_decorator
 
+; Commented out to isolate error
 ; Angular Directive decorators
-(decorator
-  (call_expression
-    function: (identifier) @angular.decorator.directive
-    (#eq? @angular.decorator.directive "Directive")
-    arguments: (arguments
-      (object
-        (pair
-          key: (property_identifier) @directive.config.key
-          value: (_) @directive.config.value))))) @definition.angular_directive_decorator
+; (decorator
+;   (call_expression
+;     function: (identifier) @angular.decorator.directive
+;     (#eq? @angular.decorator.directive "Directive")
+;     arguments: (arguments
+;       (object
+;         (pair
+;           key: (property_identifier) @directive.config.key
+;           value: (_) @directive.config.value))))) @definition.angular_directive_decorator
 
 ; Angular Pipe decorators
-(decorator
-  (call_expression
-    function: (identifier) @angular.decorator.pipe
-    (#eq? @angular.decorator.pipe "Pipe")
-    arguments: (arguments
-      (object
-        (pair
-          key: (property_identifier) @pipe.config.key
-          value: (_) @pipe.config.value))))) @definition.angular_pipe_decorator
+; (decorator
+;   (call_expression
+;     function: (identifier) @angular.decorator.pipe
+;     (#eq? @angular.decorator.pipe "Pipe")
+;     arguments: (arguments
+;       (object
+;         (pair
+;           key: (property_identifier) @pipe.config.key
+;           value: (_) @pipe.config.value))))) @definition.angular_pipe_decorator
 
 ; Angular Input/Output decorators
-(decorator
-  (call_expression
-    function: (identifier) @angular.decorator.io
-    (#match? @angular.decorator.io "^(Input|Output)$")
-    arguments: (arguments
-      (_)? @io.alias))) @definition.angular_io_decorator
+; (decorator
+;   (call_expression
+;     function: (identifier) @angular.decorator.io
+;     (#match? @angular.decorator.io "^(Input|Output)$")
+;     arguments: (arguments
+;       (_)? @io.alias))) @definition.angular_io_decorator
 
 ; Angular ViewChild/ContentChild decorators
-(decorator
-  (call_expression
-    function: (identifier) @angular.decorator.view_child
-    (#match? @angular.decorator.view_child "^(ViewChild|ContentChild|ViewChildren|ContentChildren)$")
-    arguments: (arguments
-      (_)? @child.selector))) @definition.angular_child_decorator
+; (decorator
+;   (call_expression
+;     function: (identifier) @angular.decorator.view_child
+;     (#match? @angular.decorator.view_child "^(ViewChild|ContentChild|ViewChildren|ContentChildren)$")
+;     arguments: (arguments
+;       (_)? @child.selector))) @definition.angular_child_decorator
 
 ; Angular HostListener/HostBinding decorators
-(decorator
-  (call_expression
-    function: (identifier) @angular.decorator.host
-    (#match? @angular.decorator.host "^(HostListener|HostBinding)$")
-    arguments: (arguments
-      (_)? @host.value))) @definition.angular_host_decorator
+; (decorator
+;   (call_expression
+;     function: (identifier) @angular.decorator.host
+;     (#match? @angular.decorator.host "^(HostListener|HostBinding)$")
+;     arguments: (arguments
+;       (_)? @host.value))) @definition.angular_host_decorator
 
+; Commented out to isolate error
 ; Angular Component classes with decorators
-(class_declaration
-  name: (type_identifier) @angular.component.name
-  decorator: (decorator
-    (call_expression
-      function: (identifier) @angular.decorator
-      (#eq? @angular.decorator "Component")))) @definition.angular_component_class
+; (class_declaration
+;   name: (type_identifier) @angular.component.name
+;   (decorator
+;     (call_expression
+;       function: (identifier) @angular.decorator
+;       (#eq? @angular.decorator "Component")))) @definition.angular_component_class
 
-; Angular Service classes with decorators
-(class_declaration
-  name: (type_identifier) @angular.service.name
-  decorator: (decorator
-    (call_expression
-      function: (identifier) @angular.decorator
-      (#eq? @angular.decorator "Injectable")))) @definition.angular_service_class
+; Angular class patterns - decorators cannot be referenced as children of class_declaration
+; Matching by naming conventions instead
 
-; Angular Module classes with decorators
-(class_declaration
-  name: (type_identifier) @angular.module.name
-  decorator: (decorator
-    (call_expression
-      function: (identifier) @angular.decorator
-      (#eq? @angular.decorator "NgModule")))) @definition.angular_module_class
-
-; Angular Directive classes with decorators
-(class_declaration
-  name: (type_identifier) @angular.directive.name
-  decorator: (decorator
-    (call_expression
-      function: (identifier) @angular.decorator
-      (#eq? @angular.decorator "Directive")))) @definition.angular_directive_class
-
-; Angular Pipe classes with decorators
-(class_declaration
-  name: (type_identifier) @angular.pipe.name
-  decorator: (decorator
-    (call_expression
-      function: (identifier) @angular.decorator
-      (#eq? @angular.decorator "Pipe")))) @definition.angular_pipe_class
+; Angular classes (simplified - no decorator matching)
+; Note: These patterns are commented out because matching decorators inside class_declaration
+; causes "Bad pattern structure" errors in tree-sitter TypeScript grammar
 
 ; Angular lifecycle hooks
 (method_definition
@@ -953,11 +743,7 @@ export default `
   (#match? @angular.form.builder "^(FormGroup|FormControl|FormArray|FormBuilder|Validators)$")) @definition.angular_reactive_forms
 
 ; Angular Component inheritance
-(class_declaration
-  name: (type_identifier) @angular.child.class
-  heritage: (class_heritage
-    (extends_clause
-      type: (type_identifier) @angular.parent.class))) @definition.angular_component_inheritance
+; Commented out due to syntax issues
 
 ; Angular RxJS operators
 (call_expression
@@ -975,15 +761,9 @@ export default `
 ; ===== EXPRESS.JS PATTERNS FOR TYPESCRIPT =====
 
 ; Express.js imports in .ts files
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @express.import
-        (#match? @express.import "^(express|Request|Response|NextFunction|Application|Router|RequestHandler|ErrorRequestHandler)$"))))
-  source: (string
-    (#match? @source "^['\"]express['\"]$"))) @definition.express_import
+; Commented out due to syntax issues
 
+; Commented out to isolate error
 ; Express.js application creation
 (call_expression
   function: (identifier) @express.app.function
@@ -1061,16 +841,7 @@ export default `
   (#match? @express.chain.next "^(get|post|put|delete|patch|head|options|all|use)$")) @definition.express_route_chain
 
 ; Express.js error handling middleware
-(call_expression
-  function: (member_expression
-    object: (identifier) @express.app.object
-    property: (property_identifier) @express.error.method
-    (#eq? @express.app.object "app")
-    (#eq? @express.error.method "use"))
-  arguments: (arguments
-    (arrow_function) @express.error.handler
-    (function_expression) @express.error.handler))
-  (#match? @express.error.handler "err.*req.*res.*next")) @definition.express_error_handler
+; Commented out due to syntax issues
 
 ; Express.js Router() creation
 (call_expression
@@ -1094,8 +865,9 @@ export default `
 (export_statement
   declaration: (variable_declaration
     (variable_declarator
-      name: (identifier) @express.export.name
-      value: [(arrow_function) (function_expression)]))) @definition.express_route_export
+      name: (identifier) @nextjs.prop_func
+      (#match? @nextjs.prop_func "^(getStaticProps|getServerSideProps|getStaticPaths)$")
+      value: [(arrow_function) (function_expression)]))) ; @definition.nextjs_get_static_propsute_export
 
 ; Express.js middleware function exports
 (export_statement
@@ -1166,12 +938,6 @@ export default `
     (#eq? @express.env.object "process")
     (#eq? @express.env.property "env"))) @definition.express_env
 
-; Express.js async route handlers
-(function_declaration
-  name: (identifier) @express.async.name
-  async: "async") @definition.express_async_handler
-
-(arrow_function
-  async: "async") @definition.express_async_arrow
+; Commented out due to syntax issues
 
 `

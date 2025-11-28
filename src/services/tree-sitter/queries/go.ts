@@ -96,7 +96,7 @@ export default `
 (import_declaration
   (import_spec
     path: (interpreted_string_literal) @go.testing_import_path
-    (#match? @go.testing_import_path "^\"testing\"$"))) @definition.go_testing_import
+    (#match? @go.testing_import_path "testing"))) @definition.go_testing_import
 
 ; Testing sub-packages
 (import_declaration
@@ -107,41 +107,40 @@ export default `
 ; Test methods requiring arguments
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.test_obj
+    operand: (identifier) @go.test_obj
     (#eq? @go.test_obj "t")
-    property: (field_identifier) @go.test_method
+    field: (field_identifier) @go.test_method
     (#match? @go.test_method "^(Log|Logf|Error|Errorf|Fatal|Fatalf|Skip|Skipf|Run|TempDir|Setenv|Cleanup)$"))
   arguments: (argument_list)) @definition.go_test_method
 
 ; Test methods without required arguments
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.test_obj
+    operand: (identifier) @go.test_obj
     (#eq? @go.test_obj "t")
-    property: (field_identifier) @go.test_method
+    field: (field_identifier) @go.test_method
     (#match? @go.test_method "^(Fail|FailNow|Helper|Parallel)$"))) @definition.go_test_method
 
 ; Testing.TB methods (interface methods)
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.tb_obj
-    property: (field_identifier) @go.tb_method
+    operand: (identifier) @go.tb_obj
+    field: (field_identifier) @go.tb_method
     (#match? @go.tb_method "^(Log|Logf|Error|Errorf|Fatal|Fatalf|Skip|Skipf|Fail|FailNow|Helper|Run|Parallel|TempDir|Setenv|Cleanup)$"))
   arguments: (argument_list)?) @definition.go_testing_interface_method
 
 ; Test table-driven tests (simplified and broadened pattern)
 (composite_literal
   type: (_) @go.test_data_type
-  body: (expression_list
-    (composite_literal
-      type: (struct_type) @go.test_case_struct))) @definition.go_table_driven_test
+  body: (literal_value
+    (_) @go.test_case_struct)) @definition.go_table_driven_test
 
 ; Subtests
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.subtest_obj
+    operand: (identifier) @go.subtest_obj
     (#eq? @go.subtest_obj "t")
-    property: (field_identifier) @go.subtest_method
+    field: (field_identifier) @go.subtest_method
     (#eq? @go.subtest_method "Run"))
   arguments: (argument_list
     (interpreted_string_literal) @go.subtest_name
@@ -190,17 +189,17 @@ export default `
 ; Testing assertions (third-party libraries)
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.assert_obj
-    property: (field_identifier) @go.assert_method
+    operand: (identifier) @go.assert_obj
+    field: (field_identifier) @go.assert_method
     (#match? @go.assert_method "^(Equal|NotEqual|True|False|Nil|NotNil|Empty|NotEmpty|Contains|NotContains|Panics|DoesNotPanic|WithinDuration|InDelta|InEpsilon)$"))
   arguments: (argument_list)?) @definition.go_assertion
 
 ; Testify assertions
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.testify_pkg
+    operand: (identifier) @go.testify_pkg
     (#match? @go.testify_pkg "^(assert|require)$")
-    property: (field_identifier) @go.testify_method)
+    field: (field_identifier) @go.testify_method)
   arguments: (argument_list
     (identifier) @go.testify_param
     (_)*)) @definition.go_testify
@@ -208,15 +207,15 @@ export default `
 ; Testify mock patterns
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.testify_mock_obj
-    property: (field_identifier) @go.testify_mock_method
+    operand: (identifier) @go.testify_mock_obj
+    field: (field_identifier) @go.testify_mock_method
     (#match? @go.testify_mock_method "^(On|Return|Run|Once|Twice|Times|Maybe|Unset)$"))
   arguments: (argument_list)?) @definition.go_testify_mock
 
 ; Ginkgo testing framework
 (call_expression
   function: (identifier) @go.ginkgo_func
-  (#match? @go.ginkgo_func "^(Describe|Context|It|BeforeEach|AfterEach|BeforeSuite|AfterSuite|JustBeforeEach|Specify)$"))
+  (#match? @go.ginkgo_func "^(Describe|Context|It|BeforeEach|AfterEach|BeforeSuite|AfterSuite|JustBeforeEach|Specify)$")
   arguments: (argument_list
     (interpreted_string_literal) @go.ginkgo_description
     (func_literal) @go.ginkgo_func_body)) @definition.go_ginkgo_test
@@ -224,12 +223,12 @@ export default `
 ; Gomega assertions
 (call_expression
   function: (identifier) @go.gomega_func
-  (#match? @go.gomega_func "^(Expect|Ω|Eventually|Consistently)$"))
+  (#match? @go.gomega_func "^(Expect|Ω|Eventually|Consistently)$")
   arguments: (argument_list
     (_) @go.gomega_actual
     (selector_expression
-      object: (identifier) @go.gomega_matcher_obj
-      property: (field_identifier) @go.gomega_matcher
+      operand: (identifier) @go.gomega_matcher_obj
+      field: (field_identifier) @go.gomega_matcher
       (#match? @go.gomega_matcher "^(To|ToNot|ToEqual|ToNotEqual|BeNil|BeFalse|BeTrue|BeEmpty|HaveLen|ContainElement|ContainElements|BeEquivalentTo|MatchError|BeIdenticalTo|BeNumerically|BeTemporally|And|WithTransform)$")))) @definition.go_gomega_assertion
 
 ; Test configuration
@@ -240,8 +239,8 @@ export default `
 ; Test environment variables
 (call_expression
   function: (selector_expression
-    object: (identifier) @go.env_obj
-    property: (field_identifier) @go.env_method
+    operand: (identifier) @go.env_obj
+    field: (field_identifier) @go.env_method
     (#match? @go.env_method "^(Setenv|Unsetenv|Getenv|LookupEnv)$"))
   arguments: (argument_list)?) @definition.go_test_environment
 

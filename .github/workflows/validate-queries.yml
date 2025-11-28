@@ -1,0 +1,38 @@
+name: Validate Tree-sitter Queries
+
+on:
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+jobs:
+    validate-queries:
+        runs-on: ubuntu-latest
+
+        steps:
+            - uses: actions/checkout@v3
+
+            - name: Use Node.js
+              uses: actions/setup-node@v3
+              with:
+                  node-version: "18.x"
+                  cache: "pnpm"
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v2
+              with:
+                  version: 10.8.1
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Run Query Validation
+              run: pnpm run validate-queries
+
+            - name: Upload Validation Report
+              if: always()
+              uses: actions/upload-artifact@v3
+              with:
+                  name: query-validation-report
+                  path: INDEXAUDIT/QUERY_VALIDATION_REPORT.md

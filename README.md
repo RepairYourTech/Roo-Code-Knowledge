@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-  </details>
+      </details>
 
 ---
 
@@ -261,6 +261,9 @@ If the codebase index is not finding code blocks:
 2. **Check WASM files**: Verify that `src/dist/services/tree-sitter/*.wasm` files exist after build
 3. **Check logs**: Look for parser loading errors in the VSCode Developer Console (Help > Toggle Developer Tools)
 4. **Verify dependencies**: Ensure `tree-sitter-wasms` and `web-tree-sitter` are installed in `src/node_modules`
+5. **Validate queries**: Run `npm run validate-queries` to ensure tree-sitter queries are working correctly
+
+For detailed information about query validation and troubleshooting, see [QUERY_FIX_GUIDE.md](docs/QUERY_FIX_GUIDE.md).
 
 If you see "No parser available for file extension" errors, the WASM files may not have been copied during build.
 

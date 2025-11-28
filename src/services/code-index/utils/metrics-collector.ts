@@ -131,6 +131,9 @@ export interface ParserMetrics {
 	noneQueryUsage: number
 	unknownQueryUsage: number
 	averageFileSize: number
+	queryTier1: number
+	queryTier2: number
+	queryTier3: number
 }
 
 /**
@@ -579,12 +582,17 @@ export class MetricsCollector {
 			| "fileSize"
 			| "zeroCaptureEvent"
 			| "captureEffectiveness"
-			| "fallbackChunkingTrigger",
+			| "captureEffectiveness"
+			| "fallbackChunkingTrigger"
+			| "queryTier1"
+			| "queryTier2"
+			| "queryTier3",
 		count: number = 1,
 		error?: string,
 		querySource?: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
 		fileSize?: number,
 		fallbackReason?: "zeroCaptures" | "parseError" | "noParser",
+		tier?: number,
 	): void {
 		const existing = this.parserMetrics.get(language) || {
 			language,
@@ -606,6 +614,9 @@ export class MetricsCollector {
 			noneQueryUsage: 0,
 			unknownQueryUsage: 0,
 			averageFileSize: 0,
+			queryTier1: 0,
+			queryTier2: 0,
+			queryTier3: 0,
 		}
 
 		switch (metric) {
@@ -690,6 +701,15 @@ export class MetricsCollector {
 				existing.averageFileSize = (existing.averageFileSize * (totalFiles - 1) + count) / totalFiles
 				break
 			}
+			case "queryTier1":
+				existing.queryTier1 += count
+				break
+			case "queryTier2":
+				existing.queryTier2 += count
+				break
+			case "queryTier3":
+				existing.queryTier3 += count
+				break
 		}
 
 		this.parserMetrics.set(language, existing)

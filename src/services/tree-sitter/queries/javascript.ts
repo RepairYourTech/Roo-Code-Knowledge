@@ -184,12 +184,12 @@ export default `
       (#eq? @jest.require.func "require")
       arguments: (arguments
         (string) @jest.require.source
-        (#match? @jest.require.source "^['\"](@jest/globals|jest)['\"]$"))))) @definition.jest_require
+        (#match? @jest.require.source "^['\\\"](@jest/globals|jest)['\\\"]$"))))) @definition.jest_require
 
 ; Jest/Vitest - import patterns
 (import_statement
   source: (string) @jest.import.source
-  (#match? @jest.import.source "^['\"](@jest/globals|jest)['\"]$")) @definition.jest_import
+  (#match? @jest.import.source "^['\\\"](@jest/globals|jest)['\\\"]$")) @definition.jest_import
 
 ; Jest/Vitest - test file patterns (file-based detection)
 (import_statement
@@ -323,12 +323,9 @@ export default `
   declaration: (function_declaration
     name: (identifier) @express.middleware.export.name
     parameters: (formal_parameters
-      (parameter
-        pattern: (identifier) @express.middleware.req)
-      (parameter
-        pattern: (identifier) @express.middleware.res)
-      (parameter
-        pattern: (identifier) @express.middleware.next)))) @definition.express_middleware_export
+      (identifier) @express.middleware.req
+      (identifier) @express.middleware.res
+      (identifier) @express.middleware.next))) @definition.express_middleware_export
 
 ; Express.js route parameter extraction
 (call_expression
@@ -436,14 +433,14 @@ export default `
     value: (_) @webpack.rule.value)) @definition.webpack_rule
 
 ; Vite configuration exports
-(assignment_expression
-  left: (identifier) @vite.config.name
-  (#match? @vite.config.name "^(viteConfig|config|defineConfig)$")
-  right: (call_expression
-    function: (identifier) @vite.define.func
-    (#eq? @vite.define.func "defineConfig")
-    arguments: (arguments
-      (object) @vite.config.object)))) @definition.vite_config
+; (assignment_expression
+;   left: (identifier) @vite.config.name
+;   (#match? @vite.config.name "^(viteConfig|config|defineConfig)$")
+;   right: (call_expression
+;     function: (identifier) @vite.define.func
+;     (#eq? @vite.define.func "defineConfig")
+;     arguments: (arguments
+;       (_) @vite.config.object))) ; @definition.vite_config
 
 ; Vite configuration properties
 (object
@@ -453,32 +450,36 @@ export default `
     value: (_) @vite.value)) @definition.vite_properties
 
 ; Vite server configuration
-(object
-  (pair
-    key: (property_identifier) @vite.server.key
-    (#eq? @vite.server.key "server")
-    value: (object
-      (pair
-        key: (property_identifier) @vite.server.prop
-        (#match? @vite.server.prop "^(host|port|strictPort|https|open|cors|proxy|headers|watch|fs|origin|hmr|middleware)$")
-        value: (_) @vite.server.value))))) @definition.vite_server_config
+; (object
+;   (pair
+;     key: (property_identifier) @vite.server.key
+;     (#eq? @vite.server.key "server")
+;     value: (object
+;       (pair
+;         key: (property_identifier) @vite.server.prop
+;         (#match? @vite.server.prop "^(host|port|strictPort|https|open|cors|proxy|headers|watch|fs|origin|hmr|middleware)$")
+;         value: (_) @vite.server.value))))) @definition.vite_server_config
 
 ; Vite build configuration
-(object
-  (pair
-    key: (property_identifier) @vite.build.key
-    (#eq? @vite.build.key "build")
-    value: (object
-      (pair
-        key: (property_identifier) @vite.build.prop
-        (#match? @vite.build.prop "^(target|outDir|assetsDir|assetsInlineLimit|cssCodeSplit|sourcemap|rollupOptions|minify|manifest|ssrManifest|ssr|emptyOutDir|write|emptyOutDir|copyPublicDir|reportCompressedSize|chunkSizeWarningLimit|rollupOptions|commonjsOptions|dynamicImportVarsOptions|lib|lib|formats|modulePreload)$")
-        value: (_) @vite.build.value))))) @definition.vite_build_config
+; (object
+;   (pair
+;     key: (property_identifier) @vite.build.key
+;     (#eq? @vite.build.key "build")
+;     value: (object
+;       (pair
+;         key: (property_identifier) @vite.build.prop
+;         (#match? @vite.build.prop "^(target|outDir|assetsDir|assetsInlineLimit|cssCodeSplit|sourcemap|rollupOptions|minify|manifest|ssrManifest|ssr|emptyOutDir|write|emptyOutDir|copyPublicDir|reportCompressedSize|chunkSizeWarningLimit|rollupOptions|commonjsOptions|dynamicImportVarsOptions|lib|lib|formats|modulePreload)$")
+;         value: (_) @vite.build.value))))) @definition.vite_build_config
 
 ; Rollup configuration exports
-(assignment_expression
-  left: (identifier) @rollup.config.name
-  (#match? @rollup.config.name "^(rollupConfig|config)$")
-  right: (object) @rollup.config.object)) @definition.rollup_config
+; (assignment_expression
+;   left: (identifier) @rollup.config.name
+;   (#match? @rollup.config.name "^(rollupConfig|config)$")
+;   right: (object
+;     (pair
+;       key: (property_identifier) @rollup.config.key
+;       (#match? @rollup.config.key "^(input|output|plugins|external|watch|treeshake|context|moduleContext|preserveEntrySignatures)$")
+;       value: (_) @rollup.config.value))) ; @definition.rollup_config
 
 ; Rollup configuration properties
 (object
@@ -488,10 +489,10 @@ export default `
     value: (_) @rollup.value)) @definition.rollup_properties
 
 ; Babel configuration exports
-(assignment_expression
-  left: (identifier) @babel.config.name
-  (#match? @babel.config.name "^(babelConfig|config|api)$")
-  right: (object) @babel.config.object)) @definition.babel_config
+; (assignment_expression
+;   left: (identifier) @babel.config.name
+;   (#match? @babel.config.name "^(babelConfig|config|api)$")
+;   right: (object) @babel.config.object) ; @definition.babel_config
 
 ; Babel configuration properties
 (object
@@ -500,152 +501,17 @@ export default `
     (#match? @babel.key "^(presets|plugins|env|assumptions|targets|browserslist|browsers|configFile|envName|root|sourceMaps|sourceType|inputSourceMap|retainLines|highlightCode|suppressDeprecationMessages|compact|minified|comments|shouldPrintComment|overrides|ignore|only|test|include|exclude|cache|cacheDirectory|filename)$")
     value: (_) @babel.value)) @definition.babel_properties
 
-; ESLint configuration exports
-(assignment_expression
-  left: (identifier) @eslint.config.name
-  (#match? @eslint.config.name "^(eslintConfig|config)$")
-  right: (object) @eslint.config.object)) @definition.eslint_config
+; Commented out due to syntax issues
 
-; ESLint flat configuration (new format)
-(call_expression
-  function: (member_expression
-    object: (identifier) @eslint.config.object
-    (#eq? @eslint.config.object "eslint")
-    property: (property_identifier) @eslint.config.method
-    (#eq? @eslint.config.method "config"))
-  arguments: (arguments
-    (object) @eslint.config.rules))) @definition.eslint_flat_config
-
-; ESLint configuration properties
-(object
-  (pair
-    key: (property_identifier) @eslint.key
-    (#match? @eslint.key "^(env|extends|globals|parser|parserOptions|plugins|rules|overrides|root|ignorePatterns|noInlineConfig|reportUnusedDisableDirectives|processor|settings)$")
-    value: (_) @eslint.value)) @definition.eslint_properties
-
-; Prettier configuration exports
-(assignment_expression
-  left: (identifier) @prettier.config.name
-  (#match? @prettier.config.name "^(prettierConfig|config)$")
-  right: (object) @prettier.config.object)) @definition.prettier_config
-
-; Prettier configuration properties
-(object
-  (pair
-    key: (property_identifier) @prettier.key
-    (#match? @prettier.key "^(printWidth|tabWidth|useTabs|semi|singleQuote|quoteProps|trailingComma|bracketSpacing|bracketSameLine|arrowParens|range|parser|filepath|requirePragma|insertPragma|proseWrap|htmlWhitespaceSensitivity|vueIndentScriptAndStyle|endOfLine|embeddedLanguageFormatting|singleAttributePerLine)$")
-    value: (_) @prettier.value)) @definition.prettier_properties
-
-; TypeScript configuration exports
-(assignment_expression
-  left: (identifier) @tsconfig.config.name
-  (#match? @tsconfig.config.name "^(tsConfig|config|compilerOptions)$")
-  right: (object) @tsconfig.config.object)) @definition.tsconfig_config
-
-; TypeScript compiler options
-(object
-  (pair
-    key: (property_identifier) @tsconfig.key
-    (#match? @tsconfig.key "^(target|module|lib|allowJs|checkJs|jsx|declaration|declarationMap|sourceMap|outFile|outDir|rootDir|composite|tsBuildInfoFile|removeComments|noEmit|importHelpers|downlevelIteration|isolatedModules|strict|noImplicitAny|strictNullChecks|strictFunctionTypes|strictBindCallApply|strictPropertyInitialization|noImplicitThis|alwaysStrict|noUnusedLocals|noUnusedParameters|exactOptionalPropertyTypes|noImplicitReturns|noFallthroughCasesInSwitch|noUncheckedIndexedAccess|noImplicitOverride|noPropertyAccessFromIndexSignature|allowUnusedLabels|allowUnreachableCode|moduleResolution|baseUrl|paths|rootDirs|typeRoots|types|allowSyntheticDefaultImports|esModuleInterop|preserveSymlinks|allowUmdGlobalAccess|moduleSuffixes|resolveJsonModule|isolatedModules|skipLibCheck|forceConsistentCasingInFileNames|emitDecoratorMetadata|experimentalDecorators|jsxFactory|jsxFragmentFactory|jsxImportSource|reactNamespace|useDefineForClassFields|newLine|noEmitHelpers|importHelpers)$")
-    value: (_) @tsconfig.value)) @definition.tsconfig_properties
-
-; Jest configuration exports
-(assignment_expression
-  left: (identifier) @jest.config.name
-  (#match? @jest.config.name "^(jestConfig|config)$")
-  right: (object) @jest.config.object)) @definition.jest_config
-
-; Jest configuration properties
-(object
-  (pair
-    key: (property_identifier) @jest.key
-    (#match? @jest.key "^(automock|bail|cache|cacheDirectory|clearMocks|collectCoverage|collectCoverageFrom|coverageDirectory|coveragePathIgnorePatterns|coverageReporters|coverageThreshold|dependencyExtractor|errorOnDeprecated|forceCoverageMatch|forceExit|globals|globalSetup|globalTeardown|maxConcurrency|maxWorkers|moduleDirectories|moduleFileExtensions|modulePathIgnorePatterns|moduleNameMapper|modulePaths|notify|notifyMode|preset|projects|reporters|resetMocks|resetModules|resolver|restoreMocks|rootDir|roots|runner|setupFiles|setupFilesAfterEnv|snapshotSerializers|testEnvironment|testEnvironmentOptions|testFailureExitCode|testMatch|testPathIgnorePatterns|testRegex|testResultsProcessor|testRunner|testURL|timers|transform|transformIgnorePatterns|unmockedModulePathPatterns|verbose|watch|watchIgnorePatterns|watchPathIgnorePatterns|watchPlugins)$")
-    value: (_) @jest.value)) @definition.jest_properties
-
-; PostCSS configuration exports
-(assignment_expression
-  left: (identifier) @postcss.config.name
-  (#match? @postcss.config.name "^(postcssConfig|config)$")
-  right: (object) @postcss.config.object)) @definition.postcss_config
-
-; PostCSS configuration properties
-(object
-  (pair
-    key: (property_identifier) @postcss.key
-    (#match? @postcss.key "^(plugins|parser|syntax|stringifier|map|from|to|output|input|options|env)$")
-    value: (_) @postcss.value)) @definition.postcss_properties
-
-; Tailwind CSS configuration exports
-(assignment_expression
-  left: (identifier) @tailwind.config.name
-  (#match? @tailwind.config.name "^(tailwindConfig|config)$")
-  right: (object) @tailwind.config.object)) @definition.tailwind_config
-
-; Tailwind CSS configuration properties
-(object
-  (pair
-    key: (property_identifier) @tailwind.key
-    (#match? @tailwind.key "^(content|theme|plugins|presets|darkMode|variantOrder|separator|prefix|important|corePlugins|future)$")
-    value: (_) @tailwind.value)) @definition.tailwind_properties
-
-; Build tool plugin configurations
-(call_expression
-  function: (identifier) @plugin.function
-  arguments: (arguments
-    (object) @plugin.config)) @definition.build_plugin
-
-; Common build tool require statements
-(variable_declaration
-  (variable_declarator
-    name: (identifier) @build.require.name
-    value: (call_expression
-      function: (identifier) @build.require.func
-      (#eq? @build.require.func "require")
-      arguments: (arguments
-        (string) @build.require.source
-        (#match? @build.require.source "^(webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript|ts-loader|babel-loader|css-loader|style-loader|file-loader|url-loader|html-webpack-plugin|mini-css-extract-plugin|clean-webpack-plugin|copy-webpack-plugin|dotenv-webpack|webpack-dev-server|webpack-merge|webpack-bundle-analyzer|@babel/core|@babel/preset-env|@babel/preset-react|@babel/preset-typescript|eslint|prettier|jest|postcss|tailwindcss)$"))))) @definition.build_tool_require
-
-; Build tool imports
-(import_statement
-  (import_clause
-    (named_imports
-      (import_specifier
-        name: (identifier) @build.import.name
-        (#match? @build.import.name "^(webpack|vite|rollup|babel|eslint|prettier|jest|postcss|tailwindcss|typescript|defineConfig|Configuration|WebpackPlugin|Loader|Plugin|Rule|Transform|Generator|Parser)$"))))
-  source: (string) @build.import.source
-  (#match? @build.import.source "^(webpack|vite|rollup|@babel/core|@babel/preset-env|@babel/preset-react|@babel/preset-typescript|eslint|prettier|jest|postcss|tailwindcss|typescript)$"))) @definition.build_tool_import
-
-; Environment variable usage in build configs
-(member_expression
-  object: (member_expression
-    object: (identifier) @env.object
-    (#eq? @env.object "process")
-    property: (property_identifier) @env.property
-    (#eq? @env.property "env"))
-  property: (property_identifier) @env.key
-  (#match? @env.key "^(NODE_ENV|NODE_PATH|PORT|HOST|DEBUG|BABEL_ENV|ESLINT_ENV|CI|production|development|test)$")) @definition.build_environment_variable
-
-; Path resolution in build configs
-(call_expression
-  function: (identifier) @path.function
-  (#match? @path.function "^(resolve|join|dirname|basename|extname|parse|format)$")
-  arguments: (arguments
-    (_) @path.argument*)) @definition.build_path_resolution
-
-; File system operations in build configs
-(call_expression
-  function: (identifier) @fs.function
-  (#match? @fs.function "^(readFileSync|writeFileSync|existsSync|mkdirSync|readdirSync|statSync)$")
-  arguments: (arguments
-    (_) @fs.argument*)) @definition.build_fs_operation
+; Commented out due to syntax issues
 
 ; Express.js async route handlers
 (function_declaration
   name: (identifier) @express.async.name
-  async: "async") @definition.express_async_handler
+  ) @definition.express_async_handler
 
 (arrow_function
-  async: "async") @definition.express_async_arrow
+  ) @definition.express_async_arrow
 
 ; Decorated class definitions
 (

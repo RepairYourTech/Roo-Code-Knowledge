@@ -7,6 +7,7 @@ import { LanguageParser, LanguageParsers, loadRequiredLanguageParsers } from "..
 import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
 import { MetricsCollector } from "../utils/metrics-collector"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
+import { executeQueryWithFallback } from "../../tree-sitter/query-fallback-strategy"
 import { ICodeParser, CodeBlock, ILSPService, LSPTypeInfo, CallInfo, TestMetadata, TestTarget } from "../interfaces"
 import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
 import {
@@ -62,7 +63,7 @@ export class CodeParser implements ICodeParser {
 			jsx: "javascript",
 			json: "javascript",
 			ts: "typescript",
-			tsx: "tsx",
+			tsx: "typescript", // Map tsx to typescript for simplified query compatibility
 			py: "python",
 			rs: "rust",
 			go: "go",
@@ -407,6 +408,7 @@ export class CodeParser implements ICodeParser {
 	private async parseContent(filePath: string, content: string, fileHash: string): Promise<CodeBlock[]> {
 		const ext = path.extname(filePath).slice(1).toLowerCase()
 		const seenSegmentHashes = new Set<string>()
+		let queryTier = 1 // Initialize query tier for progressive fallback tracking
 
 		// Handle markdown files specially
 		if (ext === "md" || ext === "markdown") {
@@ -718,6 +720,7 @@ export class CodeParser implements ICodeParser {
 
 		// Query execution diagnostics
 		let captures: any[] = []
+		let tier = 0
 		if (tree && language.query) {
 			try {
 				// Log the query pattern count
@@ -731,7 +734,23 @@ export class CodeParser implements ICodeParser {
 				}
 
 				// Execute the query with try-catch to detect runtime errors
-				captures = language.query.captures(tree.rootNode)
+				// Execute query with progressive fallback strategy
+				// Use normalizedExt which now returns canonical language names that match cases in getSimplifiedQuery()
+				const result = executeQueryWithFallback(language.parser, language.query, tree, normalizedExt)
+				captures = result.captures
+				tier = result.tier
+				queryTier = tier // Update queryTier for use in fallback logic
+
+				// Log which tier was used if not Tier 1
+				if (tier > 1) {
+					logger.debug(
+						`Query execution for ${filePath} used tier ${tier} and produced ${captures.length} captures`,
+						"CodeParser",
+					)
+				}
+
+				// Record metrics about tier usage
+				this.metricsCollector?.recordParserMetric(normalizedExt, `queryTier${tier}` as any, 1)
 				logger.debug(`Query captures for ${filePath}: ${captures.length}`, "CodeParser")
 			} catch (error) {
 				logger.error(
@@ -790,6 +809,7 @@ export class CodeParser implements ICodeParser {
 			logger.debug(`  - File size: ${content.length} characters`, "CodeParser")
 			logger.debug(`  - Content length: ${content.length} characters`, "CodeParser")
 			logger.debug(`  - MIN_BLOCK_CHARS threshold: ${MIN_BLOCK_CHARS}`, "CodeParser")
+			logger.debug(`  - Query tier used: ${queryTier}`, "CodeParser")
 
 			// Log query source information
 			const querySource = language.querySource || "unknown"
@@ -1133,15 +1153,20 @@ export class CodeParser implements ICodeParser {
 			)
 		}
 
-		// Fallback chunking: If no blocks were created from captures and content is sufficient, use fallback chunking
-		if (results.length === 0 && content.length >= MIN_BLOCK_CHARS) {
-			logger.debug(
-				`Applying fallback chunking for ${filePath} due to empty captures (content length: ${content.length}, threshold: ${MIN_BLOCK_CHARS})`,
+		// Fallback chunking: Only trigger if all tiers have truly failed
+		// Check if tier was 3 (emergency) AND results are empty, indicating complete failure
+		// This ensures fallback chunking is not invoked when Tier 1 or 2 produced captures
+		// but semantic unit processing simply yielded small or filtered nodes
+		if (results.length === 0 && content.length >= MIN_BLOCK_CHARS && queryTier === 3) {
+			const reason = "zeroCaptures" // Use the standard reason value
+			logger.warn(
+				`All query tiers failed for ${filePath} (tier ${queryTier}), applying fallback chunking`,
 				"CodeParser",
 			)
 			this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
 			const querySource = language.querySource || "unknown"
-			const reason = "zeroCaptures"
+			// Add tier-aware metrics for fallback triggers
+			this.metricsCollector?.recordParserMetric(normalizedExt, `fallbackTriggerTier${queryTier}` as any, 1)
 			this.metricsCollector?.recordParserMetric(
 				normalizedExt,
 				"fallbackChunkingTrigger",
@@ -1150,6 +1175,7 @@ export class CodeParser implements ICodeParser {
 				undefined,
 				undefined,
 				reason,
+				queryTier, // Propagate tier to differentiate between "no captures after all tiers" and "captures exist but downstream logic produced no blocks"
 			)
 			const fallbackResults = this._performFallbackChunking(
 				filePath,
@@ -1157,7 +1183,7 @@ export class CodeParser implements ICodeParser {
 				fileHash,
 				seenSegmentHashes,
 				fileImports,
-				"zero captures",
+				`zero captures (tier ${tier})`,
 				querySource,
 			)
 			results.push(...fallbackResults)

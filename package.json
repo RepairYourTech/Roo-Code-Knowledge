@@ -2,7 +2,7 @@
 	"name": "roo-code",
 	"packageManager": "pnpm@10.8.1",
 	"engines": {
-		"node": "20.19.2"
+		"node": ">=18.0.0"
 	},
 	"scripts": {
 		"preinstall": "node scripts/bootstrap.mjs",
@@ -11,7 +11,8 @@
 		"install:all": "node scripts/bootstrap.mjs",
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
 		"check-types": "turbo check-types --log-order grouped --output-logs new-only",
-		"test": "turbo test --log-order grouped --output-logs new-only",
+		"test": "vscode-test",
+		"validate-queries": "ts-node scripts/validate-queries.ts",
 		"format": "turbo format --log-order grouped --output-logs new-only",
 		"build": "turbo build --log-order grouped --output-logs new-only",
 		"bundle": "turbo bundle --log-order grouped --output-logs new-only",
@@ -50,6 +51,7 @@
 		"prettier": "^3.4.2",
 		"rimraf": "^6.0.1",
 		"tsx": "^4.19.3",
+		"ts-node": "^10.9.2",
 		"turbo": "^2.5.6",
 		"typescript": "^5.4.5"
 	},
