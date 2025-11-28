@@ -18,7 +18,7 @@ import {
 } from "../interfaces/quality-metrics"
 import { HybridSearchResult } from "../hybrid-search-service"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
-import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
+import { getWasmDirectory, getWasmDirectorySync } from "../../tree-sitter/get-wasm-directory"
 import { ImportInfo } from "../types/metadata"
 import { ReachabilityAnalyzer, UnreachableNode } from "./reachability"
 
@@ -834,7 +834,7 @@ export class QualityMetricsService implements IQualityMetricsService {
 		}
 
 		// Start a new load
-		const loadPromise = loadRequiredLanguageParsers([filePath], getWasmDirectory())
+		const loadPromise = loadRequiredLanguageParsers([filePath], getWasmDirectorySync())
 		this.pendingParserLoads.set(ext, loadPromise)
 
 		try {

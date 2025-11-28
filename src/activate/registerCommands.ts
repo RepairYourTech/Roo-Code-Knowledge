@@ -621,8 +621,8 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 					outputChannel.appendLine("[DownloadTreeSitterWasms] Running pre-download diagnostics...")
 					let wasmDirectory: string | undefined
 					try {
-						const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
-						wasmDirectory = getWasmDirectory()
+						const { getWasmDirectorySync } = await import("../services/tree-sitter/get-wasm-directory")
+						wasmDirectory = getWasmDirectorySync()
 					} catch (error) {
 						outputChannel.appendLine(
 							"[DownloadTreeSitterWasms] Could not determine WASM directory for diagnostics",
@@ -693,8 +693,8 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 					try {
 						let errorWasmDirectory: string | undefined
 						try {
-							const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
-							errorWasmDirectory = getWasmDirectory()
+							const { getWasmDirectorySync } = await import("../services/tree-sitter/get-wasm-directory")
+							errorWasmDirectory = getWasmDirectorySync()
 						} catch (error) {
 							outputChannel.appendLine(
 								"[DownloadTreeSitterWasms] Could not determine WASM directory for error diagnostics",
@@ -738,7 +738,7 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 	checkWasmSetup: async () => {
 		try {
 			// Import necessary modules
-			const { getWasmDirectory } = await import("../services/tree-sitter/get-wasm-directory")
+			const { getWasmDirectorySync } = await import("../services/tree-sitter/get-wasm-directory")
 			const { diagnoseWasmSetup, formatDiagnosticReport } = await import(
 				"../services/tree-sitter/wasm-diagnostics"
 			)
@@ -748,7 +748,7 @@ const getCommandsMap = ({ context, outputChannel, provider }: RegisterCommandOpt
 			// Get WASM directory
 			let wasmDirectory: string | undefined
 			try {
-				wasmDirectory = getWasmDirectory()
+				wasmDirectory = getWasmDirectorySync()
 			} catch (error) {
 				outputChannel.appendLine("[CheckWasmSetup] Could not determine WASM directory")
 			}

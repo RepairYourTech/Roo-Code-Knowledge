@@ -1,0 +1,229 @@
+name: WASM Loading Tests
+
+on:
+    workflow_dispatch:
+    push:
+        branches: [main]
+        paths:
+            - "src/services/tree-sitter/**"
+            - "src/services/code-index/processors/parser.ts"
+    pull_request:
+        types: [opened, reopened, ready_for_review, synchronize]
+        branches: [main]
+        paths:
+            - "src/services/tree-sitter/**"
+            - "src/services/code-index/processors/parser.ts"
+
+jobs:
+    unit-tests:
+        name: Unit Tests (${{ matrix.os }} Node ${{ matrix.node-version }})
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+                node-version: [16, 18, 20]
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+              with:
+                  node-version: ${{ matrix.node-version }}
+
+            - name: Run WASM loader unit tests
+              run: |
+                  cd packages/roo-cline
+                  pnpm test src/services/tree-sitter/__tests__/wasm-loading-retry.test.ts
+
+            - name: Run parser availability unit tests
+              run: |
+                  cd packages/roo-cline
+                  pnpm test src/services/tree-sitter/__tests__/parser-availability.test.ts
+
+    integration-tests:
+        name: Integration Tests (${{ matrix.os }})
+        runs-on: ${{ matrix.os }}
+        strategy:
+            matrix:
+                os: [ubuntu-latest, macos-latest, windows-latest]
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Create mock WASM directory structure
+              run: |
+                  mkdir -p src/services/tree-sitter/wasm
+                  echo "mock wasm content" > src/services/tree-sitter/wasm/parser.wasm
+
+            - name: Run integration tests for parser loading flow
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testPathPattern=integration.*wasm.*loading
+
+    retry-logic-tests:
+        name: Retry Logic Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Test exponential backoff
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="calculateBackoffDelay" --verbose
+
+            - name: Test error classification
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="shouldRetryError" --verbose
+
+            - name: Test retry attempts with mocked failures
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="should load successfully after.*retry" --verbose
+
+    availability-cache-tests:
+        name: Availability Cache Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Test cache TTL behavior
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="cache respects TTL" --verbose
+
+            - name: Test cache invalidation
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="cache invalidation" --verbose
+
+            - name: Test concurrent cache access
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="concurrent access to cache" --verbose
+
+    error-scenario-tests:
+        name: Error Scenario Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Test missing WASM files scenario
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="missing.*wasm" --verbose
+
+            - name: Test corrupted WASM files scenario
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="corrupted.*wasm" --verbose
+
+            - name: Test transient file system errors
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="ENOENT|EACCES" --verbose
+
+            - name: Test WASM directory unavailable
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="directory.*unavailable" --verbose
+
+    coverage:
+        name: Code Coverage
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Generate coverage report
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --coverage --coverageReporters=lcov --coverageReporters=text
+
+            - name: Upload coverage to Codecov
+              uses: codecov/codecov-action@v4
+              with:
+                  file: ./packages/roo-cline/coverage/lcov.info
+                  flags: wasm-loading
+                  name: wasm-loading-coverage
+
+            - name: Check coverage threshold
+              run: |
+                  cd packages/roo-cline
+                  COVERAGE=$(pnpm test -- --coverage --coverageReporters=text | grep -E "All files|Lines" | tail -1 | grep -o "[0-9]*\.[0-9]*" | head -1)
+                  THRESHOLD=80
+                  if (( $(echo "$COVERAGE < $THRESHOLD" | bc -l) )); then
+                    echo "Coverage $COVERAGE% is below threshold $THRESHOLD%"
+                    exit 1
+                  else
+                    echo "Coverage $COVERAGE% meets threshold $THRESHOLD%"
+                  fi
+
+    performance-tests:
+        name: Performance Tests
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Measure parser loading time without retries
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="should load successfully on first attempt" --verbose --testTimeout=30000
+
+            - name: Measure parser loading time with retries
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="should apply exponential backoff delays correctly" --verbose --testTimeout=60000
+
+            - name: Verify retry delays are within expected ranges
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="should respect max delay cap" --verbose
+
+            - name: Check cache hit rates
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="cache hit" --verbose
+
+    error-message-validation:
+        name: Error Message Validation
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v4
+
+            - name: Setup Node.js and pnpm
+              uses: ./.github/actions/setup-node-pnpm
+
+            - name: Verify retry count in error messages
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="retry count.*error messages" --verbose
+
+            - name: Verify recovery suggestions in error messages
+              run: |
+                  cd packages/roo-cline
+                  pnpm test -- --testNamePattern="suggestions.*error messages" --verbose

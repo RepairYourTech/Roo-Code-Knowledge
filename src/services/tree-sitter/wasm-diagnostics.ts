@@ -29,6 +29,19 @@ export interface DiagnosticReport {
 	treeSitterWasmsVersion: string | null
 	recommendations: string[]
 	isHealthy: boolean
+	recoverySuggestions: RecoverySuggestion[]
+	canAutoRecover: boolean
+	estimatedRecoveryTime: number
+}
+
+/**
+ * Recovery suggestion for WASM issues
+ */
+export interface RecoverySuggestion {
+	action: string
+	command: string | null
+	priority: number
+	description: string
 }
 
 /**
@@ -242,6 +255,75 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 		criticalFiles.every((file) => file.isValid) &&
 		webTreeSitterVersion !== null
 
+	// Generate recovery suggestions
+	const recoverySuggestions: RecoverySuggestion[] = []
+	let canAutoRecover = false
+	let estimatedRecoveryTime = 0
+
+	if (!wasmDirectoryExists) {
+		recoverySuggestions.push({
+			action: "Regenerate WASM files",
+			command: "pnpm regenerate-wasms",
+			priority: 1,
+			description: "Regenerate all WASM files in src/wasms/tree-sitter/",
+		})
+		recoverySuggestions.push({
+			action: "Download WASM files",
+			command: "Roo-Cline: Download Tree-sitter WASM Files",
+			priority: 2,
+			description: "Download WASM files to the legacy dist/ path",
+		})
+		canAutoRecover = true
+		estimatedRecoveryTime = 60 // 1 minute for directory creation
+	} else if (missingCriticalFiles.length > 0) {
+		recoverySuggestions.push({
+			action: "Download missing files",
+			command: "Roo-Cline: Download Tree-sitter WASM Files",
+			priority: 1,
+			description: "Download missing critical WASM files",
+		})
+		recoverySuggestions.push({
+			action: "Check file permissions",
+			command: null,
+			priority: 2,
+			description: "Verify you have read/write access to the WASM directory",
+		})
+		canAutoRecover = true
+		estimatedRecoveryTime = missingCriticalFiles.length * 30 // 30 seconds per file
+	} else {
+		const corruptedFiles = criticalFiles.filter((file) => file.exists && !file.isValid)
+		if (corruptedFiles.length > 0) {
+			recoverySuggestions.push({
+				action: "Re-download corrupted files",
+				command: "Roo-Cline: Download Tree-sitter WASM Files",
+				priority: 1,
+				description: "Re-download corrupted WASM files",
+			})
+			recoverySuggestions.push({
+				action: "Manual download",
+				command: null,
+				priority: 2,
+				description: "Manually download and replace corrupted files",
+			})
+			canAutoRecover = true
+			estimatedRecoveryTime = corruptedFiles.length * 30 // 30 seconds per file
+		}
+	}
+
+	if (!webTreeSitterVersion) {
+		recoverySuggestions.push({
+			action: "Install web-tree-sitter",
+			command: "pnpm install",
+			priority: 1,
+			description: "Install the web-tree-sitter package",
+		})
+		canAutoRecover = true
+		estimatedRecoveryTime += 30 // 30 seconds for package install
+	}
+
+	// Sort recovery suggestions by priority (lower number = higher priority)
+	recoverySuggestions.sort((a, b) => a.priority - b.priority)
+
 	// Add troubleshooting link if there are any issues
 	if (!isHealthy) {
 		recommendations.push(`For detailed troubleshooting steps, visit: ${TROUBLESHOOTING_URL}`)
@@ -259,6 +341,9 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 		treeSitterWasmsVersion,
 		recommendations,
 		isHealthy,
+		recoverySuggestions,
+		canAutoRecover,
+		estimatedRecoveryTime,
 	}
 }
 
@@ -303,8 +388,31 @@ export function formatDiagnosticReport(report: DiagnosticReport): string {
 	lines.push("")
 
 	// Overall health
-	lines.push(`Overall Health: ${report.isHealthy ? "✅ Healthy" : "❌ Issues detected"}`)
+	const healthScore = getHealthScore(report)
+	lines.push(
+		`Overall Health: ${report.isHealthy ? "✅ Healthy" : "❌ Issues detected"} (Score: ${healthScore.score}/100 - ${healthScore.category})`,
+	)
 	lines.push("")
+
+	// Recovery suggestions
+	if (report.recoverySuggestions.length > 0) {
+		lines.push("Recovery Suggestions:")
+		report.recoverySuggestions.forEach((suggestion, index) => {
+			const priority = suggestion.priority === 1 ? "🔴 High" : suggestion.priority === 2 ? "🟡 Medium" : "🟢 Low"
+			lines.push(`  ${index + 1}. [${priority}] ${suggestion.action}`)
+			lines.push(`     Description: ${suggestion.description}`)
+			if (suggestion.command) {
+				lines.push(`     Command: ${suggestion.command}`)
+			}
+			lines.push("")
+		})
+
+		// Auto-recovery information
+		if (report.canAutoRecover) {
+			lines.push(`💡 Auto-recovery available! Estimated time: ${report.estimatedRecoveryTime}s`)
+			lines.push("")
+		}
+	}
 
 	// Recommendations
 	if (report.recommendations.length > 0) {
@@ -372,5 +480,194 @@ export function validateWasmDirectory(dirPath: string): ValidationResult {
 		isValid,
 		missingCriticalFiles,
 		foundFiles,
+	}
+}
+
+/**
+ * Interface for health score result
+ */
+export interface HealthScoreResult {
+	score: number
+	category: "healthy" | "degraded" | "unhealthy"
+}
+
+/**
+ * Calculate health score from diagnostic report
+ */
+export function getHealthScore(report: DiagnosticReport): HealthScoreResult {
+	let score = 0
+
+	// Critical files present (50% of score)
+	const criticalFilesPresent = report.criticalFiles.filter((f) => f.exists && f.isValid).length
+	const criticalFilesScore = (criticalFilesPresent / report.criticalFiles.length) * 50
+	score += criticalFilesScore
+
+	// Optional files present (30% of score)
+	if (report.optionalFiles.length > 0) {
+		const optionalFilesPresent = report.optionalFiles.filter((f) => f.exists && f.isValid).length
+		const optionalFilesScore = (optionalFilesPresent / report.optionalFiles.length) * 30
+		score += optionalFilesScore
+	} else {
+		// If no optional files expected, give full points
+		score += 30
+	}
+
+	// No corrupted files (20% of score)
+	const corruptedFiles = report.criticalFiles.filter((f) => f.exists && !f.isValid)
+	if (corruptedFiles.length === 0) {
+		score += 20
+	}
+
+	// Round to nearest integer
+	score = Math.round(score)
+
+	// Determine category
+	let category: "healthy" | "degraded" | "unhealthy"
+	if (score > 90) {
+		category = "healthy"
+	} else if (score >= 70) {
+		category = "degraded"
+	} else {
+		category = "unhealthy"
+	}
+
+	return {
+		score,
+		category,
+	}
+}
+
+/**
+ * Interface for parser file validation result
+ */
+export interface ParserFileValidationResult {
+	isValid: boolean
+	exists: boolean
+	size: number
+	isWasmFormat: boolean
+	error: string | null
+}
+
+/**
+ * Validate a parser WASM file thoroughly
+ */
+export function validateParserFile(wasmFilePath: string): ParserFileValidationResult {
+	const result: ParserFileValidationResult = {
+		isValid: false,
+		exists: false,
+		size: 0,
+		isWasmFormat: false,
+		error: null,
+	}
+
+	try {
+		// Check if file exists
+		const stats = fs.statSync(wasmFilePath)
+		result.exists = stats.isFile()
+		result.size = stats.size
+
+		if (!result.exists) {
+			result.error = "File does not exist"
+			return result
+		}
+
+		// Check file size (must be > 1KB)
+		if (result.size <= 1024) {
+			result.error = `File too small (${result.size} bytes, must be > 1KB)`
+			return result
+		}
+
+		// Check WASM magic number (0x00 0x61 0x73 0x6d)
+		const fileBuffer = fs.readFileSync(wasmFilePath)
+		if (fileBuffer.length < 4) {
+			result.error = "File too small to be a valid WASM file"
+			return result
+		}
+
+		// WASM magic number: 0x00 0x61 0x73 0x6d
+		const wasmMagic = Buffer.from([0x00, 0x61, 0x73, 0x6d])
+		if (fileBuffer.compare(wasmMagic, 0, 4, 0, 4) !== 0) {
+			result.error = "File does not have valid WASM magic number"
+			return result
+		}
+
+		result.isWasmFormat = true
+		result.isValid = true
+	} catch (error) {
+		result.error = error instanceof Error ? error.message : String(error)
+	}
+
+	return result
+}
+
+// Cache for health check results
+let healthCheckCache: {
+	result: boolean
+	timestamp: number
+} | null = null
+
+const HEALTH_CHECK_CACHE_DURATION = 60 * 1000 // 1 minute
+
+/**
+ * Perform quick health check without full diagnostics
+ */
+export function checkWasmHealth(): boolean {
+	const now = Date.now()
+
+	// Return cached result if still valid
+	if (healthCheckCache && now - healthCheckCache.timestamp < HEALTH_CHECK_CACHE_DURATION) {
+		return healthCheckCache.result
+	}
+
+	try {
+		// Get WASM directory using lightweight mechanism
+		const possiblePaths = [
+			path.join(__dirname, "..", "..", "src", "wasms", "tree-sitter"),
+			path.join(__dirname, "..", "..", "dist", "services", "tree-sitter"),
+			path.join(__dirname, "..", "..", "src", "dist", "services", "tree-sitter"),
+			path.join(__dirname, "..", "..", "out", "services", "tree-sitter"),
+			path.join(__dirname, "..", "..", "services", "tree-sitter"),
+		]
+
+		let wasmDirectory: string | null = null
+		for (const possiblePath of possiblePaths) {
+			if (fs.existsSync(possiblePath) && fs.statSync(possiblePath).isDirectory()) {
+				wasmDirectory = possiblePath
+				break
+			}
+		}
+
+		if (!wasmDirectory) {
+			healthCheckCache = { result: false, timestamp: now }
+			return false
+		}
+
+		// Quick check for critical files
+		for (const filename of CRITICAL_FILES) {
+			const filePath = path.join(wasmDirectory, filename)
+			if (!fs.existsSync(filePath)) {
+				healthCheckCache = { result: false, timestamp: now }
+				return false
+			}
+
+			const stats = fs.statSync(filePath)
+			if (!stats.isFile() || stats.size <= 1024) {
+				healthCheckCache = { result: false, timestamp: now }
+				return false
+			}
+		}
+
+		// Check if web-tree-sitter is available
+		const webTreeSitterVersion = getPackageVersion("web-tree-sitter")
+		if (!webTreeSitterVersion) {
+			healthCheckCache = { result: false, timestamp: now }
+			return false
+		}
+
+		healthCheckCache = { result: true, timestamp: now }
+		return true
+	} catch (error) {
+		healthCheckCache = { result: false, timestamp: now }
+		return false
 	}
 }

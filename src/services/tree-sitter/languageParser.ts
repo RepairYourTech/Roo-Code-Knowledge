@@ -1,12 +1,19 @@
 import * as path from "path"
 import * as vscode from "vscode"
-import { getWasmDirectory, invalidateWasmDirectoryCache } from "./get-wasm-directory"
-import { diagnoseWasmSetup, validateWasmDirectory, DiagnosticReport } from "./wasm-diagnostics"
+import {
+	getWasmDirectory,
+	getWasmDirectorySync,
+	invalidateWasmDirectoryCache,
+	getWasmDirectoryWithRetry,
+} from "./get-wasm-directory"
+import { diagnoseWasmSetup, validateWasmDirectory, DiagnosticReport, formatDiagnosticReport } from "./wasm-diagnostics"
 import { logger } from "../shared/logger"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { MetricsCollector } from "../code-index/utils/metrics-collector"
 import * as queries from "./queries"
+import { loadLanguageWithRetry, WasmLoadOptions } from "./wasm-loader-with-retry"
+import { ParserAvailabilityCache, checkMultipleParserAvailability } from "./parser-availability-checker"
 
 const TROUBLESHOOTING_URL = "https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files"
 
@@ -25,6 +32,13 @@ export interface LanguageParsers {
 
 let hasRunDiagnostics = false
 let languageParserMap: { [key: string]: LanguageParser } = {}
+
+// Module-level availability cache
+const parserAvailabilityCache = new ParserAvailabilityCache()
+
+export function getParserAvailabilityCache(): ParserAvailabilityCache {
+	return parserAvailabilityCache
+}
 
 function getStrictWasmLoading(): boolean {
 	const config = vscode.workspace.getConfiguration("roo-code")
@@ -101,7 +115,7 @@ async function loadLanguage(langName: string, sourceDirectory?: string, metricsC
 
 		let wasmDirectory: string
 		try {
-			wasmDirectory = getWasmDirectory()
+			wasmDirectory = getWasmDirectorySync()
 		} catch (error) {
 			logger.debug(
 				`Failed to locate WASM directory: ${error instanceof Error ? error.message : String(error)}`,
@@ -113,32 +127,51 @@ async function loadLanguage(langName: string, sourceDirectory?: string, metricsC
 
 		logger.debug(`Attempting to load language: ${langName}`, "LanguageParser")
 
+		// Use retry logic for WASM loading
+		const retryOptions: WasmLoadOptions = {
+			maxRetries: 3,
+			initialDelayMs: 100,
+			maxDelayMs: 2000,
+		}
+
+		let loadResult
+
 		// For development or when sourceDirectory is provided, try to load from local path
 		if (process.env.NODE_ENV === "development" || sourceDirectory) {
 			const localPath = sourceDirectory || wasmDirectory
-			const languagePath = path.join(localPath, `${langName}.wasm`)
+			loadResult = await loadLanguageWithRetry(langName, localPath, Parser, retryOptions)
 
-			try {
-				const language = await Parser.Language.load(languagePath)
-				logger.debug(`Successfully loaded ${langName}.wasm from ${languagePath}`, "LanguageParser")
+			if (loadResult.success) {
+				logger.debug(
+					`Successfully loaded ${langName}.wasm from ${loadResult.wasmPath} with retry logic (${loadResult.attemptCount} attempts, ${loadResult.totalDuration}ms)`,
+					"LanguageParser",
+				)
 
 				// Record success metrics
 				if (metricsCollector) {
 					metricsCollector.recordParserMetric(langName, "loadSuccess")
+					// Record retry attempts as loadSuccess count to track total attempts
+					if (loadResult.attemptCount > 1) {
+						metricsCollector.recordParserMetric(langName, "loadSuccess", loadResult.attemptCount - 1)
+					}
 				}
 
 				// Capture telemetry for success
 				try {
-					TelemetryService.instance.captureWasmLoadSuccess(langName, languagePath, Date.now() - startTime)
+					TelemetryService.instance.captureWasmLoadSuccess(
+						langName,
+						loadResult.wasmPath!,
+						Date.now() - startTime,
+					)
 				} catch (e) {
 					logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
 				}
 
-				return language
-			} catch (error) {
+				return loadResult.languageObj
+			} else {
 				// Fall back to node_modules if local loading fails
 				logger.warn(
-					`Failed to load ${langName}.wasm from ${languagePath}, falling back to node_modules: ${error instanceof Error ? error.message : String(error)}`,
+					`Failed to load ${langName}.wasm from local path after ${loadResult.attemptCount} attempts, falling back to node_modules: ${loadResult.error?.message}`,
 					"LanguageParser",
 				)
 
@@ -149,51 +182,107 @@ async function loadLanguage(langName: string, sourceDirectory?: string, metricsC
 			}
 		}
 
-		// Try loading from node_modules
+		// Try loading from node_modules with retry logic
 		try {
 			const packagePath = require.resolve(
 				`@tree-sitter-grammars/tree-sitter-${langName}/tree-sitter-${langName}.wasm`,
 			)
-			const language = await Parser.Language.load(packagePath)
-			logger.debug(`Successfully loaded ${langName}.wasm from node_modules`, "LanguageParser")
+			loadResult = await loadLanguageWithRetry(langName, path.dirname(packagePath), Parser, retryOptions)
 
-			// Record success metrics
-			if (metricsCollector) {
-				metricsCollector.recordParserMetric(langName, "loadSuccess")
+			if (loadResult.success) {
+				logger.debug(
+					`Successfully loaded ${langName}.wasm from node_modules with retry logic (${loadResult.attemptCount} attempts, ${loadResult.totalDuration}ms)`,
+					"LanguageParser",
+				)
+
+				// Record success metrics
+				if (metricsCollector) {
+					metricsCollector.recordParserMetric(langName, "loadSuccess")
+					// Record retry attempts as loadSuccess count to track total attempts
+					if (loadResult.attemptCount > 1) {
+						metricsCollector.recordParserMetric(langName, "loadSuccess", loadResult.attemptCount - 1)
+					}
+				}
+
+				// Capture telemetry for success
+				try {
+					TelemetryService.instance.captureWasmLoadSuccess(
+						langName,
+						loadResult.wasmPath!,
+						Date.now() - startTime,
+					)
+				} catch (e) {
+					logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+				}
+
+				return loadResult.languageObj
 			}
-
-			// Capture telemetry for success
-			try {
-				TelemetryService.instance.captureWasmLoadSuccess(langName, packagePath, Date.now() - startTime)
-			} catch (e) {
-				logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
-			}
-
-			return language
 		} catch (error) {
-			// Try alternative package name
+			// Try alternative package name with retry logic
 			logger.debug(`Trying alternative package name for ${langName}`, "LanguageParser")
-			const altPackagePath = require.resolve(`tree-sitter-${langName}/tree-sitter-${langName}.wasm`)
-			const language = await Parser.Language.load(altPackagePath)
-			logger.debug(`Successfully loaded ${langName}.wasm from alternative package`, "LanguageParser")
-
-			// Record success metrics
-			if (metricsCollector) {
-				metricsCollector.recordParserMetric(langName, "loadSuccess")
-			}
-
-			// Capture telemetry for success
 			try {
-				TelemetryService.instance.captureWasmLoadSuccess(langName, altPackagePath, Date.now() - startTime)
-			} catch (e) {
-				logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
-			}
+				const altPackagePath = require.resolve(`tree-sitter-${langName}/tree-sitter-${langName}.wasm`)
+				loadResult = await loadLanguageWithRetry(langName, path.dirname(altPackagePath), Parser, retryOptions)
 
-			return language
+				if (loadResult.success) {
+					logger.debug(
+						`Successfully loaded ${langName}.wasm from alternative package with retry logic (${loadResult.attemptCount} attempts, ${loadResult.totalDuration}ms)`,
+						"LanguageParser",
+					)
+
+					// Record success metrics
+					if (metricsCollector) {
+						metricsCollector.recordParserMetric(langName, "loadSuccess")
+						// Record retry attempts as loadSuccess count to track total attempts
+						if (loadResult.attemptCount > 1) {
+							metricsCollector.recordParserMetric(langName, "loadSuccess", loadResult.attemptCount - 1)
+						}
+					}
+
+					// Capture telemetry for success
+					try {
+						TelemetryService.instance.captureWasmLoadSuccess(
+							langName,
+							loadResult.wasmPath!,
+							Date.now() - startTime,
+						)
+					} catch (e) {
+						logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+					}
+
+					return loadResult.languageObj
+				}
+			} catch (altError) {
+				logger.debug(
+					`Alternative package also failed for ${langName}: ${altError instanceof Error ? altError.message : String(altError)}`,
+					"LanguageParser",
+				)
+			}
 		}
+
+		// All attempts failed, update availability cache
+		parserAvailabilityCache.invalidate(langName)
+
+		// Record final failure metrics
+		const finalError = loadResult?.error || new Error(`Failed to load ${langName} from all sources`)
+		const errorMessage = finalError.message
+
+		if (metricsCollector) {
+			metricsCollector.recordParserMetric(langName, "loadFailure", 1, errorMessage)
+		}
+
+		// Capture telemetry for failure
+		try {
+			TelemetryService.instance.captureWasmLoadFailure(langName, errorMessage, true)
+		} catch (e) {
+			logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+		}
+
+		logger.error(`Failed to load language ${langName} after all retry attempts: ${errorMessage}`, "LanguageParser")
+		return null
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
-		logger.error(`Failed to load language ${langName}: ${errorMessage}`, "LanguageParser")
+		logger.error(`Unexpected error loading language ${langName}: ${errorMessage}`, "LanguageParser")
 
 		// Record failure metrics
 		if (metricsCollector) {
@@ -225,7 +314,7 @@ export async function loadRequiredLanguageParsers(
 	if (!hasRunDiagnostics) {
 		let wasmDirectory: string | undefined
 		try {
-			wasmDirectory = getWasmDirectory()
+			wasmDirectory = getWasmDirectorySync()
 		} catch (error) {
 			logger.debug(
 				`Failed to locate WASM directory for diagnostics: ${error instanceof Error ? error.message : String(error)}`,
@@ -321,10 +410,49 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 		exs: "elixir",
 	}
 
+	// Pre-flight availability check for all required languages
+	const requiredLanguages = Array.from(extensionsToLoad)
+		.map((ext) => extensionToLanguage[ext] || ext)
+		.filter(Boolean)
+	logger.debug(
+		`Performing pre-flight availability check for ${requiredLanguages.length} languages: ${requiredLanguages.join(", ")}`,
+		"LanguageParser",
+	)
+
+	const availabilityResults = await checkMultipleParserAvailability(requiredLanguages, 10, metricsCollector)
+	const availableLanguages = availabilityResults
+		.filter((result) => result.isAvailable)
+		.map((result) => result.language)
+	const unavailableLanguages = availabilityResults.filter((result) => !result.isAvailable)
+
+	logger.info(
+		`Parser availability check: ${availableLanguages.length}/${requiredLanguages.length} available`,
+		"LanguageParser",
+	)
+
+	if (unavailableLanguages.length > 0) {
+		logger.warn(`Unavailable parsers: ${unavailableLanguages.map((u) => u.language).join(", ")}`, "LanguageParser")
+		unavailableLanguages.forEach((unavailable) => {
+			logger.debug(`  ${unavailable.language}: ${unavailable.error || "Unknown error"}`, "LanguageParser")
+		})
+	}
+
+	// If strict mode enabled and critical parsers unavailable, throw early with detailed error
+	if (getStrictWasmLoading() && unavailableLanguages.length > 0) {
+		const criticalLanguages = ["javascript", "typescript", "python", "rust", "go", "cpp", "c"]
+		const missingCritical = unavailableLanguages.filter((u) => criticalLanguages.includes(u.language))
+
+		if (missingCritical.length > 0) {
+			throw new Error(`Strict mode enabled. Critical parsers unavailable: ${missingCritical.map((u) => u.language).join(", ")}.
+Missing files: ${missingCritical.map((u) => u.error || "Unknown error").join("; ")}.
+See troubleshooting guide: ${TROUBLESHOOTING_URL}`)
+		}
+	}
+
 	// Initialize Parser once with validation and improved error handling
 	let wasmDirectory: string
 	try {
-		wasmDirectory = getWasmDirectory()
+		wasmDirectory = await getWasmDirectoryWithRetry({ allowFallback: true, strictMode: getStrictWasmLoading() })
 	} catch (error) {
 		logger.debug(
 			`Failed to locate WASM directory: ${error instanceof Error ? error.message : String(error)}`,
@@ -366,6 +494,16 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 		// Skip if already loaded
 		if (languageParserMap[parserKey]) {
 			parsers[parserKey] = languageParserMap[parserKey]
+			continue
+		}
+
+		// Skip loading for parsers marked as unavailable in cache
+		const cachedStatus = parserAvailabilityCache.getCachedStatus(parserKey)
+		if (cachedStatus && !cachedStatus.isAvailable) {
+			logger.debug(
+				`Skipping ${parserKey} - marked as unavailable in cache: ${cachedStatus.error || "Unknown error"}`,
+				"LanguageParser",
+			)
 			continue
 		}
 
@@ -839,6 +977,44 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			logger.error(`Failed to load parser for ${parserKey}: ${errorMessage}`, "LanguageParser")
+
+			// Classify error type for better handling
+			const isTransientError =
+				errorMessage.includes("ENOENT") ||
+				errorMessage.includes("EACCES") ||
+				errorMessage.includes("ETIMEDOUT") ||
+				errorMessage.includes("timeout") ||
+				errorMessage.includes("network")
+
+			const isPermanentError =
+				errorMessage.includes("HTTP 404") ||
+				errorMessage.includes("HTTP 403") ||
+				errorMessage.includes("Invalid WASM format") ||
+				errorMessage.includes("WASM validation failed") ||
+				errorMessage.includes("Syntax error") ||
+				errorMessage.includes("Unsupported WASM")
+
+			// Update availability cache with failure status
+			parserAvailabilityCache.invalidate(parserKey)
+
+			// Provide specific recovery suggestions based on error type
+			if (isTransientError) {
+				logger.warn(
+					`Transient error loading ${parserKey}: ${errorMessage}. Suggestion: Retry indexing operation later.`,
+					"LanguageParser",
+				)
+			} else if (isPermanentError) {
+				logger.warn(
+					`Permanent error loading ${parserKey}: ${errorMessage}. Suggestion: Run 'Roo-Cline: Download Tree-sitter WASM Files' command.`,
+					"LanguageParser",
+				)
+			} else {
+				logger.warn(
+					`Unknown error loading ${parserKey}: ${errorMessage}. Suggestion: Check file permissions and disk space.`,
+					"LanguageParser",
+				)
+			}
+
 			if (getStrictWasmLoading()) {
 				throw error
 			}
@@ -850,6 +1026,54 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 	// Log loaded parsers for debugging
 	const loadedParserKeys = Object.keys(parsers)
 	logger.info(`Loaded ${loadedParserKeys.length} parsers: ${loadedParserKeys.join(", ")}`, "LanguageParser")
+
+	// Recovery attempt: if no parsers loaded and WASM directory validation failed, suggest diagnostics
+	if (Object.keys(parsers).length === 0 && filesToParse.length > 0) {
+		logger.warn("No parsers loaded, attempting recovery diagnostics...", "LanguageParser")
+
+		try {
+			// Run comprehensive diagnostics
+			const diagnosticReport = diagnoseWasmSetup()
+			const formattedReport = formatDiagnosticReport(diagnosticReport)
+
+			logger.error("=== WASM Setup Diagnostic Report ===", "LanguageParser")
+			logger.error(formattedReport, "LanguageParser")
+			logger.error("=== End Diagnostic Report ===", "LanguageParser")
+
+			// Provide specific recovery commands based on diagnostic results
+			if (!diagnosticReport.wasmDirectoryExists) {
+				logger.error(
+					"RECOVERY: WASM directory not found. Run 'Roo-Cline: Download Tree-sitter WASM Files' command.",
+					"LanguageParser",
+				)
+			} else if (diagnosticReport.missingCriticalFiles.length > 0) {
+				logger.error(
+					`RECOVERY: Missing critical files: ${diagnosticReport.missingCriticalFiles.join(", ")}. Run 'Roo-Cline: Download Tree-sitter WASM Files' command.`,
+					"LanguageParser",
+				)
+			} else if (!diagnosticReport.webTreeSitterVersion) {
+				logger.error(
+					"RECOVERY: web-tree-sitter package not found. Run 'pnpm install' to install dependencies.",
+					"LanguageParser",
+				)
+			} else {
+				logger.error(
+					"RECOVERY: Unknown issue. Check logs above and see troubleshooting guide.",
+					"LanguageParser",
+				)
+			}
+
+			logger.error(
+				`RECOVERY: After fixing issues, retry the indexing operation. See: ${TROUBLESHOOTING_URL}`,
+				"LanguageParser",
+			)
+		} catch (diagnosticError) {
+			logger.error(
+				`Failed to run recovery diagnostics: ${diagnosticError instanceof Error ? diagnosticError.message : String(diagnosticError)}`,
+				"LanguageParser",
+			)
+		}
+	}
 
 	// Final strict-mode check: ensure at least one parser was loaded when we had input files to process
 	if (getStrictWasmLoading() && filesToParse.length > 0 && Object.keys(parsers).length === 0) {
@@ -962,4 +1186,146 @@ export function getParserLoadStatus(): Map<string, { loaded: boolean; error?: st
 	})
 
 	return status
+}
+
+/**
+ * Reload a specific parser by invalidating cache and attempting to load again
+ * @param language Name of the language parser to reload
+ * @param sourceDirectory Optional source directory for WASM files
+ * @param metricsCollector Optional metrics collector
+ * @returns Promise resolving to success/failure status
+ */
+export async function reloadParser(
+	language: string,
+	sourceDirectory?: string,
+	metricsCollector?: MetricsCollector,
+): Promise<{ success: boolean; error?: string }> {
+	try {
+		logger.info(`Reloading parser: ${language}`, "LanguageParser")
+
+		// Invalidate cache for this language
+		parserAvailabilityCache.invalidate(language)
+
+		// Remove from language parser map if it exists
+		if (languageParserMap[language]) {
+			delete languageParserMap[language]
+			logger.debug(`Removed ${language} from language parser map`, "LanguageParser")
+		}
+
+		// Attempt to reload parser with retry logic
+		const reloadedLanguage = await loadLanguage(language, sourceDirectory, metricsCollector)
+
+		if (reloadedLanguage) {
+			logger.info(`Successfully reloaded parser: ${language}`, "LanguageParser")
+			return { success: true }
+		} else {
+			const error = `Failed to reload parser: ${language}`
+			logger.error(error, "LanguageParser")
+			return { success: false, error }
+		}
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		logger.error(`Error reloading parser ${language}: ${errorMessage}`, "LanguageParser")
+		return { success: false, error: errorMessage }
+	}
+}
+
+/**
+ * Validate availability of all supported parsers and return health report
+ * @returns Promise resolving to health report with available/unavailable counts
+ */
+export async function validateAllParsers(): Promise<{
+	total: number
+	available: number
+	unavailable: number
+	languages: Array<{ language: string; isAvailable: boolean; error?: string }>
+}> {
+	try {
+		logger.info("Validating all parsers...", "LanguageParser")
+
+		// Get all supported language names from extension mapping
+		const supportedLanguages = Object.values({
+			js: "javascript",
+			jsx: "javascript",
+			json: "javascript",
+			ts: "typescript",
+			tsx: "tsx",
+			py: "python",
+			rs: "rust",
+			go: "go",
+			cpp: "cpp",
+			hpp: "cpp",
+			c: "c",
+			h: "c",
+			cs: "c_sharp",
+			rb: "ruby",
+			java: "java",
+			php: "php",
+			swift: "swift",
+			kt: "kotlin",
+			kts: "kotlin",
+			css: "css",
+			html: "html",
+			ml: "ocaml",
+			mli: "ocaml",
+			scala: "scala",
+			sol: "solidity",
+			toml: "toml",
+			yaml: "yaml",
+			yml: "yaml",
+			vue: "vue",
+			lua: "lua",
+			rdl: "systemrdl",
+			tla: "tlaplus",
+			zig: "zig",
+			ejs: "ejs",
+			erb: "erb",
+			el: "elisp",
+			ex: "elixir",
+			exs: "elixir",
+		}).filter((lang, index, arr) => arr.indexOf(lang) === index) // Remove duplicates
+
+		// Check availability for all languages
+		const availabilityResults = await checkMultipleParserAvailability(supportedLanguages)
+
+		const available = availabilityResults.filter((result) => result.isAvailable)
+		const unavailable = availabilityResults.filter((result) => !result.isAvailable)
+
+		// Log detailed report
+		logger.info(
+			`Parser validation complete: ${available.length}/${supportedLanguages.length} available`,
+			"LanguageParser",
+		)
+
+		if (unavailable.length > 0) {
+			logger.warn(`Unavailable parsers: ${unavailable.map((u) => u.language).join(", ")}`, "LanguageParser")
+			unavailable.forEach((u) => {
+				logger.debug(`  ${u.language}: ${u.error || "Unknown error"}`, "LanguageParser")
+			})
+		}
+
+		return {
+			total: supportedLanguages.length,
+			available: available.length,
+			unavailable: unavailable.length,
+			languages: availabilityResults.sort((a, b) => a.language.localeCompare(b.language)),
+		}
+	} catch (error) {
+		const errorMessage = error instanceof Error ? error.message : String(error)
+		logger.error(`Error validating parsers: ${errorMessage}`, "LanguageParser")
+
+		// Return error state
+		return {
+			total: 0,
+			available: 0,
+			unavailable: 0,
+			languages: [
+				{
+					language: "error",
+					isAvailable: false,
+					error: errorMessage,
+				},
+			],
+		}
+	}
 }

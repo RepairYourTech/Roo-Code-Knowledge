@@ -2,9 +2,14 @@ import { readFile } from "fs/promises"
 import { createHash } from "crypto"
 import * as path from "path"
 
+import { getWasmDirectoryWithRetry } from "../../tree-sitter/get-wasm-directory"
+import { getParserAvailabilityCache, reloadParser } from "../../tree-sitter/languageParser"
+import { diagnoseWasmSetup, formatDiagnosticReport } from "../../tree-sitter/wasm-diagnostics"
+import { shouldRetryError } from "../../tree-sitter/wasm-loader-with-retry"
+
 import { Node } from "web-tree-sitter"
 import { LanguageParser, LanguageParsers, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
-import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
+import { getWasmDirectory, getWasmDirectorySync } from "../../tree-sitter/get-wasm-directory"
 import { MetricsCollector } from "../utils/metrics-collector"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
 import { executeQueryWithFallback } from "../../tree-sitter/query-fallback-strategy"
@@ -47,10 +52,12 @@ export class CodeParser implements ICodeParser {
 	private metricsCollector?: MetricsCollector
 	// Markdown files are now supported using the custom markdown parser
 	// which extracts headers and sections for semantic indexing
+	private parserHealthCache: Map<string, { healthy: boolean; lastCheck: number; failureCount: number }>
 
 	constructor(lspService?: ILSPService, metricsCollector?: MetricsCollector) {
 		this.lspService = lspService
 		this.metricsCollector = metricsCollector
+		this.parserHealthCache = new Map()
 	}
 
 	/**
@@ -99,6 +106,70 @@ export class CodeParser implements ICodeParser {
 			exs: "elixir",
 		}
 		return extensionToLanguage[ext] || ext
+	}
+
+	/**
+	 * Checks parser health to avoid repeated load attempts for known-bad parsers
+	 * @param ext The file extension
+	 * @returns false if parser has failed >3 times in last 5 minutes
+	 */
+	private checkParserHealth(ext: string): boolean {
+		const normalizedExt = this.normalizeParserKey(ext)
+		const health = this.parserHealthCache.get(normalizedExt)
+
+		if (!health) {
+			return true // No previous failures
+		}
+
+		const now = Date.now()
+		const fiveMinutesMs = 5 * 60 * 1000
+
+		// Reset health if last check was more than 5 minutes ago
+		if (now - health.lastCheck > fiveMinutesMs) {
+			this.parserHealthCache.delete(normalizedExt)
+			return true
+		}
+
+		// If parser has failed more than 3 times in the last 5 minutes, mark as unhealthy
+		if (health.failureCount > 3) {
+			logger.warn(
+				`Parser ${normalizedExt} marked as unhealthy (${health.failureCount} failures), skipping load attempt`,
+				"CodeParser",
+			)
+			return false
+		}
+
+		return true
+	}
+
+	/**
+	 * Updates parser health cache with failure information
+	 * @param ext The file extension
+	 * @param error The error that occurred
+	 */
+	private updateParserHealth(ext: string, error?: Error): void {
+		const normalizedExt = this.normalizeParserKey(ext)
+		const now = Date.now()
+		const existing = this.parserHealthCache.get(normalizedExt)
+
+		if (existing) {
+			this.parserHealthCache.set(normalizedExt, {
+				healthy: false,
+				lastCheck: now,
+				failureCount: existing.failureCount + 1,
+			})
+		} else {
+			this.parserHealthCache.set(normalizedExt, {
+				healthy: false,
+				lastCheck: now,
+				failureCount: 1,
+			})
+		}
+
+		logger.debug(
+			`Updated parser health for ${normalizedExt}: failure count = ${this.parserHealthCache.get(normalizedExt)?.failureCount}`,
+			"CodeParser",
+		)
 	}
 
 	/**
@@ -441,6 +512,32 @@ export class CodeParser implements ICodeParser {
 		// Check if we already have the parser loaded
 		logger.debug(`Checking parser availability for extension: ${ext} (file: ${filePath})`, "CodeParser")
 		const normalizedExt = this.normalizeParserKey(ext)
+
+		// Check parser health before attempting any operations
+		if (!this.checkParserHealth(ext)) {
+			logger.warn(
+				`Parser ${normalizedExt} is unhealthy, skipping load attempt and triggering fallback`,
+				"CodeParser",
+			)
+			this.metricsCollector?.recordParserMetric(
+				normalizedExt,
+				"fallbackChunkingTrigger",
+				1,
+				"Parser marked unhealthy",
+				undefined,
+				undefined,
+				"parseError",
+			)
+			return this._performFallbackChunking(
+				filePath,
+				content,
+				fileHash,
+				seenSegmentHashes,
+				undefined,
+				"parser unhealthy",
+			)
+		}
+
 		if (!this.loadedParsers[normalizedExt]) {
 			const pendingLoad = this.pendingLoads.get(normalizedExt)
 			if (pendingLoad) {
@@ -449,35 +546,69 @@ export class CodeParser implements ICodeParser {
 					await pendingLoad
 					logger.debug(`Pending load completed for ${ext}`, "CodeParser")
 				} catch (error) {
+					const errorObj = error instanceof Error ? error : new Error(String(error))
 					logger.error(
-						`Error in pending parser load for ${filePath} (extension: ${ext}): ${error instanceof Error ? error.message : String(error)}`,
+						`Error in pending parser load for ${filePath} (extension: ${ext}): ${errorObj.message}`,
 						"CodeParser",
 					)
-					logger.error(
-						`Error details: ${error instanceof Error ? error.message : String(error)}`,
-						"CodeParser",
-					)
-					logger.error(
-						`Stack trace: ${error instanceof Error ? error.stack || "No stack available" : "No stack available"}`,
-						"CodeParser",
-					)
+					logger.error(`Error details: ${errorObj.message}`, "CodeParser")
+					logger.error(`Stack trace: ${errorObj.stack || "No stack available"}`, "CodeParser")
 					logger.error(`This was a retry attempt for extension ${ext}`, "CodeParser")
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "parseContent:loadParser",
-					})
-					logger.warn(`Parser load failed for ${ext}, falling back to chunking`, "CodeParser")
-					const reason = "parseError"
+
+					// Update parser health cache with failure
+					this.updateParserHealth(ext, errorObj)
+
+					// Check if this is a transient error
+					const isTransient = shouldRetryError(errorObj)
+
+					// Run diagnostics and provide recovery suggestions
+					const diagnosticReport = diagnoseWasmSetup()
+					logger.error(`WASM Diagnostics Report:\n${formatDiagnosticReport(diagnosticReport)}`, "CodeParser")
+
+					if (isTransient) {
+						logger.warn(
+							`Transient error detected for ${ext}. Suggestion: Retry indexing operation.`,
+							"CodeParser",
+						)
+					} else {
+						logger.warn(
+							`Permanent error detected for ${ext}. Suggestion: Run 'Roo-Cline: Download Tree-sitter WASM Files' command.`,
+							"CodeParser",
+						)
+					}
+
+					// Enhanced metrics collection
 					this.metricsCollector?.recordParserMetric(
 						normalizedExt,
 						"fallbackChunkingTrigger",
 						1,
+						errorObj.message,
 						undefined,
 						undefined,
-						undefined,
-						reason,
+						"parseError",
 					)
+
+					// Record additional WASM-specific metrics
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"loadFailure",
+						1,
+						`WASM error: ${isTransient ? "transient" : "permanent"}`,
+					)
+
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(errorObj.message),
+						stack: sanitizeErrorMessage(errorObj.stack || ""),
+						location: "parseContent:loadParser",
+						properties: {
+							extension: ext,
+							isTransient,
+							diagnosticHealthy: diagnosticReport.isHealthy,
+							failureCount: this.parserHealthCache.get(normalizedExt)?.failureCount || 1,
+						},
+					})
+
+					logger.warn(`Parser load failed for ${ext}, falling back to chunking`, "CodeParser")
 					return this._performFallbackChunking(
 						filePath,
 						content,
@@ -490,12 +621,12 @@ export class CodeParser implements ICodeParser {
 			} else {
 				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
 
-				// Get WASM directory with explicit error handling
+				// Get WASM directory with retry logic and enhanced error handling
 				let wasmDir: string
 				try {
-					logger.debug("Calling getWasmDirectory()...", "CodeParser")
-					wasmDir = getWasmDirectory()
-					logger.debug(`getWasmDirectory() returned: ${wasmDir}`, "CodeParser")
+					logger.debug("Calling getWasmDirectoryWithRetry()...", "CodeParser")
+					wasmDir = await getWasmDirectoryWithRetry(undefined, 3, 500)
+					logger.debug(`getWasmDirectoryWithRetry() returned: ${wasmDir}`, "CodeParser")
 
 					// Verify directory exists
 					try {
@@ -516,21 +647,71 @@ export class CodeParser implements ICodeParser {
 						logger.warn(`[CodeParser] Failed to verify WASM directory: ${fsError}`, "CodeParser")
 					}
 				} catch (error) {
-					const errorMsg = `getWasmDirectory() failed: ${error instanceof Error ? error.message : String(error)}`
+					const errorObj = error instanceof Error ? error : new Error(String(error))
+					const errorMsg = `getWasmDirectoryWithRetry() failed: ${errorObj.message}`
 					logger.error(errorMsg, "CodeParser")
-					logger.error(`Stack: ${error instanceof Error ? error.stack : "N/A"}`, "CodeParser")
-					// Return empty array - graceful degradation
-					logger.warn(`WASM directory unavailable, falling back to chunking for ${filePath}`, "CodeParser")
-					const reason = "parseError"
+					logger.error(`Stack: ${errorObj.stack || "N/A"}`, "CodeParser")
+
+					// Run full diagnostics after retry exhausted
+					const diagnosticReport = diagnoseWasmSetup()
+					logger.error(`WASM Diagnostics Report:\n${formatDiagnosticReport(diagnosticReport)}`, "CodeParser")
+
+					// Update parser health cache with failure
+					this.updateParserHealth(ext, errorObj)
+
+					// Provide specific recovery commands based on diagnostic results
+					if (!diagnosticReport.wasmDirectoryExists) {
+						logger.warn(
+							`WASM directory not found. Recovery: Run 'Roo-Cline: Download Tree-sitter WASM Files' command or 'pnpm regenerate-wasms' in development.`,
+							"CodeParser",
+						)
+					} else if (diagnosticReport.missingCriticalFiles.length > 0) {
+						logger.warn(
+							`Critical WASM files missing: ${diagnosticReport.missingCriticalFiles.join(", ")}. Recovery: Re-run download command.`,
+							"CodeParser",
+						)
+					} else if (!diagnosticReport.webTreeSitterVersion) {
+						logger.warn(`web-tree-sitter package not found. Recovery: Run 'pnpm install'.`, "CodeParser")
+					} else {
+						logger.warn(
+							`WASM directory access failed. Recovery: Check file permissions and try 'Roo-Cline: Download Tree-sitter WASM Files' command.`,
+							"CodeParser",
+						)
+					}
+
+					// Enhanced metrics collection
 					this.metricsCollector?.recordParserMetric(
 						normalizedExt,
 						"fallbackChunkingTrigger",
 						1,
+						errorObj.message,
 						undefined,
 						undefined,
-						undefined,
-						reason,
+						"parseError",
 					)
+
+					// Record additional WASM-specific metrics
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"loadFailure",
+						1,
+						`WASM directory unavailable: ${diagnosticReport.isHealthy ? "healthy" : "unhealthy"}`,
+					)
+
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: sanitizeErrorMessage(errorObj.message),
+						stack: sanitizeErrorMessage(errorObj.stack || ""),
+						location: "parseContent:getWasmDirectory",
+						properties: {
+							extension: ext,
+							diagnosticHealthy: diagnosticReport.isHealthy,
+							wasmDirectoryExists: diagnosticReport.wasmDirectoryExists,
+							missingCriticalFiles: diagnosticReport.missingCriticalFiles.length,
+							failureCount: this.parserHealthCache.get(normalizedExt)?.failureCount || 1,
+						},
+					})
+
+					logger.warn(`WASM directory unavailable, falling back to chunking for ${filePath}`, "CodeParser")
 					return this._performFallbackChunking(
 						filePath,
 						content,
@@ -538,6 +719,37 @@ export class CodeParser implements ICodeParser {
 						seenSegmentHashes,
 						undefined,
 						"WASM directory unavailable",
+					)
+				}
+
+				// Check parser availability cache before attempting load
+				const parserAvailabilityCache = getParserAvailabilityCache()
+				const cachedStatus = parserAvailabilityCache.getCachedStatus(normalizedExt)
+				if (cachedStatus && !cachedStatus.isAvailable) {
+					logger.warn(
+						`Parser ${normalizedExt} marked as unavailable in cache, skipping load attempt`,
+						"CodeParser",
+					)
+					this.updateParserHealth(ext, new Error("Parser marked unavailable in cache"))
+
+					// Enhanced metrics collection
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"fallbackChunkingTrigger",
+						1,
+						"Parser marked unavailable in cache",
+						undefined,
+						undefined,
+						"parseError",
+					)
+
+					return this._performFallbackChunking(
+						filePath,
+						content,
+						fileHash,
+						seenSegmentHashes,
+						undefined,
+						"parser unavailable in cache",
 					)
 				}
 
@@ -579,24 +791,68 @@ export class CodeParser implements ICodeParser {
 						)
 					}
 				} catch (error) {
+					const errorObj = error instanceof Error ? error : new Error(String(error))
 					logger.error(
-						`Error loading language parser for ${filePath} (extension: ${ext}): ${error instanceof Error ? error.message : String(error)}`,
+						`Error loading language parser for ${filePath} (extension: ${ext}): ${errorObj.message}`,
 						"CodeParser",
 					)
-					logger.error(
-						`Error details: ${error instanceof Error ? error.message : String(error)}`,
-						"CodeParser",
-					)
-					logger.error(
-						`Stack trace: ${error instanceof Error ? error.stack || "No stack available" : "No stack available"}`,
-						"CodeParser",
-					)
+					logger.error(`Error details: ${errorObj.message}`, "CodeParser")
+					logger.error(`Stack trace: ${errorObj.stack || "No stack available"}`, "CodeParser")
 					logger.error(`This was a first attempt for extension ${ext}`, "CodeParser")
+
+					// Update parser health cache with failure
+					this.updateParserHealth(ext, errorObj)
+
+					// Add error classification to distinguish transient vs permanent failures
+					const isTransient = shouldRetryError(errorObj)
+
+					// Run diagnostics and provide recovery suggestions
+					const diagnosticReport = diagnoseWasmSetup()
+					logger.error(`WASM Diagnostics Report:\n${formatDiagnosticReport(diagnosticReport)}`, "CodeParser")
+
+					if (isTransient) {
+						logger.warn(
+							`Transient error detected for ${ext} (ENOENT, EACCES). Suggestion: Retry indexing operation.`,
+							"CodeParser",
+						)
+					} else {
+						logger.warn(
+							`Permanent error detected for ${ext} (file not found, invalid WASM). Suggestion: Run 'Roo-Cline: Download Tree-sitter WASM Files' command.`,
+							"CodeParser",
+						)
+					}
+
+					// Enhanced metrics collection
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"fallbackChunkingTrigger",
+						1,
+						errorObj.message,
+						undefined,
+						undefined,
+						"parseError",
+					)
+
+					// Record additional WASM-specific metrics
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"loadFailure",
+						1,
+						`Parser loading exception: ${isTransient ? "transient" : "permanent"}`,
+					)
+
 					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
+						error: sanitizeErrorMessage(errorObj.message),
+						stack: sanitizeErrorMessage(errorObj.stack || ""),
 						location: "parseContent:loadParser",
+						properties: {
+							extension: ext,
+							isTransient,
+							diagnosticHealthy: diagnosticReport.isHealthy,
+							failureCount: this.parserHealthCache.get(normalizedExt)?.failureCount || 1,
+						},
 					})
+
 					logger.warn(`Parser loading failed for ${ext}, falling back to chunking`, "CodeParser")
 					return this._performFallbackChunking(
 						filePath,
@@ -613,23 +869,129 @@ export class CodeParser implements ICodeParser {
 		}
 
 		// Check both the normalized language key and the original extension for backward compatibility
-		const language = this.loadedParsers[normalizedExt] || this.loadedParsers[ext]
+		let language = this.loadedParsers[normalizedExt] || this.loadedParsers[ext]
 		if (!language) {
 			logger.warn(`No parser available for file extension: ${ext} (file: ${filePath})`, "CodeParser")
 			logger.debug(
 				`Available parsers in loadedParsers: ${Object.keys(this.loadedParsers).join(", ")}`,
 				"CodeParser",
 			)
-			logger.warn(`No WASM parser for ${ext}, forcing fallback chunking`, "CodeParser")
-			this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
-			return this._performFallbackChunking(
-				filePath,
-				content,
-				fileHash,
-				seenSegmentHashes,
-				undefined,
-				"no parser available",
-			)
+
+			// Check parser availability cache before triggering fallback
+			const parserAvailabilityCache = getParserAvailabilityCache()
+			const cachedStatus = parserAvailabilityCache.getCachedStatus(normalizedExt)
+
+			// If parser should be available but isn't loaded, attempt reload
+			if (cachedStatus?.isAvailable) {
+				logger.info(
+					`Parser ${normalizedExt} should be available but isn't loaded, attempting reload...`,
+					"CodeParser",
+				)
+
+				try {
+					// Get WASM directory for reload attempt
+					const wasmDir = await getWasmDirectoryWithRetry(undefined, 2, 300)
+
+					// Attempt to reload the parser
+					const reloadResult = await reloadParser(normalizedExt, wasmDir, this.metricsCollector)
+
+					if (reloadResult.success) {
+						logger.info(
+							`Successfully reloaded parser ${normalizedExt}, continuing with parsing`,
+							"CodeParser",
+						)
+
+						// Try to get the reloaded parser
+						const reloadedLanguage = this.loadedParsers[normalizedExt] || this.loadedParsers[ext]
+						if (reloadedLanguage) {
+							// Successfully reloaded, continue with parsing instead of fallback
+							language = reloadedLanguage
+							logger.info(
+								`Parser ${normalizedExt} reloaded successfully, proceeding with parsing`,
+								"CodeParser",
+							)
+						}
+					} else {
+						logger.error(`Failed to reload parser ${normalizedExt}: ${reloadResult.error}`, "CodeParser")
+						this.updateParserHealth(ext, new Error(reloadResult.error || "Parser reload failed"))
+
+						// Run diagnostics and provide recovery suggestions
+						const diagnosticReport = diagnoseWasmSetup()
+						logger.error(
+							`WASM Diagnostics Report:\n${formatDiagnosticReport(diagnosticReport)}`,
+							"CodeParser",
+						)
+
+						logger.warn(
+							`Parser reload failed for ${ext}. Recovery: Run 'Roo-Cline: Download Tree-sitter WASM Files' command or check file permissions.`,
+							"CodeParser",
+						)
+					}
+				} catch (reloadError) {
+					const errorObj = reloadError instanceof Error ? reloadError : new Error(String(reloadError))
+					logger.error(
+						`Exception during parser reload for ${normalizedExt}: ${errorObj.message}`,
+						"CodeParser",
+					)
+					this.updateParserHealth(ext, errorObj)
+
+					// Run diagnostics and provide recovery suggestions
+					const diagnosticReport = diagnoseWasmSetup()
+					logger.error(`WASM Diagnostics Report:\n${formatDiagnosticReport(diagnosticReport)}`, "CodeParser")
+
+					logger.warn(
+						`Parser reload exception for ${ext}. Recovery: Check WASM directory and file permissions.`,
+						"CodeParser",
+					)
+				}
+			} else {
+				logger.warn(`Parser ${normalizedExt} not available in cache, no reload attempt`, "CodeParser")
+			}
+
+			// If still no language after reload attempt, trigger fallback
+			if (!language) {
+				logger.warn(`No WASM parser for ${ext}, forcing fallback chunking`, "CodeParser")
+
+				// Enhanced metrics collection
+				this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
+				this.metricsCollector?.recordParserMetric(
+					normalizedExt,
+					"fallbackChunkingTrigger",
+					1,
+					"No parser available",
+					undefined,
+					undefined,
+					"noParser",
+				)
+
+				// Record additional WASM-specific metrics
+				this.metricsCollector?.recordParserMetric(
+					normalizedExt,
+					"loadFailure",
+					1,
+					`No parser available: ${cachedStatus?.isAvailable ? "should be available" : "not in cache"}`,
+				)
+
+				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+					error: "No parser available",
+					location: "parseContent:noParser",
+					properties: {
+						extension: ext,
+						wasInCache: !!cachedStatus,
+						shouldHaveBeenAvailable: cachedStatus?.isAvailable || false,
+						failureCount: this.parserHealthCache.get(normalizedExt)?.failureCount || 0,
+					},
+				})
+
+				return this._performFallbackChunking(
+					filePath,
+					content,
+					fileHash,
+					seenSegmentHashes,
+					undefined,
+					"no parser available",
+				)
+			}
 		}
 
 		logger.debug(`Attempting to parse ${filePath} with ${ext} parser`, "CodeParser")
