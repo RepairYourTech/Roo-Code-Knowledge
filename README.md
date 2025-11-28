@@ -35,7 +35,7 @@
 - [简体中文](locales/zh-CN/README.md)
 - [繁體中文](locales/zh-TW/README.md)
 - ...
-      </details>
+  </details>
 
 ---
 
@@ -149,11 +149,49 @@ If you prefer to install the VSIX package manually:
     code --install-extension bin/roo-cline-<version>.vsix
     ```
 
+### WASM Files Setup (One-Time)
+
+This project uses a strategy of committing all WASM files (~44MB: 30 tree-sitter parsers + 1 tiktoken tokenizer) to `src/wasms/` in the repository to eliminate network dependencies during builds. **NO downloads occur during normal `pnpm build` or `pnpm install`.**
+
+#### Initial Setup Instructions
+
+For new developers or if `src/wasms/` is missing:
+
+```bash
+pnpm setup-wasms-once
+```
+
+This command creates directories, downloads WASMs, copies them to `src/wasms/`, and verifies integrity.
+
+#### Verification
+
+After setup, verify with:
+
+```bash
+ls -lh src/wasms/tree-sitter/*.wasm  # Should show 30 files (~38MB)
+ls -lh src/wasms/tiktoken/tiktoken_bg.wasm  # Should show ~5-6MB
+```
+
+#### Commit Instructions
+
+If you regenerated WASMs (e.g., updated versions):
+
+```bash
+git add src/wasms/
+git commit -m "chore: update WASM files (tree-sitter + tiktoken)"
+```
+
+#### Troubleshooting
+
+For common issues (missing files, activation errors, etc.), see: [docs/TROUBLESHOOTING.md#wasm-files](docs/TROUBLESHOOTING.md#wasm-files)
+
+Refer to `.gitignore` (lines 53-68) which documents the WASM strategy and force-includes these files.
+
 ---
 
 ## WASM Files
 
-This extension bundles tree-sitter and tiktoken WASM files (~44MB) directly in the repository for zero network dependency during builds and runtime.
+This extension bundles tree-sitter and tiktoken WASM files (~44MB) directly in the repository for zero network dependency during builds and runtime. **All WASM files are committed to ensure builds work completely offline without requiring any network access.**
 
 ### Static WASM Files
 
@@ -204,11 +242,12 @@ pnpm --filter roo-cline check-wasms
 ### Why Bundle WASM Files?
 
 - **Zero network dependency**: Builds and extension loading don't require internet access
-- **Reliability**: No CDN failures or download timeouts
+- **Reliability**: No CDN failures or download timeouts during builds or runtime
 - **Performance**: Instant startup, no download delays
 - **Reproducibility**: Exact WASM versions are locked in the repository
+- **Self-contained**: All builds work offline without requiring network access
 
-**Trade-off**: Repository size increases by ~44MB, but this is acceptable for the reliability and performance benefits.
+**Trade-off**: Repository size increases by ~44MB, but this is acceptable for the reliability and performance benefits. The WASM files are committed to ensure builds never require network access.
 
 ---
 

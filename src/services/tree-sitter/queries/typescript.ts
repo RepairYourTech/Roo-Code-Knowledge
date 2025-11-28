@@ -148,7 +148,7 @@ export default `
         (#match? @jest.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach|jest|jest\\.fn)$"))))
   source: (string
     (string_fragment) @source
-    (#match? @source "^['\"]@jest/globals['\"]$"))) @definition.jest_import
+    (#match? @source "^['\\\"]@jest/globals['\\\"]$"))) @definition.jest_import
 
 ; Testing library imports - Vitest
 (import_statement
@@ -159,7 +159,7 @@ export default `
         (#match? @vitest.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach|vi|vi\\.fn)$"))))
   source: (string
     (string_fragment) @source
-    (#match? @source "^['\"]vitest['\"]$"))) @definition.vitest_import
+    (#match? @source "^['\\\"]vitest['\\\"]$"))) @definition.vitest_import
 
 ; Testing library imports - Vitest globals
 (import_statement
@@ -170,7 +170,7 @@ export default `
         (#match? @vitest.global.import "^(describe|test|it|expect|beforeAll|beforeEach|afterAll|afterEach)$"))))
   source: (string
     (string_fragment) @source
-    (#match? @source "^['\"]vitest/globals['\"]$"))) @definition.vitest_global_import
+    (#match? @source "^['\\\"]vitest/globals['\\\"]$"))) @definition.vitest_global_import
 
 ; Testing library imports - Chai
 (import_statement
@@ -181,7 +181,7 @@ export default `
         (#match? @chai.import "^(expect|assert|should)$"))))
   source: (string
     (string_fragment) @source
-    (#match? @source "^['\"]chai['\"]$"))) @definition.chai_import
+    (#match? @source "^['\\\"]chai['\\\"]$"))) @definition.chai_import
 
 ; Testing library imports - Sinon
 (import_statement
@@ -192,7 +192,7 @@ export default `
         (#match? @sinon.import "^(sinon|spy|stub|mock|fake|createSandbox)$"))))
   source: (string
     (string_fragment) @source
-    (#match? @source "^['\"]sinon['\"]$"))) @definition.sinon_import
+    (#match? @source "^['\\\"]sinon['\\\"]$"))) @definition.sinon_import
 
 ; CommonJS test exports
 (assignment_expression
@@ -213,8 +213,7 @@ export default `
   function: (identifier) @test.async_func
   arguments: (arguments
     (string) @test.async_description
-    (arrow_function
-      async: "async") @test.async_callback)
+    (arrow_function) @test.async_callback)
   (#match? @test.async_func "^(test|it|describe)$")) @definition.async_test
 
 ; Promise-based test patterns
@@ -225,7 +224,7 @@ export default `
     (arrow_function
       parameters: (formal_parameters
         (required_parameter
-          pattern: (identifier) @test.done_param)))))
+          pattern: (identifier) @test.done_param))))
   (#match? @test.promise_func "^(test|it)$")
   (#eq? @test.done_param "done")) @definition.promise_test
 
@@ -360,7 +359,7 @@ export default `
         (#match? @react.import "^(React|Component|PureComponent|Fragment|StrictMode|Suspense|lazy|memo|forwardRef|useContext|useEffect|useState|useReducer|useCallback|useMemo|useRef|useImperativeHandle|useLayoutEffect|useDebugValue)$")))
   source: (string
     (string_fragment) @react.source
-    (#match? @react.source "^['\"]react['\"]$"))) @definition.react_import
+    (#match? @react.source "^['\\\"]react['\\\"]$"))) @definition.react_import
 
 ; React hooks in .ts files
 (variable_declaration
@@ -405,12 +404,12 @@ export default `
         name: (identifier) @nextjs.import
         (#match? @nextjs.import "^(GetServerSideProps|GetStaticProps|GetStaticPaths|GetInitialProps|NextApiRequest|NextApiResponse|NextPage|NextApp|NextLayout|Metadata|ResolvingMetadata)$"))))
   source: (string
-    (#match? @source "^['\"]next['\"]$"))) @definition.nextjs_import
+    (#match? @source "^['\\\"]next['\\\"]$"))) @definition.nextjs_import
 
 ; Next.js library imports in .ts files
 (import_statement
   source: (string
-    (#match? @source "^['\"]next/['\"]"))) @definition.nextjs_library_import
+    (#match? @source "^['\\\"]next/['\\\"]$"))) @definition.nextjs_library_import
 
 ; Next.js page type declarations in .ts files
 (type_alias_declaration
@@ -523,7 +522,7 @@ export default `
 (expression_statement
   (string
     (string_fragment) @nextjs.client.directive
-    (#match? @nextjs.client.directive "^[\"']use client[\"']$"))) @definition.nextjs_client_component
+    (#match? @nextjs.client.directive "^[\\\"']use client[\\\"']$"))) @definition.nextjs_client_component
 
 ; ===== ANGULAR PATTERNS FOR TYPESCRIPT =====
 

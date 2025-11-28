@@ -15,6 +15,7 @@ import { IGraphIndexer, GraphIndexResult } from "../interfaces/graph-indexer"
 import { CodebaseIndexErrorLogger } from "./error-logger"
 import { MetadataValidator } from "./metadata-validator"
 import { MAX_METADATA_ARRAY_LENGTH } from "../constants"
+import { MetricsCollector } from "../utils/metrics-collector"
 import * as path from "path"
 import * as vscode from "vscode"
 import { Logger } from "../../../shared/logger"
@@ -27,15 +28,18 @@ import { TelemetryService } from "@roo-code/telemetry"
 export class GraphIndexer implements IGraphIndexer {
 	private readonly metadataValidator: MetadataValidator
 	private readonly telemetryEnabled: boolean
+	private readonly metricsCollector?: MetricsCollector
 
 	constructor(
 		private neo4jService: INeo4jService,
 		private errorLogger?: CodebaseIndexErrorLogger,
 		logger?: Logger,
 		telemetryEnabled: boolean = true,
+		metricsCollector?: MetricsCollector,
 	) {
 		this.log = logger
 		this.telemetryEnabled = telemetryEnabled && TelemetryService.hasInstance()
+		this.metricsCollector = metricsCollector
 
 		// Initialize metadata validator with appropriate configuration
 		this.metadataValidator = new MetadataValidator(
@@ -130,6 +134,11 @@ export class GraphIndexer implements IGraphIndexer {
 		let relationshipsCreated = 0
 		const startTime = this.getTimestamp()
 
+		// Initialize counters for fallback chunks
+		let fallbackChunkCount = 0
+		let fallbackNodesCreated = 0
+		let fallbackRelationshipsCreated = 0
+
 		// Log entry
 		this.log?.info(`[GraphIndexer] indexBlocks ENTRY: Processing ${blocks.length} blocks for file: ${filePath}`)
 
@@ -143,18 +152,37 @@ export class GraphIndexer implements IGraphIndexer {
 			// Extract all nodes from all blocks
 			const allNodes: CodeNode[] = []
 			for (const block of blocks) {
-				const nodes = this.extractNodes(block)
-				allNodes.push(...nodes)
+				// Track fallback chunks for telemetry
+				if (block.type && (block.type.includes("fallback") || block.type.includes("emergency"))) {
+					fallbackChunkCount++
+					const nodes = this.extractNodes(block)
+					fallbackNodesCreated += nodes.length
+					allNodes.push(...nodes)
+				} else {
+					const nodes = this.extractNodes(block)
+					allNodes.push(...nodes)
+				}
 			}
 
 			// Log extraction summary
 			this.log?.info(`[GraphIndexer] Extracted ${allNodes.length} nodes from blocks`)
 			this.log?.info(`[GraphIndexer] Node types: ${this.extractNodeTypes(allNodes).join(", ")}`)
 
+			// Log fallback nodes if any were created
+			if (fallbackNodesCreated > 0) {
+				this.log?.info(`[GraphIndexer] Created ${fallbackNodesCreated} nodes from fallback chunks`)
+			}
+
 			// Extract all relationships from all blocks
 			const allRelationships: CodeRelationship[] = []
 			for (const block of blocks) {
 				const relationships = this.extractRelationships(block, blocks)
+
+				// Track fallback relationships
+				if (block.type && (block.type.includes("fallback") || block.type.includes("emergency"))) {
+					fallbackRelationshipsCreated += relationships.length
+				}
+
 				allRelationships.push(...relationships)
 			}
 
@@ -176,6 +204,13 @@ export class GraphIndexer implements IGraphIndexer {
 						})}`,
 					)
 				}
+			}
+
+			// Log fallback relationships if any were created
+			if (fallbackRelationshipsCreated > 0) {
+				this.log?.info(
+					`[GraphIndexer] Created ${fallbackRelationshipsCreated} relationships from fallback chunks`,
+				)
 			}
 
 			// Create nodes first, then relationships in the same transaction context
@@ -211,6 +246,38 @@ export class GraphIndexer implements IGraphIndexer {
 				})
 			}
 
+			// Capture telemetry for fallback chunks if any were found
+			if (fallbackChunkCount > 0) {
+				this.captureTelemetry("FALLBACK_CHUNKS_INDEXED", {
+					filePath,
+					fallbackChunkCount,
+				})
+
+				// Record graph indexing metrics to MetricsCollector
+				if (this.metricsCollector && fallbackChunkCount > 0) {
+					const language = this.getLanguageFromPath(filePath)
+					this.metricsCollector.recordGraphIndexingMetric(
+						language,
+						"fallbackChunksIndexed",
+						fallbackChunkCount,
+					)
+					this.metricsCollector.recordGraphIndexingMetric(
+						language,
+						"fallbackNodesCreated",
+						fallbackNodesCreated,
+					)
+					this.metricsCollector.recordGraphIndexingMetric(
+						language,
+						"fallbackRelationshipsCreated",
+						fallbackRelationshipsCreated,
+					)
+
+					this.log?.info(
+						`[GraphIndexer] Recorded graph indexing metrics for ${language}: ${fallbackChunkCount} chunks, ${fallbackNodesCreated} nodes, ${fallbackRelationshipsCreated} relationships`,
+					)
+				}
+			}
+
 			//Capture telemetry for successful indexing completion
 			const duration = this.getTimestamp() - startTime
 			this.captureTelemetry("GRAPH_INDEXING_COMPLETED", {
@@ -218,6 +285,9 @@ export class GraphIndexer implements IGraphIndexer {
 				nodesCreated,
 				relationshipsCreated,
 				durationMs: duration,
+				fallbackChunkCount, // Include fallback chunk count in completion telemetry
+				fallbackNodesCreated, // Add fallback nodes to completion telemetry
+				fallbackRelationshipsCreated, // Add fallback relationships to completion telemetry
 			})
 		} catch (error) {
 			const errorMessage = error instanceof Error ? error.message : String(error)
@@ -273,8 +343,8 @@ export class GraphIndexer implements IGraphIndexer {
 			// This makes error handling consistent with indexFile method
 			const contextualError = new Error(
 				`Failed to index blocks for ${filePath}: ${nodesCreated} nodes created, ${relationshipsCreated} relationships created before failure: ${errorMessage}`,
-				{ cause: error },
-			)
+			) as Error & { cause?: unknown }
+			contextualError.cause = error
 			throw contextualError
 		}
 
@@ -399,7 +469,11 @@ export class GraphIndexer implements IGraphIndexer {
 			this.log?.info(`[GraphIndexer] Failed to remove file from graph: ${filePath}`, error)
 
 			// Throw error with enhanced context
-			throw new Error(`Failed to remove file ${filePath} from graph: ${errorMessage}`, { cause: error })
+			const removeError = new Error(`Failed to remove file ${filePath} from graph: ${errorMessage}`) as Error & {
+				cause?: unknown
+			}
+			removeError.cause = error
+			throw removeError
 		}
 	}
 
@@ -452,9 +526,17 @@ export class GraphIndexer implements IGraphIndexer {
 		let identifier = block.identifier
 		if (!identifier || identifier.trim() === "") {
 			identifier = this.generateSyntheticIdentifier(block)
-			this.log?.info(
-				`[GraphIndexer] Using fallback synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
-			)
+
+			// Enhanced logging for fallback chunks
+			if (block.type.includes("fallback") || block.type.includes("emergency")) {
+				this.log?.info(
+					`[GraphIndexer] Indexing fallback chunk '${identifier}' (type: ${block.type}) in ${block.file_path}:${block.start_line}-${block.end_line}`,
+				)
+			} else {
+				this.log?.info(
+					`[GraphIndexer] Using fallback synthetic identifier '${identifier}' for ${block.type} in ${block.file_path}:${block.start_line}`,
+				)
+			}
 		}
 
 		// Create primary node for this block
@@ -1480,6 +1562,25 @@ export class GraphIndexer implements IGraphIndexer {
 		}
 
 		// ============================================================================
+		// TIER 5: FALLBACK CHUNKS (Parser Fallback Handling)
+		// ============================================================================
+		// These chunks are created when Tree-sitter queries return zero captures or parsing fails
+		// They represent the parser's last resort to ensure code is not lost during indexing
+		if (type.includes("fallback_chunk")) {
+			// Map fallback chunks to "function" as a generic container type
+			// This maintains compatibility with the CodeNode interface while ensuring
+			// these important fallback blocks are properly indexed
+			return "function"
+		}
+
+		if (type.includes("emergency_fallback")) {
+			// Emergency fallbacks are created when even the basic parsing fails
+			// We map to "function" to ensure they're indexed as generic code blocks
+			// rather than being filtered out, which could result in code loss
+			return "function"
+		}
+
+		// ============================================================================
 		// FINAL FALLBACK
 		// ============================================================================
 		// CRITICAL: Instead of returning null (which filters out the block),
@@ -2419,5 +2520,20 @@ export class GraphIndexer implements IGraphIndexer {
 		}
 
 		return relationships
+	}
+
+	/**
+	 * Extract file extension from file path for metrics
+	 * @param filePath The file path
+	 * @returns The file extension (without dot) or 'unknown' if not found
+	 */
+	private getLanguageFromPath(filePath: string): string {
+		const extension = path.extname(filePath).toLowerCase()
+		if (!extension) {
+			return "unknown"
+		}
+
+		// Remove the dot and return the extension
+		return extension.substring(1)
 	}
 }

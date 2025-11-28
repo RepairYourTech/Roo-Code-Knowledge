@@ -122,6 +122,63 @@ export interface ParserMetrics {
 	fallbackTriggered: number
 	averageCapturesPerFile: number
 	lastError?: string
+	// New metrics for query effectiveness
+	queryEffectiveness: number
+	zeroCaptures: number
+	comprehensiveQueryUsage: number
+	hardcodedQueryUsage: number
+	fallbackQueryUsage: number
+	noneQueryUsage: number
+	unknownQueryUsage: number
+	averageFileSize: number
+}
+
+/**
+ * Query source metrics
+ */
+export interface QuerySourceMetrics {
+	language: string
+	source: "comprehensive" | "hardcoded"
+	count: number
+}
+
+/**
+ * Capture effectiveness metrics
+ */
+export interface CaptureEffectivenessMetrics {
+	language: string
+	querySource: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown"
+	captureCount: number
+	fileCount: number
+}
+
+/**
+ * Zero capture event metrics
+ */
+export interface ZeroCaptureEventMetrics {
+	language: string
+	querySource: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown"
+	fileSize: number
+	eventCount: number
+}
+
+/**
+ * Fallback chunking trigger metrics
+ */
+export interface FallbackChunkingTriggerMetrics {
+	language: string
+	reason: "zeroCaptures" | "parseError" | "noParser"
+	count: number
+}
+
+/**
+ * Graph indexing metrics
+ */
+export interface GraphIndexingMetrics {
+	fileType: string
+	fallbackChunksIndexed: number
+	fallbackNodesCreated: number
+	fallbackRelationshipsCreated: number
 }
 
 /**
@@ -144,6 +201,11 @@ export class MetricsCollector {
 	private fileTypeMetrics: Map<string, FileTypeMetrics> = new Map()
 	private blockTypeMetrics: Map<string, BlockTypeMetrics> = new Map()
 	private parserMetrics: Map<string, ParserMetrics> = new Map()
+	private querySourceMetrics: Map<string, QuerySourceMetrics> = new Map()
+	private captureEffectivenessMetrics: Map<string, CaptureEffectivenessMetrics> = new Map()
+	private zeroCaptureEventMetrics: Map<string, ZeroCaptureEventMetrics> = new Map()
+	private fallbackChunkingTriggerMetrics: Map<string, FallbackChunkingTriggerMetrics> = new Map()
+	private graphIndexingMetrics: Map<string, GraphIndexingMetrics> = new Map()
 
 	// Performance thresholds
 	private readonly slowQueryThreshold = 1000 // 1 second
@@ -463,6 +525,36 @@ export class MetricsCollector {
 	}
 
 	/**
+	 * Record graph indexing metrics
+	 */
+	recordGraphIndexingMetric(
+		fileType: string,
+		metric: "fallbackChunksIndexed" | "fallbackNodesCreated" | "fallbackRelationshipsCreated",
+		count: number,
+	): void {
+		const existing = this.graphIndexingMetrics.get(fileType) || {
+			fileType,
+			fallbackChunksIndexed: 0,
+			fallbackNodesCreated: 0,
+			fallbackRelationshipsCreated: 0,
+		}
+
+		switch (metric) {
+			case "fallbackChunksIndexed":
+				existing.fallbackChunksIndexed += count
+				break
+			case "fallbackNodesCreated":
+				existing.fallbackNodesCreated += count
+				break
+			case "fallbackRelationshipsCreated":
+				existing.fallbackRelationshipsCreated += count
+				break
+		}
+
+		this.graphIndexingMetrics.set(fileType, existing)
+	}
+
+	/**
 	 * Record parser metrics
 	 */
 	recordParserMetric(
@@ -475,9 +567,24 @@ export class MetricsCollector {
 			| "parseSuccess"
 			| "parseFailed"
 			| "captures"
-			| "fallback",
+			| "fallback"
+			| "queryEffectiveness"
+			| "zeroCaptures"
+			| "querySource_comprehensive"
+			| "querySource_hardcoded"
+			| "querySource_fallback"
+			| "querySource_none"
+			| "querySource_unknown"
+			| "captureCount"
+			| "fileSize"
+			| "zeroCaptureEvent"
+			| "captureEffectiveness"
+			| "fallbackChunkingTrigger",
 		count: number = 1,
 		error?: string,
+		querySource?: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
+		fileSize?: number,
+		fallbackReason?: "zeroCaptures" | "parseError" | "noParser",
 	): void {
 		const existing = this.parserMetrics.get(language) || {
 			language,
@@ -490,6 +597,15 @@ export class MetricsCollector {
 			totalCaptures: 0,
 			fallbackTriggered: 0,
 			averageCapturesPerFile: 0,
+			// New metrics for query effectiveness
+			queryEffectiveness: 0,
+			zeroCaptures: 0,
+			comprehensiveQueryUsage: 0,
+			hardcodedQueryUsage: 0,
+			fallbackQueryUsage: 0,
+			noneQueryUsage: 0,
+			unknownQueryUsage: 0,
+			averageFileSize: 0,
 		}
 
 		switch (metric) {
@@ -523,6 +639,55 @@ export class MetricsCollector {
 				break
 			case "fallback":
 				existing.fallbackTriggered += count
+				break
+			case "queryEffectiveness":
+				existing.queryEffectiveness += count
+				break
+			case "zeroCaptures":
+				existing.zeroCaptures += count
+				break
+			case "querySource_comprehensive":
+				existing.comprehensiveQueryUsage += count
+				this.recordQuerySourceMetric(language, "comprehensive", count)
+				break
+			case "querySource_hardcoded":
+				existing.hardcodedQueryUsage += count
+				this.recordQuerySourceMetric(language, "hardcoded", count)
+				break
+			case "querySource_fallback":
+				existing.fallbackQueryUsage += count
+				break
+			case "querySource_none":
+				existing.noneQueryUsage += count
+				break
+			case "querySource_unknown":
+				existing.unknownQueryUsage += count
+				break
+			case "captureCount":
+				// Record capture effectiveness with query source
+				if (querySource) {
+					this.recordCaptureEffectivenessMetric(language, querySource, count)
+				}
+				break
+			case "zeroCaptureEvent":
+				// Record zero capture event with query source and file size
+				if (querySource && fileSize) {
+					this.recordZeroCaptureEventMetric(language, querySource, fileSize)
+				}
+				break
+			case "captureEffectiveness":
+				// This metric is already handled by the captureCount case
+				break
+			case "fallbackChunkingTrigger":
+				// Record fallback chunking trigger with reason
+				if (fallbackReason) {
+					this.recordFallbackChunkingTriggerMetric(language, fallbackReason, count)
+				}
+				break
+			case "fileSize":
+				// Update average file size
+				const totalFiles = existing.parseAttempts || 1
+				existing.averageFileSize = (existing.averageFileSize * (totalFiles - 1) + count) / totalFiles
 				break
 		}
 
@@ -572,6 +737,161 @@ export class MetricsCollector {
 	}
 
 	/**
+	 * Record query source metric
+	 */
+	recordQuerySourceMetric(language: string, source: "comprehensive" | "hardcoded", count: number = 1): void {
+		const key = `${language}:${source}`
+		const existing = this.querySourceMetrics.get(key) || {
+			language,
+			source,
+			count: 0,
+		}
+		existing.count += count
+		this.querySourceMetrics.set(key, existing)
+	}
+
+	/**
+	 * Record capture effectiveness metric
+	 */
+	recordCaptureEffectivenessMetric(
+		language: string,
+		querySource: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
+		captureCount: number,
+	): void {
+		const key = `${language}:${querySource}`
+		const existing = this.captureEffectivenessMetrics.get(key) || {
+			language,
+			querySource,
+			captureCount: 0,
+			fileCount: 0,
+		}
+		existing.captureCount += captureCount
+		existing.fileCount += 1
+		this.captureEffectivenessMetrics.set(key, existing)
+	}
+
+	/**
+	 * Record zero capture event metric
+	 */
+	recordZeroCaptureEventMetric(
+		language: string,
+		querySource: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
+		fileSize: number,
+	): void {
+		const key = `${language}:${querySource}`
+		const existing = this.zeroCaptureEventMetrics.get(key) || {
+			language,
+			querySource,
+			fileSize: 0,
+			eventCount: 0,
+		}
+		existing.fileSize = (existing.fileSize * existing.eventCount + fileSize) / (existing.eventCount + 1)
+		existing.eventCount += 1
+		this.zeroCaptureEventMetrics.set(key, existing)
+	}
+
+	/**
+	 * Record fallback chunking trigger metric
+	 */
+	recordFallbackChunkingTriggerMetric(
+		language: string,
+		reason: "zeroCaptures" | "parseError" | "noParser",
+		count: number = 1,
+	): void {
+		const key = `${language}:${reason}`
+		const existing = this.fallbackChunkingTriggerMetrics.get(key) || {
+			language,
+			reason,
+			count: 0,
+		}
+		existing.count += count
+		this.fallbackChunkingTriggerMetrics.set(key, existing)
+	}
+
+	/**
+	 * Get query source metrics
+	 */
+	getQuerySourceMetrics(language?: string, source?: "comprehensive" | "hardcoded"): QuerySourceMetrics[] {
+		let metrics = Array.from(this.querySourceMetrics.values())
+		if (language) {
+			metrics = metrics.filter((m) => m.language === language)
+		}
+		if (source) {
+			metrics = metrics.filter((m) => m.source === source)
+		}
+		return metrics
+	}
+
+	/**
+	 * Get capture effectiveness metrics
+	 */
+	getCaptureEffectivenessMetrics(
+		language?: string,
+		querySource?: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
+	): CaptureEffectivenessMetrics[] {
+		let metrics = Array.from(this.captureEffectivenessMetrics.values())
+		if (language) {
+			metrics = metrics.filter((m) => m.language === language)
+		}
+		if (querySource) {
+			metrics = metrics.filter((m) => m.querySource === querySource)
+		}
+		return metrics
+	}
+
+	/**
+	 * Get zero capture event metrics
+	 */
+	getZeroCaptureEventMetrics(
+		language?: string,
+		querySource?: "comprehensive" | "hardcoded" | "fallback" | "none" | "unknown",
+	): ZeroCaptureEventMetrics[] {
+		let metrics = Array.from(this.zeroCaptureEventMetrics.values())
+		if (language) {
+			metrics = metrics.filter((m) => m.language === language)
+		}
+		if (querySource) {
+			metrics = metrics.filter((m) => m.querySource === querySource)
+		}
+		return metrics
+	}
+
+	/**
+	 * Get fallback chunking trigger metrics
+	 */
+	getFallbackChunkingTriggerMetrics(
+		language?: string,
+		reason?: "zeroCaptures" | "parseError" | "noParser",
+	): FallbackChunkingTriggerMetrics[] {
+		let metrics = Array.from(this.fallbackChunkingTriggerMetrics.values())
+		if (language) {
+			metrics = metrics.filter((m) => m.language === language)
+		}
+		if (reason) {
+			metrics = metrics.filter((m) => m.reason === reason)
+		}
+		return metrics
+	}
+
+	/**
+	 * Get graph indexing metrics
+	 */
+	getGraphIndexingMetrics(fileType?: string): GraphIndexingMetrics[] {
+		let metrics = Array.from(this.graphIndexingMetrics.values())
+		if (fileType) {
+			metrics = metrics.filter((m) => m.fileType === fileType)
+		}
+		return metrics
+	}
+
+	/**
+	 * Get all graph indexing metrics
+	 */
+	getAllGraphIndexingMetrics(): GraphIndexingMetrics[] {
+		return Array.from(this.graphIndexingMetrics.values())
+	}
+
+	/**
 	 * Get comprehensive performance summary
 	 */
 	getPerformanceSummary(): {
@@ -588,6 +908,11 @@ export class MetricsCollector {
 		fileTypes: FileTypeMetrics[]
 		blockTypes: BlockTypeMetrics[]
 		parsers: ParserMetrics[]
+		querySources: QuerySourceMetrics[]
+		captureEffectiveness: CaptureEffectivenessMetrics[]
+		zeroCaptureEvents: ZeroCaptureEventMetrics[]
+		fallbackChunkingTriggers: FallbackChunkingTriggerMetrics[]
+		graphIndexing: GraphIndexingMetrics[]
 	} {
 		const recentBatches = this.getRecentBatchMetrics(100)
 		const successfulBatches = recentBatches.filter((b) => b.success)
@@ -612,6 +937,11 @@ export class MetricsCollector {
 			fileTypes: this.getAllFileTypeMetrics(),
 			blockTypes: this.getAllBlockTypeMetrics(),
 			parsers: this.getAllParserMetrics(),
+			querySources: Array.from(this.querySourceMetrics.values()),
+			captureEffectiveness: Array.from(this.captureEffectivenessMetrics.values()),
+			zeroCaptureEvents: Array.from(this.zeroCaptureEventMetrics.values()),
+			fallbackChunkingTriggers: Array.from(this.fallbackChunkingTriggerMetrics.values()),
+			graphIndexing: Array.from(this.graphIndexingMetrics.values()),
 		}
 	}
 
@@ -635,6 +965,11 @@ export class MetricsCollector {
 		this.fileTypeMetrics.clear()
 		this.blockTypeMetrics.clear()
 		this.parserMetrics.clear()
+		this.querySourceMetrics.clear()
+		this.captureEffectivenessMetrics.clear()
+		this.zeroCaptureEventMetrics.clear()
+		this.fallbackChunkingTriggerMetrics.clear()
+		this.graphIndexingMetrics.clear()
 	}
 
 	/**

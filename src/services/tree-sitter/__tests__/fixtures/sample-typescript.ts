@@ -1,208 +1,83 @@
-export default String.raw`
-// Import statements test - inherently single-line, exempt from 4-line requirement
-import React, { useState, useEffect } from 'react';
-import { render } from 'react-dom';
-import * as utils from './utils';
-
-// Interface declaration test
-interface TestInterfaceDefinition {
-    name: string;
-    value: number;
-    
-    methodSignature(
-        param1: string,
-        param2: number
-    ): string;
+// Sample TypeScript file for testing
+interface User {
+	id: number
+	name: string
+	email?: string
 }
 
-// Type declaration test
-type TestTypeDefinition = {
-    id: number;
-    name: string;
-    
-    callback: (
-        param: string
-    ) => void;
-};
+class UserService {
+	private users: User[] = []
 
-// Enum declaration test
-enum TestEnumDefinition {
-    First = 'FIRST',
-    Second = 'SECOND',
-    Third = 'THIRD',
-    Fourth = 'FOURTH'
+	constructor() {
+		console.log("UserService initialized")
+	}
+
+	public addUser(user: User): void {
+		this.users.push(user)
+	}
+
+	public getUserById(id: number): User | undefined {
+		return this.users.find((user) => user.id === id)
+	}
+
+	public getAllUsers(): User[] {
+		return [...this.users]
+	}
 }
 
-// Namespace declaration test
-namespace TestNamespaceDefinition {
-    export interface InnerInterface {
-        prop: string;
-    }
-    
-    export function innerFunction(
-        param: string
-    ): void {
-        console.log(param);
-    }
+// Function with generics
+function createRepository<T>(): {
+	add: (item: T) => void
+	find: (predicate: (item: T) => boolean) => T | undefined
+	getAll: () => T[]
+} {
+	const items: T[] = []
+
+	return {
+		add: (item: T) => items.push(item),
+		find: (predicate: (item: T) => boolean) => items.find(predicate),
+		getAll: () => [...items],
+	}
 }
 
-// Generic interface test
-interface TestGenericInterfaceDefinition<T, U> {
-    data: T;
-    metadata: U;
-    
-    process(
-        input: T
-    ): U;
+// Enum
+enum UserRole {
+	ADMIN = "admin",
+	USER = "user",
+	GUEST = "guest",
 }
 
-// Function with type annotations
-function testTypedFunctionDefinition(
-    param1: string,
-    param2: number,
-    callback: (result: string) => void
-): string {
-    const result = param1.repeat(param2);
-    callback(result);
-    return result;
+// Decorator example
+function log(target: any, propertyKey: string, descriptor: PropertyDescriptor) {
+	const originalMethod = descriptor.value
+
+	descriptor.value = function (...args: any[]) {
+		console.log(`Calling ${propertyKey} with args:`, args)
+		const result = originalMethod.apply(this, args)
+		console.log(`${propertyKey} returned:`, result)
+		return result
+	}
+
+	return descriptor
 }
 
-// Async function with type annotations
-async function testTypedAsyncFunctionDefinition(
-    url: string,
-    options: RequestInit,
-    timeout: number
-): Promise<Response> {
-    const response = await fetch(url, options);
-    const data = await response.json();
-    return data;
+class ApiService {
+	@log
+	public async fetchData<T>(url: string): Promise<T> {
+		const response = await fetch(url)
+		return response.json()
+	}
 }
 
-// Generic function test
-function testGenericFunctionDefinition<T, U>(
-    input: T,
-    transform: (value: T) => U
-): U {
-    return transform(input);
+// Type alias and union type
+type Status = "loading" | "success" | "error"
+
+interface ApiResponse<T> {
+	data: T
+	status: Status
+	message?: string
 }
 
-// Class with interface implementation
-class TestTypedClassDefinition implements TestInterfaceDefinition {
-    // Typed class fields
-    private readonly #privateField: string;
-    static staticField: number = 42;
-    
-    constructor(
-        public name: string,
-        public value: number
-    ) {
-        this.#privateField = 'private';
-    }
-    
-    // Interface method implementation
-    methodSignature(
-        param1: string,
-        param2: number
-    ): string {
-        return param1.repeat(param2);
-    }
-    
-    // Generic method
-    genericMethod<T>(
-        input: T,
-        count: number
-    ): T[] {
-        return Array(count).fill(input);
-    }
-}
-
-// Abstract class test
-abstract class TestAbstractClassDefinition {
-    constructor(
-        protected name: string,
-        private value: number
-    ) {}
-    
-    abstract process(
-        input: string
-    ): number;
-    
-    // Concrete method
-    format(): string {
-        return this.name +
-               String(this.value);
-    }
-}
-
-// Typed object literal
-const testTypedObjectLiteralDefinition: TestTypeDefinition = {
-    id: 1,
-    name: 'test',
-    
-    callback: (
-        param: string
-    ): void => {
-        console.log(param);
-    }
-};
-
-// JSX element with TypeScript props
-interface TestJsxPropsDefinition {
-    title: string;
-    items: string[];
-    onSelect: (item: string) => void;
-}
-
-const testTypedJsxElementDefinition = (
-    props: TestJsxPropsDefinition
-): JSX.Element => {
-    return (
-        <div className="test-container">
-            <header className="test-header">
-                {props.title}
-            </header>
-            <main>
-                {props.items.map(item => (
-                    <div onClick={() => props.onSelect(item)}>
-                        {item}
-                    </div>
-                ))}
-            </main>
-        </div>
-    );
-};
-
-// Decorator with TypeScript types
-function testTypedDecoratorDefinition(
-    target: any,
-    propertyKey: string,
-    descriptor: PropertyDescriptor
-): PropertyDescriptor {
-    const original = descriptor.value;
-    descriptor.value = function(...args: any[]) {
-        return original.apply(this, args);
-    };
-    return descriptor;
-}
-
-// Class with typed decorator
-@testTypedDecoratorDefinition
-class TestTypedDecoratedClassDefinition {
-    constructor(
-        private name: string,
-        protected type: string
-    ) {}
-    
-    @testTypedDecoratorDefinition
-    testDecoratedMethodDefinition(
-        param1: string,
-        param2: number
-    ): string {
-        return param1.repeat(param2);
-    }
-}
-
-// Module exports - inherently single-line, exempt from 4-line requirement
-export { testTypedFunctionDefinition, TestTypedClassDefinition };
-export default TestTypedDecoratedClassDefinition;
-`
+// Export statement
+export { UserService, UserRole, ApiService }
+export type { User, ApiResponse, Status }

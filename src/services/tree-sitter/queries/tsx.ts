@@ -46,19 +46,19 @@ export default `${typescriptQuery}
         name: (identifier) @react.import
         (#match? @react.import "^(React|Component|PureComponent|Fragment|StrictMode|Suspense|lazy|memo|forwardRef|useContext|useEffect|useState|useReducer|useCallback|useMemo|useRef|useImperativeHandle|useLayoutEffect|useDebugValue)$"))))
   source: (string
-    (#match? @source "^['\"]react['\"]$"))) @definition.react_import
+    (#match? @source "^['\\\"]react['\\\"]$"))) @definition.react_import
 
 ; Default React import
 (import_statement
   (import_clause
     (identifier) @react.default_import)
   source: (string
-    (#match? @source "^['\"]react['\"]$"))) @definition.react_default_import
+    (#match? @source "^['\\\"]react['\\\"]$"))) @definition.react_default_import
 
 ; React library imports (react-dom, @testing-library/react, etc.)
 (import_statement
   source: (string
-    (#match? @source "^['\"](@react.*|react-.*|@testing-library/.*)['\""]$"))) @definition.react_library_import
+    (#match? @source "^['\\\"](@react.*|react-.*|@testing-library/.*)['\\\""]$"))) @definition.react_library_import
 
 ; ===== FUNCTION COMPONENTS =====
 ; Function Components - Basic detection
@@ -379,12 +379,12 @@ export default `${typescriptQuery}
         name: (identifier) @nextjs.import
         (#match? @nextjs.import "^(GetServerSideProps|GetStaticProps|GetStaticPaths|GetInitialProps|NextApiRequest|NextApiResponse|NextPage|NextApp|NextLayout|Metadata|ResolvingMetadata)$"))))
   source: (string
-    (#match? @source "^['\"]next['\"]$"))) @definition.nextjs_import
+    (#match? @source "^['\\\"]next['\\\"]$"))) @definition.nextjs_import
 
 ; Next.js library imports (next/navigation, next/image, etc.)
 (import_statement
   source: (string
-    (#match? @source "^['\"]next/.*['\"]"))) @definition.nextjs_library_import
+    (#match? @source "^['\\\"]next/.*['\\\"]$"))) @definition.nextjs_library_import
 
 ; Next.js Page Components - Pages Router
 (export_statement

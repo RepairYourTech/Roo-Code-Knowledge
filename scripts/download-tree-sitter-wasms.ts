@@ -3,15 +3,17 @@
 /**
  * Tree-sitter WASM Download Script
  *
- * Purpose: Regenerate static WASM files bundled in src/wasms/tree-sitter/
+ * Purpose: Download tree-sitter WASM files to dist/services/tree-sitter/ (intermediate location)
  *
- * Usage:
- *   1. Run: pnpm regenerate-wasms (or tsx scripts/download-tree-sitter-wasms.ts)
+ * Usage (for initial setup):
+ *   1. Run: pnpm setup-wasms-once (automated script that calls this + copies to src/wasms/)
+ *
+ * Usage (for manual regeneration):
+ *   1. Run: tsx scripts/download-tree-sitter-wasms.ts
  *   2. Copy: cp dist/services/tree-sitter/*.wasm src/wasms/tree-sitter/
  *   3. Commit: git add src/wasms/tree-sitter/*.wasm && git commit -m "chore: update tree-sitter WASMs"
  *
- * Note: This script is NOT run during normal builds. The build process uses
- * pre-downloaded WASM files from src/wasms/tree-sitter/ for zero network dependency.
+ * Note: This script downloads to dist/ as an intermediate location. The setup-wasms-once.sh script automates copying to src/wasms/tree-sitter/ for permanent repo storage. Normal builds load WASMs directly from src/wasms/ (no downloads).
  */
 
 import * as fs from "fs"

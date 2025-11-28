@@ -14,7 +14,7 @@ describe("GraphIndexer - Synthetic Identifier Generation", () => {
 			createRelationships: async () => {},
 		} as any
 
-		graphIndexer = new GraphIndexer(mockNeo4jService)
+		graphIndexer = new GraphIndexer(mockNeo4jService, undefined, undefined, true, undefined)
 	})
 
 	describe("generateSyntheticIdentifier", () => {

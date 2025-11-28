@@ -1,7 +1,7 @@
 import { readFile } from "fs/promises"
 import { createHash } from "crypto"
 import * as path from "path"
-import * as vscode from "vscode"
+
 import { Node } from "web-tree-sitter"
 import { LanguageParser, LanguageParsers, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { getWasmDirectory } from "../../tree-sitter/get-wasm-directory"
@@ -50,6 +50,54 @@ export class CodeParser implements ICodeParser {
 	constructor(lspService?: ILSPService, metricsCollector?: MetricsCollector) {
 		this.lspService = lspService
 		this.metricsCollector = metricsCollector
+	}
+
+	/**
+	 * Normalizes parser key to match language keys produced by loadRequiredLanguageParsers
+	 * This mirrors the extensionToLanguage mapping from languageParser.ts
+	 */
+	private normalizeParserKey(ext: string): string {
+		const extensionToLanguage: { [key: string]: string } = {
+			js: "javascript",
+			jsx: "javascript",
+			json: "javascript",
+			ts: "typescript",
+			tsx: "tsx",
+			py: "python",
+			rs: "rust",
+			go: "go",
+			cpp: "cpp",
+			hpp: "cpp",
+			c: "c",
+			h: "c",
+			cs: "c_sharp",
+			rb: "ruby",
+			java: "java",
+			php: "php",
+			swift: "swift",
+			kt: "kotlin",
+			kts: "kotlin",
+			css: "css",
+			html: "html",
+			ml: "ocaml",
+			mli: "ocaml",
+			scala: "scala",
+			sol: "solidity",
+			toml: "toml",
+			yaml: "yaml",
+			yml: "yaml",
+			vue: "vue",
+			lua: "lua",
+			rdl: "systemrdl",
+			tla: "tlaplus",
+			zig: "zig",
+			ejs: "ejs",
+			erb: "erb",
+			el: "elisp",
+			ex: "elixir",
+			exs: "elixir",
+		}
+		return extensionToLanguage[ext] || ext
 	}
 
 	/**
@@ -367,13 +415,32 @@ export class CodeParser implements ICodeParser {
 
 		// Check if this extension should use fallback chunking
 		if (shouldUseFallbackChunking(`.${ext}`)) {
-			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+			const reason = "noParser"
+			const normalizedExt = this.normalizeParserKey(ext)
+			this.metricsCollector?.recordParserMetric(
+				normalizedExt,
+				"fallbackChunkingTrigger",
+				1,
+				undefined,
+				undefined,
+				undefined,
+				reason,
+			)
+			return this._performFallbackChunking(
+				filePath,
+				content,
+				fileHash,
+				seenSegmentHashes,
+				undefined,
+				"unsupported extension",
+			)
 		}
 
 		// Check if we already have the parser loaded
 		logger.debug(`Checking parser availability for extension: ${ext} (file: ${filePath})`, "CodeParser")
-		if (!this.loadedParsers[ext]) {
-			const pendingLoad = this.pendingLoads.get(ext)
+		const normalizedExt = this.normalizeParserKey(ext)
+		if (!this.loadedParsers[normalizedExt]) {
+			const pendingLoad = this.pendingLoads.get(normalizedExt)
 			if (pendingLoad) {
 				logger.debug(`Found pending load for ${ext}, waiting for completion...`, "CodeParser")
 				try {
@@ -399,7 +466,24 @@ export class CodeParser implements ICodeParser {
 						location: "parseContent:loadParser",
 					})
 					logger.warn(`Parser load failed for ${ext}, falling back to chunking`, "CodeParser")
-					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+					const reason = "parseError"
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"fallbackChunkingTrigger",
+						1,
+						undefined,
+						undefined,
+						undefined,
+						reason,
+					)
+					return this._performFallbackChunking(
+						filePath,
+						content,
+						fileHash,
+						seenSegmentHashes,
+						undefined,
+						"parser load failed",
+					)
 				}
 			} else {
 				logger.debug(`Loading parser for extension: ${ext} (file: ${filePath})`, "CodeParser")
@@ -435,11 +519,28 @@ export class CodeParser implements ICodeParser {
 					logger.error(`Stack: ${error instanceof Error ? error.stack : "N/A"}`, "CodeParser")
 					// Return empty array - graceful degradation
 					logger.warn(`WASM directory unavailable, falling back to chunking for ${filePath}`, "CodeParser")
-					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+					const reason = "parseError"
+					this.metricsCollector?.recordParserMetric(
+						normalizedExt,
+						"fallbackChunkingTrigger",
+						1,
+						undefined,
+						undefined,
+						undefined,
+						reason,
+					)
+					return this._performFallbackChunking(
+						filePath,
+						content,
+						fileHash,
+						seenSegmentHashes,
+						undefined,
+						"WASM directory unavailable",
+					)
 				}
 
 				const loadPromise = loadRequiredLanguageParsers([filePath], wasmDir, this.metricsCollector)
-				this.pendingLoads.set(ext, loadPromise)
+				this.pendingLoads.set(normalizedExt, loadPromise)
 				try {
 					const newParsers = await loadPromise
 					if (newParsers) {
@@ -455,7 +556,8 @@ export class CodeParser implements ICodeParser {
 							// Don't add to loadedParsers since it's empty, but continue processing
 						} else {
 							// Log parser details for non-empty parsers
-							const parser = newParsers[ext]
+							// Check both the normalized language key and the original extension for backward compatibility
+							const parser = newParsers[normalizedExt] || newParsers[ext]
 							if (parser) {
 								logger.debug(`Parser details for ${ext}:`, "CodeParser")
 								logger.debug(`  - Language name: ${parser.language?.name || "Unknown"}`, "CodeParser")
@@ -494,14 +596,22 @@ export class CodeParser implements ICodeParser {
 						location: "parseContent:loadParser",
 					})
 					logger.warn(`Parser loading failed for ${ext}, falling back to chunking`, "CodeParser")
-					return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+					return this._performFallbackChunking(
+						filePath,
+						content,
+						fileHash,
+						seenSegmentHashes,
+						undefined,
+						"parser loading failed",
+					)
 				} finally {
-					this.pendingLoads.delete(ext)
+					this.pendingLoads.delete(normalizedExt)
 				}
 			}
 		}
 
-		const language = this.loadedParsers[ext]
+		// Check both the normalized language key and the original extension for backward compatibility
+		const language = this.loadedParsers[normalizedExt] || this.loadedParsers[ext]
 		if (!language) {
 			logger.warn(`No parser available for file extension: ${ext} (file: ${filePath})`, "CodeParser")
 			logger.debug(
@@ -509,12 +619,19 @@ export class CodeParser implements ICodeParser {
 				"CodeParser",
 			)
 			logger.warn(`No WASM parser for ${ext}, forcing fallback chunking`, "CodeParser")
-			this.metricsCollector?.recordParserMetric(ext, "fallback")
-			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+			this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
+			return this._performFallbackChunking(
+				filePath,
+				content,
+				fileHash,
+				seenSegmentHashes,
+				undefined,
+				"no parser available",
+			)
 		}
 
 		logger.debug(`Attempting to parse ${filePath} with ${ext} parser`, "CodeParser")
-		this.metricsCollector?.recordParserMetric(ext, "parseAttempt")
+		this.metricsCollector?.recordParserMetric(normalizedExt, "parseAttempt")
 		let tree
 		try {
 			tree = language.parser.parse(content)
@@ -582,10 +699,17 @@ export class CodeParser implements ICodeParser {
 				`Full error stack trace: ${e instanceof Error ? e.stack || "No stack available" : "No stack available"}`,
 				"CodeParser",
 			)
-			this.metricsCollector?.recordParserMetric(ext, "parseFailed")
+			this.metricsCollector?.recordParserMetric(normalizedExt, "parseFailed")
 			logger.warn(`Tree parsing failed for ${filePath}, falling back to chunking`, "CodeParser")
-			this.metricsCollector?.recordParserMetric(ext, "fallback")
-			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
+			this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
+			return this._performFallbackChunking(
+				filePath,
+				content,
+				fileHash,
+				seenSegmentHashes,
+				undefined,
+				"tree parsing failed",
+			)
 		}
 
 		// We don't need to get the query string from languageQueries since it's already loaded
@@ -631,10 +755,32 @@ export class CodeParser implements ICodeParser {
 					"CodeParser",
 				)
 			})
-			this.metricsCollector?.recordParserMetric(ext, "parseSuccess")
-			this.metricsCollector?.recordParserMetric(ext, "captures", captures.length)
+			this.metricsCollector?.recordParserMetric(normalizedExt, "parseSuccess")
+
+			// Record metrics for query effectiveness
+			const querySource = language.querySource || "unknown"
+			this.metricsCollector?.recordParserMetric(normalizedExt, "queryEffectiveness", 1)
+			this.metricsCollector?.recordParserMetric(normalizedExt, `querySource_${querySource}` as any, 1)
+			this.metricsCollector?.recordParserMetric(
+				normalizedExt,
+				"captureCount",
+				captures.length,
+				undefined,
+				querySource,
+			)
 		} else {
-			this.metricsCollector?.recordParserMetric(ext, "parseFailed")
+			this.metricsCollector?.recordParserMetric(normalizedExt, "parseFailed")
+
+			// Record metrics for zero capture event
+			const querySource = language.querySource || "unknown"
+			this.metricsCollector?.recordParserMetric(
+				normalizedExt,
+				"zeroCaptureEvent",
+				1,
+				undefined,
+				querySource,
+				content.length,
+			)
 		}
 
 		// Check if captures are empty
@@ -644,6 +790,12 @@ export class CodeParser implements ICodeParser {
 			logger.debug(`  - File size: ${content.length} characters`, "CodeParser")
 			logger.debug(`  - Content length: ${content.length} characters`, "CodeParser")
 			logger.debug(`  - MIN_BLOCK_CHARS threshold: ${MIN_BLOCK_CHARS}`, "CodeParser")
+
+			// Log query source information
+			const querySource = language.querySource || "unknown"
+			const queryPatternCount = language.queryPatternCount || 0
+			logger.debug(`  - Query source: ${querySource}`, "CodeParser")
+			logger.debug(`  - Query pattern count: ${queryPatternCount}`, "CodeParser")
 
 			// Enhanced diagnostics for empty captures
 			// Log the first MAX_CONTENT_PREVIEW_CHARS characters of file content (sanitized)
@@ -681,6 +833,15 @@ export class CodeParser implements ICodeParser {
 			// Log why fallback chunking is being triggered
 			logger.debug(`  - Reason for fallback: No query captures found`, "CodeParser")
 
+			// Log AST node types present in the file (sample of root children)
+			if (tree && tree.rootNode) {
+				const rootChildren = tree.rootNode.children.slice(0, 10)
+				logger.debug(
+					`  - Root children node types: ${rootChildren.map((c: Node) => c.type).join(", ")}`,
+					"CodeParser",
+				)
+			}
+
 			// Add comparison: Expected node types in query vs Found node types in tree
 			if (language.query && language.query.captureNames && tree && tree.rootNode) {
 				const expectedNodeTypes = language.query.captureNames
@@ -696,8 +857,26 @@ export class CodeParser implements ICodeParser {
 				collectActualTypes(tree.rootNode)
 				const actualNodeTypesList = Array.from(actualNodeTypes).sort()
 
+				// Check if query capture names match any AST node types
+				const captureNames = language.query.captureNames || []
+				const matchingTypes = captureNames.filter(
+					(name: string) => actualNodeTypes.has(name) || actualNodeTypes.has(name.replace("@", "")),
+				)
+
 				logger.debug(`  - Expected node types in query: [${expectedNodeTypes}]`, "CodeParser")
 				logger.debug(`  - Found node types in tree: [${actualNodeTypesList.join(", ")}]`, "CodeParser")
+				logger.debug(
+					`  - Query capture names matching AST node types: [${matchingTypes.join(", ")}]`,
+					"CodeParser",
+				)
+
+				// Add suggestion for comprehensive query update
+				if (querySource === "comprehensive" && matchingTypes.length === 0) {
+					logger.debug(
+						`  - Suggestion: Consider updating comprehensive query in queries/${ext}.ts if this is valid code`,
+						"CodeParser",
+					)
+				}
 			}
 
 			// Query pattern analysis
@@ -960,13 +1139,26 @@ export class CodeParser implements ICodeParser {
 				`Applying fallback chunking for ${filePath} due to empty captures (content length: ${content.length}, threshold: ${MIN_BLOCK_CHARS})`,
 				"CodeParser",
 			)
-			this.metricsCollector?.recordParserMetric(ext, "fallback")
+			this.metricsCollector?.recordParserMetric(normalizedExt, "fallback")
+			const querySource = language.querySource || "unknown"
+			const reason = "zeroCaptures"
+			this.metricsCollector?.recordParserMetric(
+				normalizedExt,
+				"fallbackChunkingTrigger",
+				1,
+				undefined,
+				undefined,
+				undefined,
+				reason,
+			)
 			const fallbackResults = this._performFallbackChunking(
 				filePath,
 				content,
 				fileHash,
 				seenSegmentHashes,
 				fileImports,
+				"zero captures",
+				querySource,
 			)
 			results.push(...fallbackResults)
 		}
@@ -1218,22 +1410,35 @@ export class CodeParser implements ICodeParser {
 		fileHash: string,
 		seenSegmentHashes: Set<string>,
 		imports?: ImportInfo[],
+		fallbackReason?: string,
+		querySource?: string,
 	): CodeBlock[] {
 		const ext = path.extname(filePath).slice(1).toLowerCase()
 
 		// Diagnostics for why fallback was triggered
 		logger.debug(`Starting fallback chunking for ${filePath}`, "CodeParser")
 
-		// Log if it's due to empty captures
-		const isDueToEmptyCaptures = true // This method is called when captures are empty
-		if (isDueToEmptyCaptures) {
-			logger.debug(`Fallback reason: Empty query captures`, "CodeParser")
-		}
+		// Log the fallback reason with enhanced information
+		if (fallbackReason) {
+			logger.debug(`Fallback reason: ${fallbackReason}`, "CodeParser")
+			if (querySource) {
+				logger.debug(`Query used: ${querySource}`, "CodeParser")
+				if (fallbackReason.includes("zero captures")) {
+					logger.debug(`Suggestion: Check query patterns for ${ext} language`, "CodeParser")
+				}
+			}
+		} else {
+			// Log if it's due to empty captures (backward compatibility)
+			const isDueToEmptyCaptures = true // This method is called when captures are empty
+			if (isDueToEmptyCaptures) {
+				logger.debug(`Fallback reason: Empty query captures`, "CodeParser")
+			}
 
-		// Log if it's due to unsupported extension
-		const isUnsupportedExtension = shouldUseFallbackChunking(`.${ext}`)
-		if (isUnsupportedExtension) {
-			logger.debug(`Fallback reason: Unsupported extension ${ext}`, "CodeParser")
+			// Log if it's due to unsupported extension
+			const isUnsupportedExtension = shouldUseFallbackChunking(`.${ext}`)
+			if (isUnsupportedExtension) {
+				logger.debug(`Fallback reason: Unsupported extension ${ext}`, "CodeParser")
+			}
 		}
 
 		// Log content details and expected chunk count

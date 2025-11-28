@@ -236,6 +236,7 @@ export class CodeIndexServiceFactory {
 	public createGraphIndexer(
 		neo4jService?: INeo4jService,
 		context?: vscode.ExtensionContext,
+		metricsCollector?: MetricsCollector,
 	): IGraphIndexer | undefined {
 		if (!neo4jService || !this.configManager.isNeo4jEnabled) {
 			this.log.info("[ServiceFactory] GraphIndexer NOT created - Neo4j is disabled or service unavailable")
@@ -251,7 +252,7 @@ export class CodeIndexServiceFactory {
 			this.log.info("[ServiceFactory] GraphIndexer created WITH error logger")
 		}
 
-		return new GraphIndexer(neo4jService, errorLogger, this.log)
+		return new GraphIndexer(neo4jService, errorLogger, this.log, true, metricsCollector)
 	}
 
 	/**
@@ -380,7 +381,7 @@ export class CodeIndexServiceFactory {
 
 		// Create Neo4j service and graph indexer if enabled
 		const neo4jService = this.createNeo4jService()
-		const graphIndexer = this.createGraphIndexer(neo4jService, context)
+		const graphIndexer = this.createGraphIndexer(neo4jService, context, metricsCollector)
 
 		const scanner = this.createDirectoryScanner(
 			embedder,

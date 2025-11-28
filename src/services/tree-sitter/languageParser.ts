@@ -6,6 +6,7 @@ import { logger } from "../shared/logger"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { MetricsCollector } from "../code-index/utils/metrics-collector"
+import * as queries from "./queries"
 
 const TROUBLESHOOTING_URL = "https://github.com/RooCline/Roo-Cline/blob/main/docs/TROUBLESHOOTING.md#wasm-files"
 
@@ -13,6 +14,8 @@ export interface LanguageParser {
 	parser: any
 	query: any
 	language: any
+	querySource?: "comprehensive" | "hardcoded" | "fallback" | "none"
+	queryPatternCount?: number
 }
 
 // Type for indexed collection of language parsers
@@ -26,6 +29,58 @@ let languageParserMap: { [key: string]: LanguageParser } = {}
 function getStrictWasmLoading(): boolean {
 	const config = vscode.workspace.getConfiguration("roo-code")
 	return config.get("treeSitterStrictWasmLoading", false)
+}
+
+function getComprehensiveQuery(languageName: string): string | null {
+	// Map language names to query exports
+	const languageToQueryMap: { [key: string]: string } = {
+		typescript: "typescriptQuery",
+		javascript: "javascriptQuery",
+		tsx: "tsxQuery",
+		python: "pythonQuery",
+		rust: "rustQuery",
+		go: "goQuery",
+		cpp: "cppQuery",
+		c: "cQuery",
+		c_sharp: "csharpQuery",
+		ruby: "rubyQuery",
+		java: "javaQuery",
+		php: "phpQuery",
+		swift: "swiftQuery",
+		kotlin: "kotlinQuery",
+		css: "cssQuery",
+		html: "htmlQuery",
+		ocaml: "ocamlQuery",
+		scala: "scalaQuery",
+		solidity: "solidityQuery",
+		toml: "tomlQuery",
+		yaml: "yamlQuery",
+		vue: "vueQuery",
+		lua: "luaQuery",
+		systemrdl: "systemrdlQuery",
+		tlaplus: "tlaPlusQuery",
+		zig: "zigQuery",
+		embedded_template: "embeddedTemplateQuery",
+		elisp: "elispQuery",
+		elixir: "elixirQuery",
+		xml: "xmlQuery",
+	}
+
+	// Handle special cases
+	const queryKey = languageToQueryMap[languageName]
+	if (!queryKey) {
+		logger.debug(`No comprehensive query mapping found for language: ${languageName}`, "LanguageParser")
+		return null
+	}
+
+	// Check if the query exists in the queries module
+	if (queryKey in queries) {
+		logger.debug(`Found comprehensive query for ${languageName}: ${queryKey}`, "LanguageParser")
+		return (queries as any)[queryKey]
+	}
+
+	logger.debug(`Comprehensive query not found for language: ${languageName}`, "LanguageParser")
+	return null
 }
 
 async function loadLanguage(langName: string, sourceDirectory?: string, metricsCollector?: MetricsCollector) {
@@ -328,209 +383,330 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 			const parser = new Parser()
 			parser.setLanguage(language)
 
-			// Create basic query for each language
+			// Create query for each language - first try comprehensive query, then fallback to hardcoded
 			let query
+			let querySource: "comprehensive" | "hardcoded" | "fallback" | "none" = "unknown" as any
+			let queryPatternCount = 0
+			let captureNames: string[] = []
+
 			try {
-				switch (ext) {
-					case "json":
-						query = language.query("(object (_) @pair)")
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "ts":
-					case "tsx":
-						query = language.query(`
-							(function_declaration name: (identifier) @function-name)
-							(class_declaration name: (identifier) @class-name)
-							(interface_declaration name: (identifier) @interface-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "py":
-						query = language.query(`
-							(function_definition name: (identifier) @function-name)
-							(class_definition name: (identifier) @class-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "rs":
-						query = language.query(`
-							(function_item name: (identifier) @function-name)
-							(struct_item name: (type_identifier) @struct-name)
-							(enum_item name: (type_identifier) @enum-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "go":
-						query = language.query(`
-							(function_declaration name: (identifier) @function-name)
-							(struct_type name: (type_identifier) @struct-name)
-							(interface_type name: (type_identifier) @interface-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "cpp":
-					case "hpp":
-						query = language.query(`
-							(function_definition name: (identifier) @function-name)
-							(class_specifier name: (type_identifier) @class-name)
-							(struct_specifier name: (type_identifier) @struct-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "c":
-					case "h":
-						query = language.query(`
-							(function_definition name: (identifier) @function-name)
-							(struct_specifier name: (type_identifier) @struct-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "cs":
-						query = language.query(`
-							(method_declaration name: (identifier) @method-name)
-							(class_declaration name: (identifier) @class-name)
-							(interface_declaration name: (identifier) @interface-name)
-						`)
-						logger.debug(`Created query for ${parserKey} (${ext})`, "LanguageParser")
-						break
-					case "rb":
-						query = language.query(`
-							(method name: (identifier) @method-name)
-							(class name: (constant) @class-name)
-							(module name: (constant) @module-name)
-						`)
-						break
-					case "java":
-						query = language.query(`
-							(method_declaration name: (identifier) @method-name)
-							(class_declaration name: (identifier) @class-name)
-							(interface_declaration name: (identifier) @interface-name)
-						`)
-						break
-					case "php":
-						query = language.query(`
-							(function_definition name: (name) @function-name)
-							(class_declaration name: (name) @class-name)
-							(interface_declaration name: (name) @interface-name)
-						`)
-						break
-					case "swift":
-						query = language.query(`
-							(function_declaration name: (identifier) @function-name)
-							(class_declaration name: (identifier) @class-name)
-							(protocol_declaration name: (identifier) @protocol-name)
-						`)
-						break
-					case "kt":
-					case "kts":
-						query = language.query(`
-							(function_declaration name: (simple_identifier) @function-name)
-							(class_declaration name: (simple_identifier) @class-name)
-							(interface_declaration name: (simple_identifier) @interface-name)
-						`)
-						break
-					case "css":
-						query = language.query(`
-							(rule_set selector: (selectors) @selector)
-							(at_rule) @at-rule
-						`)
-						break
-					case "html":
-						query = language.query(`
-							(element) @element
-							(attribute) @attribute
-						`)
-						break
-					case "ml":
-					case "mli":
-						query = language.query(`
-							(value_definition name: (lower_case_identifier) @function-name)
-							(type_definition name: (type_constructor) @type-name)
-						`)
-						break
-					case "scala":
-						query = language.query(`
-							(function_definition name: (identifier) @function-name)
-							(class_definition name: (identifier) @class-name)
-							(trait_definition name: (identifier) @trait-name)
-						`)
-						break
-					case "sol":
-						query = language.query(`
-							(function_definition name: (identifier) @function-name)
-							(contract_definition name: (identifier) @contract-name)
-							(interface_definition name: (identifier) @interface-name)
-						`)
-						break
-					case "toml":
-						query = language.query(`
-							(pair key: (bare_key) @key)
-							(table (bare_key) @table-name)
-						`)
-						break
-					case "yaml":
-					case "yml":
-						query = language.query(`
-							(block_mapping_pair key: (flow_node) @key)
-							(block_node (block_mapping) @mapping)
-						`)
-						break
-					case "vue":
-						query = language.query(`
-							(element) @element
-							(start_tag (tag_name) @tag-name)
-						`)
-						break
-					case "lua":
-						query = language.query(`
-							(function_declaration name: (identifier) @function-name)
-							(local_variable_declaration (variable_list (identifier) @variable-name))
-						`)
-						break
-					case "rdl":
-						query = language.query(`
-							(signal_declaration name: (identifier) @signal-name)
-							(property_declaration name: (identifier) @property-name)
-						`)
-						break
-					case "tla":
-						query = language.query(`
-							(definition name: (identifier) @definition-name)
-							(module_definition name: (identifier) @module-name)
-						`)
-						break
-					case "zig":
-						query = language.query(`
-							(fn_proto name: (identifier) @function-name)
-							(struct_decl name: (identifier) @struct-name)
-						`)
-						break
-					case "erb":
-						query = language.query(`
-							(erb_directive) @directive
-							(erb_statement) @statement
-							(erb_expression) @expression
-						`)
-						break
-					case "el":
-						query = language.query(`
-							(defun name: (symbol) @function-name)
-							(defvar name: (symbol) @variable-name)
-						`)
-						break
-					case "exs":
-						query = language.query(`
-							(function name: (identifier) @function-name)
-							(defmodule name: (alias) @module-name)
-						`)
-						break
-					default:
-						// Create a generic query for unknown languages
-						query = language.query(`
-							(identifier) @identifier
-							(string_literal) @string
-							(comment) @comment
-						`)
+				// First, try to get comprehensive query
+				const comprehensiveQuery = getComprehensiveQuery(parserKey)
+				if (comprehensiveQuery) {
+					try {
+						query = language.query(comprehensiveQuery)
+						querySource = "comprehensive"
+						queryPatternCount = query.patterns.length
+						captureNames = query.captureNames || []
+
+						logger.debug(
+							`Created comprehensive query for ${parserKey} (${ext}) with ${queryPatternCount} patterns and ${captureNames.length} captures: [${captureNames.join(", ")}]`,
+							"LanguageParser",
+						)
+
+						// Record metrics for comprehensive query usage
+						if (metricsCollector) {
+							metricsCollector.recordParserMetric(parserKey, "loadSuccess", 1)
+							metricsCollector.recordParserMetric(parserKey, "querySource_comprehensive", 1)
+						}
+
+						// Capture telemetry for comprehensive query usage
+						try {
+							TelemetryService.instance.captureEvent(TelemetryEventName.WASM_PARSE_SUCCESS, {
+								language: parserKey,
+								querySource: "comprehensive",
+								patternCount: queryPatternCount,
+								captureCount: captureNames.length,
+							})
+						} catch (e) {
+							logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+						}
+					} catch (comprehensiveError) {
+						logger.warn(
+							`Failed to create comprehensive query for ${parserKey}, falling back to hardcoded: ${comprehensiveError instanceof Error ? comprehensiveError.message : String(comprehensiveError)}`,
+							"LanguageParser",
+						)
+						query = null
+					}
+				}
+
+				// If comprehensive query failed or doesn't exist, use hardcoded queries
+				if (!query) {
+					querySource = "hardcoded"
+					switch (ext) {
+						case "json":
+							query = language.query("(object (_) @pair)")
+							queryPatternCount = 1
+							captureNames = ["pair"]
+							break
+						case "ts":
+						case "tsx":
+							query = language.query(`
+								(function_declaration name: (identifier) @function-name)
+								(class_declaration name: (identifier) @class-name)
+								(interface_declaration name: (identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "interface-name"]
+							break
+						case "py":
+							query = language.query(`
+								(function_definition name: (identifier) @function-name)
+								(class_definition name: (identifier) @class-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "class-name"]
+							break
+						case "rs":
+							query = language.query(`
+								(function_item name: (identifier) @function-name)
+								(struct_item name: (type_identifier) @struct-name)
+								(enum_item name: (type_identifier) @enum-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "struct-name", "enum-name"]
+							break
+						case "go":
+							query = language.query(`
+								(function_declaration name: (identifier) @function-name)
+								(struct_type name: (type_identifier) @struct-name)
+								(interface_type name: (type_identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "struct-name", "interface-name"]
+							break
+						case "cpp":
+						case "hpp":
+							query = language.query(`
+								(function_definition name: (identifier) @function-name)
+								(class_specifier name: (type_identifier) @class-name)
+								(struct_specifier name: (type_identifier) @struct-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "struct-name"]
+							break
+						case "c":
+						case "h":
+							query = language.query(`
+								(function_definition name: (identifier) @function-name)
+								(struct_specifier name: (type_identifier) @struct-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "struct-name"]
+							break
+						case "cs":
+							query = language.query(`
+								(method_declaration name: (identifier) @method-name)
+								(class_declaration name: (identifier) @class-name)
+								(interface_declaration name: (identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["method-name", "class-name", "interface-name"]
+							break
+						case "rb":
+							query = language.query(`
+								(method name: (identifier) @method-name)
+								(class name: (constant) @class-name)
+								(module name: (constant) @module-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["method-name", "class-name", "module-name"]
+							break
+						case "java":
+							query = language.query(`
+								(method_declaration name: (identifier) @method-name)
+								(class_declaration name: (identifier) @class-name)
+								(interface_declaration name: (identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["method-name", "class-name", "interface-name"]
+							break
+						case "php":
+							query = language.query(`
+								(function_definition name: (name) @function-name)
+								(class_declaration name: (name) @class-name)
+								(interface_declaration name: (name) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "interface-name"]
+							break
+						case "swift":
+							query = language.query(`
+								(function_declaration name: (identifier) @function-name)
+								(class_declaration name: (identifier) @class-name)
+								(protocol_declaration name: (identifier) @protocol-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "protocol-name"]
+							break
+						case "kt":
+						case "kts":
+							query = language.query(`
+								(function_declaration name: (simple_identifier) @function-name)
+								(class_declaration name: (simple_identifier) @class-name)
+								(interface_declaration name: (simple_identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "interface-name"]
+							break
+						case "css":
+							query = language.query(`
+								(rule_set selector: (selectors) @selector)
+								(at_rule) @at-rule
+							`)
+							queryPatternCount = 2
+							captureNames = ["selector", "at-rule"]
+							break
+						case "html":
+							query = language.query(`
+								(element) @element
+								(attribute) @attribute
+							`)
+							queryPatternCount = 2
+							captureNames = ["element", "attribute"]
+							break
+						case "ml":
+						case "mli":
+							query = language.query(`
+								(value_definition name: (lower_case_identifier) @function-name)
+								(type_definition name: (type_constructor) @type-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "type-name"]
+							break
+						case "scala":
+							query = language.query(`
+								(function_definition name: (identifier) @function-name)
+								(class_definition name: (identifier) @class-name)
+								(trait_definition name: (identifier) @trait-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "class-name", "trait-name"]
+							break
+						case "sol":
+							query = language.query(`
+								(function_definition name: (identifier) @function-name)
+								(contract_definition name: (identifier) @contract-name)
+								(interface_definition name: (identifier) @interface-name)
+							`)
+							queryPatternCount = 3
+							captureNames = ["function-name", "contract-name", "interface-name"]
+							break
+						case "toml":
+							query = language.query(`
+								(pair key: (bare_key) @key)
+								(table (bare_key) @table-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["key", "table-name"]
+							break
+						case "yaml":
+						case "yml":
+							query = language.query(`
+								(block_mapping_pair key: (flow_node) @key)
+								(block_node (block_mapping) @mapping)
+							`)
+							queryPatternCount = 2
+							captureNames = ["key", "mapping"]
+							break
+						case "vue":
+							query = language.query(`
+								(element) @element
+								(start_tag (tag_name) @tag-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["element", "tag-name"]
+							break
+						case "lua":
+							query = language.query(`
+								(function_declaration name: (identifier) @function-name)
+								(local_variable_declaration (variable_list (identifier) @variable-name))
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "variable-name"]
+							break
+						case "rdl":
+							query = language.query(`
+								(signal_declaration name: (identifier) @signal-name)
+								(property_declaration name: (identifier) @property-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["signal-name", "property-name"]
+							break
+						case "tla":
+							query = language.query(`
+								(definition name: (identifier) @definition-name)
+								(module_definition name: (identifier) @module-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["definition-name", "module-name"]
+							break
+						case "zig":
+							query = language.query(`
+								(fn_proto name: (identifier) @function-name)
+								(struct_decl name: (identifier) @struct-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "struct-name"]
+							break
+						case "erb":
+							query = language.query(`
+								(erb_directive) @directive
+								(erb_statement) @statement
+								(erb_expression) @expression
+							`)
+							queryPatternCount = 3
+							captureNames = ["directive", "statement", "expression"]
+							break
+						case "el":
+							query = language.query(`
+								(defun name: (symbol) @function-name)
+								(defvar name: (symbol) @variable-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "variable-name"]
+							break
+						case "exs":
+							query = language.query(`
+								(function name: (identifier) @function-name)
+								(defmodule name: (alias) @module-name)
+							`)
+							queryPatternCount = 2
+							captureNames = ["function-name", "module-name"]
+							break
+						default:
+							// Create a generic query for unknown languages
+							query = language.query(`
+								(identifier) @identifier
+								(string_literal) @string
+								(comment) @comment
+							`)
+							queryPatternCount = 3
+							captureNames = ["identifier", "string", "comment"]
+					}
+
+					logger.debug(
+						`Created hardcoded query for ${parserKey} (${ext}) with ${queryPatternCount} patterns and ${captureNames.length} captures: [${captureNames.join(", ")}]`,
+						"LanguageParser",
+					)
+
+					// Record metrics for hardcoded query usage
+					if (metricsCollector) {
+						metricsCollector.recordParserMetric(parserKey, "loadSuccess", 1)
+						metricsCollector.recordParserMetric(parserKey, "querySource_hardcoded", 1)
+					}
+
+					// Capture telemetry for hardcoded query usage
+					try {
+						TelemetryService.instance.captureEvent(TelemetryEventName.WASM_PARSE_SUCCESS, {
+							language: parserKey,
+							querySource: "hardcoded",
+							patternCount: queryPatternCount,
+							captureCount: captureNames.length,
+						})
+					} catch (e) {
+						logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
+					}
 				}
 			} catch (queryError) {
 				logger.warn(
@@ -540,6 +716,14 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 				// Create a minimal fallback query
 				try {
 					query = language.query(`(identifier) @identifier`)
+					querySource = "fallback"
+					queryPatternCount = 1
+					captureNames = ["identifier"]
+
+					// Record metrics for fallback query usage
+					if (metricsCollector) {
+						metricsCollector.recordParserMetric(parserKey, "fallback", 1)
+					}
 				} catch (fallbackError) {
 					logger.warn(
 						`Failed to create fallback query for ${parserKey}: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
@@ -547,12 +731,18 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 					)
 					// Continue without a query
 					query = null
+					querySource = "none"
+					queryPatternCount = 0
+					captureNames = []
 				}
 			}
 
 			parser.setLanguage(language)
-			parsers[parserKey] = { parser, query, language }
-			languageParserMap[parserKey] = { parser, query, language }
+			// Create a single LanguageParser object with all properties
+			const languageParser: LanguageParser = { parser, query, language, querySource, queryPatternCount }
+			// Assign the same object to both collections to ensure consistency
+			parsers[parserKey] = languageParser
+			languageParserMap[parserKey] = languageParser
 
 			// Test the parser on a simple snippet to ensure it works
 			if (query && query !== null) {
@@ -587,23 +777,45 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 							metricsCollector.recordParserMetric(parserKey, "parseSuccess")
 						}
 
-						// Capture telemetry for parse success
+						// Capture telemetry for parse success with query source information
 						try {
-							TelemetryService.instance.captureWasmParseSuccess(parserKey, captures.length)
+							TelemetryService.instance.captureEvent(TelemetryEventName.WASM_PARSE_SUCCESS, {
+								language: parserKey,
+								querySource: querySource,
+								patternCount: queryPatternCount,
+								captureCount: captureNames.length,
+								testCaptures: captures.length,
+							})
 						} catch (e) {
 							logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
 						}
 
+						// Enhanced logging with query source information
 						logger.debug(
-							`Parser test successful for ${parserKey} with ${captures.length} captures`,
+							`Parser test successful for ${parserKey} - Query source: ${querySource}, Patterns: ${queryPatternCount}, Captures: ${captureNames.length}, Test captures: ${captures.length}`,
 							"LanguageParser",
 						)
-						// If there are no captures, it might be fine depending on the test code
+
+						// Warning for zero captures with comprehensive query
+						if (querySource === "comprehensive" && captures.length === 0) {
+							logger.warn(
+								`Comprehensive query for ${parserKey} produced zero captures on test code. This may indicate an issue with the query or test code.`,
+								"LanguageParser",
+							)
+						}
+
+						// Log capture names for debugging
+						if (captureNames.length > 0) {
+							logger.debug(
+								`Query capture names for ${parserKey}: [${captureNames.join(", ")}]`,
+								"LanguageParser",
+							)
+						}
 					}
 				} catch (testError) {
 					const errorMessage = testError instanceof Error ? testError.message : String(testError)
 					logger.warn(
-						`Parser test failed for ${parserKey}, but continuing: ${errorMessage}`,
+						`Parser test failed for ${parserKey} (Query source: ${querySource}), but continuing: ${errorMessage}`,
 						"LanguageParser",
 					)
 
@@ -612,9 +824,13 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 						metricsCollector.recordParserMetric(parserKey, "parseFailed", 1, errorMessage)
 					}
 
-					// Capture telemetry for parse failure
+					// Capture telemetry for parse failure with query source information
 					try {
-						TelemetryService.instance.captureWasmParseFailure(parserKey, errorMessage)
+						TelemetryService.instance.captureEvent(TelemetryEventName.WASM_PARSE_FAILURE, {
+							language: parserKey,
+							querySource: querySource,
+							error: errorMessage,
+						})
 					} catch (e) {
 						logger.debug(`Telemetry capture failed: ${e}`, "LanguageParser")
 					}

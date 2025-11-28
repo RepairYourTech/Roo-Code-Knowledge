@@ -16,6 +16,7 @@ vi.mock("vscode", () => ({
 vi.mock("fs", () => ({
 	existsSync: vi.fn(),
 	readdirSync: vi.fn(),
+	statSync: vi.fn(),
 }))
 
 // Mock logger
@@ -45,9 +46,33 @@ describe("getWasmDirectory", () => {
 	it("should return cached directory if available", () => {
 		// Setup cache
 		const firstResult = "cached/path"
+		const wasmDir = path.join("/test/path", "src", "wasms", "tree-sitter")
+		const criticalFiles = [
+			"tree-sitter.wasm",
+			"tree-sitter-javascript.wasm",
+			"tree-sitter-typescript.wasm",
+			"tree-sitter-python.wasm",
+		]
+
 		// We can't easily set the private variable, so we'll simulate a successful run first
 		mockGetExtension.mockReturnValue({ extensionPath: "/test/path" })
-		mockExistsSync.mockReturnValue(true) // tree-sitter.wasm exists
+		mockExistsSync.mockImplementation((p: string) => {
+			return criticalFiles.some((file) => p === path.join(wasmDir, file))
+		})
+
+		const mockStatSync = vi.mocked(fs.statSync)
+		mockStatSync.mockImplementation((p: any) => {
+			// Directory check
+			if (p === wasmDir) {
+				return { isDirectory: () => true, isFile: () => false } as any
+			}
+			// File checks
+			const filePath = p as string
+			if (criticalFiles.some((file) => filePath === path.join(wasmDir, file))) {
+				return { isFile: () => true, isDirectory: () => false, size: 2048 } as any
+			}
+			throw new Error("Path not found")
+		})
 
 		const result1 = getWasmDirectory()
 		expect(result1).toContain("/test/path")
@@ -59,30 +84,160 @@ describe("getWasmDirectory", () => {
 		expect(mockGetExtension).not.toHaveBeenCalled()
 	})
 
-	it("should find extension and return standard path if tree-sitter.wasm exists there", () => {
+	it("should prioritize src/wasms/tree-sitter over dist/services/tree-sitter", () => {
 		mockGetExtension.mockReturnValue({ extensionPath: "/extension/root" })
-		// Mock existence checks
+		const srcWasmDir = path.join("/extension/root", "src", "wasms", "tree-sitter")
+		const distServicesDir = path.join("/extension/root", "dist", "services", "tree-sitter")
+		const criticalFiles = [
+			"tree-sitter.wasm",
+			"tree-sitter-javascript.wasm",
+			"tree-sitter-typescript.wasm",
+			"tree-sitter-python.wasm",
+		]
+
+		// Mock both paths existing, but src/wasms should be chosen first
 		mockExistsSync.mockImplementation((p: string) => {
-			if (p === path.join("/extension/root", "dist", "services", "tree-sitter", "tree-sitter.wasm")) return true
-			return false
+			// Check if it's any critical file in either directory
+			return criticalFiles.some(
+				(file) => p === path.join(srcWasmDir, file) || p === path.join(distServicesDir, file),
+			)
+		})
+
+		const mockStatSync = vi.mocked(fs.statSync)
+		mockStatSync.mockImplementation((p: any) => {
+			// Directory checks
+			if (p === srcWasmDir || p === distServicesDir) {
+				return { isDirectory: () => true, isFile: () => false } as any
+			}
+			// File checks - all critical files in both directories are valid
+			const filePath = p as string
+			if (
+				criticalFiles.some(
+					(file) => filePath === path.join(srcWasmDir, file) || filePath === path.join(distServicesDir, file),
+				)
+			) {
+				return { isFile: () => true, isDirectory: () => false, size: 2048 } as any
+			}
+			throw new Error("Path not found")
 		})
 
 		const result = getWasmDirectory()
-		expect(result).toBe(path.join("/extension/root", "dist", "services", "tree-sitter"))
+		expect(result).toBe(srcWasmDir)
 	})
 
-	it("should fallback to dev path if standard path fails but dev path has wasm", () => {
+	it("should fallback to dist/services/tree-sitter if src/wasms/tree-sitter not found", () => {
 		mockGetExtension.mockReturnValue({ extensionPath: "/extension/root" })
-		// Mock existence checks
+		const srcWasmDir = path.join("/extension/root", "src", "wasms", "tree-sitter")
+		const distServicesDir = path.join("/extension/root", "dist", "services", "tree-sitter")
+		const criticalFiles = [
+			"tree-sitter.wasm",
+			"tree-sitter-javascript.wasm",
+			"tree-sitter-typescript.wasm",
+			"tree-sitter-python.wasm",
+		]
+
+		// Mock existence checks - only dist/services files exist
 		mockExistsSync.mockImplementation((p: string) => {
-			if (p === path.join("/extension/root", "dist", "services", "tree-sitter", "tree-sitter.wasm")) return false
-			if (p === path.join("/extension/root", "src", "dist", "services", "tree-sitter", "tree-sitter.wasm"))
-				return true
-			return false
+			return criticalFiles.some((file) => p === path.join(distServicesDir, file))
+		})
+
+		const mockStatSync = vi.mocked(fs.statSync)
+		mockStatSync.mockImplementation((p: any) => {
+			// src/wasms/tree-sitter directory does not exist
+			if (p === srcWasmDir) {
+				throw new Error("Directory not found")
+			}
+			// dist/services/tree-sitter directory exists
+			if (p === distServicesDir) {
+				return { isDirectory: () => true, isFile: () => false } as any
+			}
+			// Critical files in dist/services are valid
+			const filePath = p as string
+			if (criticalFiles.some((file) => filePath === path.join(distServicesDir, file))) {
+				return { isFile: () => true, isDirectory: () => false, size: 2048 } as any
+			}
+			throw new Error("Path not found")
 		})
 
 		const result = getWasmDirectory()
-		expect(result).toBe(path.join("/extension/root", "src", "dist", "services", "tree-sitter"))
+		expect(result).toBe(distServicesDir)
+	})
+
+	it("should fallback to src/dist/services/tree-sitter if both src/wasms and dist/services fail", () => {
+		mockGetExtension.mockReturnValue({ extensionPath: "/extension/root" })
+		const srcWasmDir = path.join("/extension/root", "src", "wasms", "tree-sitter")
+		const distServicesDir = path.join("/extension/root", "dist", "services", "tree-sitter")
+		const srcDistServicesDir = path.join("/extension/root", "src", "dist", "services", "tree-sitter")
+		const criticalFiles = [
+			"tree-sitter.wasm",
+			"tree-sitter-javascript.wasm",
+			"tree-sitter-typescript.wasm",
+			"tree-sitter-python.wasm",
+		]
+
+		// Mock existence checks - only src/dist/services files exist
+		mockExistsSync.mockImplementation((p: string) => {
+			return criticalFiles.some((file) => p === path.join(srcDistServicesDir, file))
+		})
+
+		const mockStatSync = vi.mocked(fs.statSync)
+		mockStatSync.mockImplementation((p: any) => {
+			// src/wasms/tree-sitter directory does not exist
+			if (p === srcWasmDir) {
+				throw new Error("Directory not found")
+			}
+			// dist/services/tree-sitter directory does not exist
+			if (p === distServicesDir) {
+				throw new Error("Directory not found")
+			}
+			// src/dist/services/tree-sitter directory exists
+			if (p === srcDistServicesDir) {
+				return { isDirectory: () => true, isFile: () => false } as any
+			}
+			// Critical files in src/dist/services are valid
+			const filePath = p as string
+			if (criticalFiles.some((file) => filePath === path.join(srcDistServicesDir, file))) {
+				return { isFile: () => true, isDirectory: () => false, size: 2048 } as any
+			}
+			throw new Error("Path not found")
+		})
+
+		const result = getWasmDirectory()
+		expect(result).toBe(srcDistServicesDir)
+	})
+
+	it("should validate src/wasms/tree-sitter with all critical files present", () => {
+		mockGetExtension.mockReturnValue({ extensionPath: "/extension/root" })
+		const wasmDir = path.join("/extension/root", "src", "wasms", "tree-sitter")
+		const criticalFiles = [
+			"tree-sitter.wasm",
+			"tree-sitter-javascript.wasm",
+			"tree-sitter-typescript.wasm",
+			"tree-sitter-python.wasm",
+		]
+
+		// Mock all critical files existing
+		mockExistsSync.mockImplementation((p: string) => {
+			return criticalFiles.some((file) => p === path.join(wasmDir, file))
+		})
+
+		const mockStatSync = vi.mocked(fs.statSync)
+		mockStatSync.mockImplementation((p: any) => {
+			// Directory check
+			if (p === wasmDir) {
+				return { isDirectory: () => true, isFile: () => false } as any
+			}
+			// Critical file checks - all must have size > 1024 to pass validateWasmDirectory
+			const filePath = p as string
+			if (criticalFiles.some((file) => filePath === path.join(wasmDir, file))) {
+				return { isFile: () => true, isDirectory: () => false, size: 2048 } as any
+			}
+			// Default for any other path
+			throw new Error("Path not found")
+		})
+
+		const result = getWasmDirectory()
+		expect(result).toBe(wasmDir)
 	})
 
 	it("should infer path from __dirname if vscode.extensions fails", () => {

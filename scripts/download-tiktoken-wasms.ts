@@ -5,13 +5,14 @@
  *
  * Purpose: Regenerate static WASM file bundled in src/wasms/tiktoken/
  *
- * Usage:
+ * Usage (for initial setup):
+ *   1. Run: pnpm setup-wasms-once (automated script that calls this)
+ *
+ * Usage (for manual regeneration):
  *   1. Run: pnpm regenerate-wasms (or tsx scripts/download-tiktoken-wasms.ts)
  *   2. Commit: git add src/wasms/tiktoken/tiktoken_bg.wasm && git commit -m "chore: update tiktoken WASM"
  *
- * Note: This script downloads directly to src/wasms/tiktoken/ as the canonical location.
- * After successful download, it also copies to node_modules/tiktoken for compatibility.
- * The build process uses the static WASM file from src/wasms/tiktoken/ for zero network dependency.
+ * Note: This script downloads directly to src/wasms/tiktoken/ as the canonical location. After successful download, it also copies to node_modules/tiktoken for compatibility. Normal builds load WASM from src/wasms/tiktoken/ (no downloads).
  */
 
 import * as fs from "fs"

@@ -35,8 +35,26 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 	if (wasmDirectoryCache && !isCacheDisabled) {
 		const cacheAge = Date.now() - wasmDirectoryCache.timestamp
 		if (cacheAge < CACHE_EXPIRY_MS) {
+			// Determine path type for logging (path-separator agnostic)
+			const srcWasmPath = path.join("src", "wasms", "tree-sitter")
+			const distServicesPath = path.join("dist", "services", "tree-sitter")
+			const normalizedCachePath = path.normalize(wasmDirectoryCache.path)
+
+			const isSrcWasmPath =
+				path.relative(normalizedCachePath, srcWasmPath) === "" ||
+				!path.relative(srcWasmPath, normalizedCachePath).startsWith("..")
+			const isDistServicesPath =
+				path.relative(normalizedCachePath, distServicesPath) === "" ||
+				!path.relative(distServicesPath, normalizedCachePath).startsWith("..")
+
+			const pathType = isSrcWasmPath
+				? "Runtime packaged source (priority #1)"
+				: isDistServicesPath
+					? "Legacy/compat (priority #2)"
+					: "Other path"
+
 			logger.debug(
-				`[getWasmDirectory] Using cached WASM directory: ${wasmDirectoryCache.path} (age: ${Math.round(cacheAge / 1000)}s)`,
+				`[getWasmDirectory] Using cached WASM directory: ${wasmDirectoryCache.path} (${pathType}, age: ${Math.round(cacheAge / 1000)}s)`,
 				"WasmDirectory",
 			)
 			return wasmDirectoryCache.path
@@ -181,15 +199,15 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 
 	// Define candidate paths in order of preference
 	// Resolution order:
-	// 1. Production builds (dist/services/tree-sitter) - highest priority for packaged extension
-	// 2. Static bundled source (src/wasms/tree-sitter) - for direct source access
+	// 1. Runtime packaged source (src/wasms/tree-sitter) - highest priority for runtime packaged WASM files
+	// 2. Legacy/compat (dist/services/tree-sitter) - for backward compatibility with existing installations
 	// 3. Monorepo development builds (src/dist/services/tree-sitter)
 	// 4. Alternative build outputs (out/services/tree-sitter)
 	// 5. Direct path (services/tree-sitter)
 	// 6. Source path for development (src/services/tree-sitter) - fallback for dev environments
 	const candidatePaths = [
-		path.join(extensionPath, "dist", "services", "tree-sitter"), // Production (highest priority)
-		path.join(extensionPath, "src", "wasms", "tree-sitter"), // Static bundled source (NEW - for direct source access)
+		path.join(extensionPath, "src", "wasms", "tree-sitter"), // Runtime packaged source (NEW - highest priority)
+		path.join(extensionPath, "dist", "services", "tree-sitter"), // Legacy/compat (moved to #2)
 		path.join(extensionPath, "src", "dist", "services", "tree-sitter"), // Monorepo dev
 		path.join(extensionPath, "out", "services", "tree-sitter"), // Alternative build output
 		path.join(extensionPath, "services", "tree-sitter"), // Direct path
@@ -212,7 +230,32 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 		if (validationResult.isValid) {
 			selectedPath = candidatePath
 			selectedValidationResult = validationResult
-			logger.info(`[getWasmDirectory] Found valid WASM directory at: ${candidatePath}`, "WasmDirectory")
+			// Determine path type for logging (path-separator agnostic)
+			const pathIndex = candidatePaths.indexOf(candidatePath) + 1
+			const srcWasmPath = path.join("src", "wasms", "tree-sitter")
+			const distServicesPath = path.join("dist", "services", "tree-sitter")
+			const normalizedCandidatePath = path.normalize(candidatePath)
+
+			const isSrcWasmPath =
+				path.relative(normalizedCandidatePath, srcWasmPath) === "" ||
+				!path.relative(srcWasmPath, normalizedCandidatePath).startsWith("..")
+			const isDistServicesPath =
+				path.relative(normalizedCandidatePath, distServicesPath) === "" ||
+				!path.relative(distServicesPath, normalizedCandidatePath).startsWith("..")
+
+			let pathType = ""
+			if (isSrcWasmPath) {
+				pathType = " (Runtime packaged source - priority #1)"
+			} else if (isDistServicesPath) {
+				pathType = " (Legacy/compat - priority #2)"
+			} else {
+				pathType = ` (priority #${pathIndex})`
+			}
+
+			logger.info(
+				`[getWasmDirectory] Found valid WASM directory at: ${candidatePath}${pathType}`,
+				"WasmDirectory",
+			)
 			logger.debug(`[getWasmDirectory] Found files: ${validationResult.foundFiles.join(", ")}`, "WasmDirectory")
 			break
 		} else {
@@ -250,13 +293,15 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 		}
 
 		// If still no path found, use the first candidate path
-		if (!selectedPath) {
-			selectedPath = candidatePaths[0]
-			selectedValidationResult = validateWasmDirectory(selectedPath)
-			logger.error(
-				`[getWasmDirectory] No existing directory found, using default path: ${selectedPath}`,
-				"WasmDirectory",
-			)
+		if (!selectedPath && candidatePaths.length > 0) {
+			selectedPath = candidatePaths[0] || null
+			if (selectedPath) {
+				selectedValidationResult = validateWasmDirectory(selectedPath)
+				logger.error(
+					`[getWasmDirectory] No existing directory found, using default path: ${selectedPath}`,
+					"WasmDirectory",
+				)
+			}
 		}
 
 		// Enhanced error logging with validation details
@@ -273,15 +318,15 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 		}
 		logger.error("[getWasmDirectory] To fix this issue:", "WasmDirectory")
 		logger.error(
-			"  1. Verify WASM files exist in src/wasms/tree-sitter/ (should be committed to repo)",
+			"  1. Verify WASM files exist in src/wasms/tree-sitter/ (primary location - should be committed to repo)",
 			"WasmDirectory",
 		)
 		logger.error(
-			"  2. If missing, run 'pnpm regenerate-wasms' to download and copy to static directory",
+			"  2. If missing, run 'pnpm regenerate-wasms' to download and copy to primary static directory",
 			"WasmDirectory",
 		)
 		logger.error(
-			"  3. Or run command 'Roo-Cline: Download Tree-sitter WASM Files' (downloads to dist, temporary)",
+			"  3. Or run command 'Roo-Cline: Download Tree-sitter WASM Files' (downloads to dist as fallback)",
 			"WasmDirectory",
 		)
 		logger.error(`  4. See troubleshooting guide: ${TROUBLESHOOTING_URL}`, "WasmDirectory")
@@ -289,7 +334,7 @@ export function getWasmDirectory(forceRevalidate: boolean = false): string {
 		// Run diagnostic integration
 		try {
 			logger.debug("[getWasmDirectory] Running comprehensive WASM diagnostics...", "WasmDirectory")
-			const diagnosticReport = diagnoseWasmSetup(selectedPath)
+			const diagnosticReport = diagnoseWasmSetup(selectedPath || undefined)
 			const formattedReport = formatDiagnosticReport(diagnosticReport)
 			logger.debug(`[getWasmDirectory] Diagnostic report:\n${formattedReport}`, "WasmDirectory")
 		} catch (e) {

@@ -108,6 +108,43 @@ pnpm install
 
 3. **Debugging:** Open with VS Code (`F5`).
 
+### WASM File Verification
+
+Roo Code uses WebAssembly (WASM) files for syntax parsing via tree-sitter. When working with WASM-related code or packaging configuration, you should verify the WASM setup:
+
+#### Running WASM Verification
+
+```bash
+# Verify WASM files are properly configured and can be loaded
+pnpm verify:wasms
+```
+
+This script:
+
+- Initializes `web-tree-sitter` in a controlled environment
+- Calls the real `getWasmDirectory()` function to locate WASM files
+- Attempts to load core grammars (TypeScript, JavaScript, Python) from the resolved directory
+- Validates that each language can parse basic code snippets
+- Exits with non-zero status if any step fails
+
+#### When to Run Verification
+
+Run this verification when:
+
+- Modifying WASM-related code in `src/services/tree-sitter/`
+- Updating packaging configuration that affects WASM file locations
+- After running `pnpm regenerate-wasms` or downloading new WASM files
+- Before submitting PRs that touch tree-sitter functionality
+- As part of your local testing workflow
+
+#### Troubleshooting WASM Issues
+
+If verification fails:
+
+1. Ensure WASM files exist: `pnpm check-wasms`
+2. Regenerate WASM files: `pnpm regenerate-wasms`
+3. Check the troubleshooting guide: [TROUBLESHOOTING.md](./TROUBLESHOOTING.md#wasm-files)
+
 ### Writing Code Guidelines
 
 - One focused PR per feature or fix.

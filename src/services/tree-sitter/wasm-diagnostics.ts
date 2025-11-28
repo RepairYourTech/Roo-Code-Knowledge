@@ -136,10 +136,18 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 	// If no directory provided, try to resolve it using a lightweight mechanism
 	if (!wasmDirectory) {
 		// Try to infer the directory from common locations without calling getWasmDirectory
+		// Try to infer the directory from common locations in priority order:
+		// 1. Runtime packaged source (src/wasms/tree-sitter) - primary for VSIX
+		// 2. Legacy build output (dist/services/tree-sitter) - backward compat
+		// 3. Monorepo development builds (src/dist/services/tree-sitter)
+		// 4. Alternative build outputs (out/services/tree-sitter)
+		// 5. Direct path (services/tree-sitter)
 		const possiblePaths = [
-			path.join(__dirname, "..", "..", "dist", "services", "tree-sitter"),
-			path.join(__dirname, "..", "..", "out", "services", "tree-sitter"),
-			path.join(__dirname, "..", "..", "services", "tree-sitter"),
+			path.join(__dirname, "..", "..", "src", "wasms", "tree-sitter"), // Runtime packaged source
+			path.join(__dirname, "..", "..", "dist", "services", "tree-sitter"), // Legacy build output
+			path.join(__dirname, "..", "..", "src", "dist", "services", "tree-sitter"), // Monorepo dev
+			path.join(__dirname, "..", "..", "out", "services", "tree-sitter"), // Alternative build
+			path.join(__dirname, "..", "..", "services", "tree-sitter"), // Direct path
 		]
 
 		// Find the first existing directory
@@ -162,7 +170,7 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 
 	// Check if WASM directory exists
 	try {
-		const stats = fs.statSync(wasmDirectory)
+		const stats = fs.statSync(wasmDirectory!)
 		wasmDirectoryExists = stats.isDirectory()
 	} catch (error) {
 		wasmDirectoryExists = false
@@ -170,12 +178,14 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 
 	// Generate recommendations based on directory existence
 	if (!wasmDirectoryExists) {
-		recommendations.push("WASM directory not found. Run 'Roo-Cline: Download Tree-sitter WASM Files' command.")
+		recommendations.push(
+			"WASM directory not found. Verify src/wasms/tree-sitter/ exists (should be committed). If missing, run 'pnpm regenerate-wasms' or 'Roo-Cline: Download Tree-sitter WASM Files' command",
+		)
 	}
 
 	// Get status for critical files
 	const criticalFiles: WasmFileStatus[] = CRITICAL_FILES.map((filename) => {
-		const status = getFileStatus(wasmDirectory, filename)
+		const status = getFileStatus(wasmDirectory!, filename)
 		if (status.exists) {
 			totalSize += status.size
 			totalFiles++
@@ -188,7 +198,7 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 		(file) => !CRITICAL_FILES.includes(file) && file !== "tree-sitter.wasm",
 	)
 	const optionalFiles: WasmFileStatus[] = optionalFileNames.map((filename) => {
-		const status = getFileStatus(wasmDirectory, filename)
+		const status = getFileStatus(wasmDirectory!, filename)
 		if (status.exists) {
 			totalSize += status.size
 			totalFiles++
@@ -203,7 +213,9 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 	if (wasmDirectoryExists && criticalFiles.length === 0) {
 		recommendations.push("WASM directory is empty. Run download command.")
 	} else if (missingCriticalFiles.length > 0) {
-		recommendations.push(`Missing critical WASM files: ${missingCriticalFiles.join(", ")}. Run download command.`)
+		recommendations.push(
+			`Missing critical WASM files: ${missingCriticalFiles.join(", ")}. Run 'pnpm regenerate-wasms' to populate src/wasms/tree-sitter/, or use download command for legacy dist/ path`,
+		)
 	}
 
 	// Check for files that are too small (likely corrupted)
@@ -236,7 +248,7 @@ export function diagnoseWasmSetup(wasmDirectory?: string): DiagnosticReport {
 	}
 
 	return {
-		wasmDirectory,
+		wasmDirectory: wasmDirectory!,
 		wasmDirectoryExists,
 		criticalFiles,
 		optionalFiles,

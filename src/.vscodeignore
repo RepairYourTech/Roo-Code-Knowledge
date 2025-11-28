@@ -16,6 +16,11 @@
 # Include tree-sitter WASM files (critical for code indexing)
 !dist/services/tree-sitter/*.wasm
 
+# Include source WASM files for runtime loading (eliminates build-time copy dependency)
+!wasms/
+!wasms/tree-sitter/*.wasm
+!wasms/tiktoken/*.wasm
+
 # Include the built webview
 !**/*.map
 !webview-ui/audio
