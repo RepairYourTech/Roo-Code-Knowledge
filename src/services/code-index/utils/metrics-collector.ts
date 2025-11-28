@@ -684,11 +684,12 @@ export class MetricsCollector {
 					this.recordFallbackChunkingTriggerMetric(language, fallbackReason, count)
 				}
 				break
-			case "fileSize":
+			case "fileSize": {
 				// Update average file size
 				const totalFiles = existing.parseAttempts || 1
 				existing.averageFileSize = (existing.averageFileSize * (totalFiles - 1) + count) / totalFiles
 				break
+			}
 		}
 
 		this.parserMetrics.set(language, existing)
