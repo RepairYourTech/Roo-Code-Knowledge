@@ -46,6 +46,7 @@ logs
 .qodo/
 .vercel
 .roo/mcp.json
+.kilocode/mcp.json
 
 # Qdrant
 qdrant_storage/

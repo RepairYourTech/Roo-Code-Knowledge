@@ -419,11 +419,18 @@ See troubleshooting guide: ${TROUBLESHOOTING_URL}`
 		"LanguageParser",
 	)
 
-	const availabilityResults = await checkMultipleParserAvailability(requiredLanguages, 10, metricsCollector)
-	const availableLanguages = availabilityResults
-		.filter((result) => result.isAvailable)
-		.map((result) => result.language)
-	const unavailableLanguages = availabilityResults.filter((result) => !result.isAvailable)
+	const availabilityResults = await checkMultipleParserAvailability(
+		requiredLanguages,
+		undefined,
+		metricsCollector,
+		10,
+	)
+	const availabilityArray = Array.from(availabilityResults.entries()).map(([language, status]) => ({
+		language,
+		...status,
+	}))
+	const availableLanguages = availabilityArray.filter((result) => result.available).map((result) => result.language)
+	const unavailableLanguages = availabilityArray.filter((result) => !result.available)
 
 	logger.info(
 		`Parser availability check: ${availableLanguages.length}/${requiredLanguages.length} available`,
@@ -1287,9 +1294,13 @@ export async function validateAllParsers(): Promise<{
 
 		// Check availability for all languages
 		const availabilityResults = await checkMultipleParserAvailability(supportedLanguages)
+		const availabilityArray = Array.from(availabilityResults.entries()).map(([language, status]) => ({
+			language,
+			...status,
+		}))
 
-		const available = availabilityResults.filter((result) => result.isAvailable)
-		const unavailable = availabilityResults.filter((result) => !result.isAvailable)
+		const available = availabilityArray.filter((result) => result.available)
+		const unavailable = availabilityArray.filter((result) => !result.available)
 
 		// Log detailed report
 		logger.info(
@@ -1308,7 +1319,13 @@ export async function validateAllParsers(): Promise<{
 			total: supportedLanguages.length,
 			available: available.length,
 			unavailable: unavailable.length,
-			languages: availabilityResults.sort((a, b) => a.language.localeCompare(b.language)),
+			languages: availabilityArray
+				.map(({ language, available, error }) => ({
+					language,
+					isAvailable: available,
+					error,
+				}))
+				.sort((a, b) => a.language.localeCompare(b.language)),
 		}
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)

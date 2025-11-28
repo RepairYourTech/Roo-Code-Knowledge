@@ -31,6 +31,16 @@ describe("wasm-diagnostics", () => {
 				treeSitterWasmsVersion: "1.0.0",
 				recommendations: ["Missing critical WASM files: tree-sitter-javascript.wasm. Run download command."],
 				isHealthy: false,
+				recoverySuggestions: [
+					{
+						action: "Download missing WASM files",
+						command: "Roo-Cline: Download Tree-sitter WASM Files",
+						priority: 1,
+						description: "Download the missing tree-sitter-javascript.wasm file",
+					},
+				],
+				canAutoRecover: true,
+				estimatedRecoveryTime: 30,
 			}
 
 			const formatted = formatDiagnosticReport(mockReport)
@@ -81,6 +91,9 @@ describe("wasm-diagnostics", () => {
 				treeSitterWasmsVersion: "1.0.0",
 				recommendations: [],
 				isHealthy: true,
+				recoverySuggestions: [],
+				canAutoRecover: false,
+				estimatedRecoveryTime: 0,
 			}
 
 			const formatted = formatDiagnosticReport(mockReport)
@@ -116,6 +129,16 @@ describe("wasm-diagnostics", () => {
 					"WASM directory not found. Run 'Roo-Cline: Download Tree-sitter WASM Files' command.",
 				],
 				isHealthy: false,
+				recoverySuggestions: [
+					{
+						action: "Create WASM directory and download files",
+						command: "Roo-Cline: Download Tree-sitter WASM Files",
+						priority: 1,
+						description: "Create the WASM directory and download all required files",
+					},
+				],
+				canAutoRecover: true,
+				estimatedRecoveryTime: 60,
 			}
 
 			const formatted = formatDiagnosticReport(mockReport)
@@ -144,6 +167,9 @@ describe("wasm-diagnostics", () => {
 				treeSitterWasmsVersion: "1.0.0",
 				recommendations: [],
 				isHealthy: false,
+				recoverySuggestions: [],
+				canAutoRecover: false,
+				estimatedRecoveryTime: 0,
 			}
 
 			const formatted = formatDiagnosticReport(mockReport)
@@ -166,6 +192,16 @@ describe("wasm-diagnostics", () => {
 				treeSitterWasmsVersion: null,
 				recommendations: ["web-tree-sitter package not installed. Run 'pnpm install'."],
 				isHealthy: false,
+				recoverySuggestions: [
+					{
+						action: "Install missing packages",
+						command: "pnpm install",
+						priority: 1,
+						description: "Install web-tree-sitter and tree-sitter-wasms packages",
+					},
+				],
+				canAutoRecover: true,
+				estimatedRecoveryTime: 120,
 			}
 
 			const formatted = formatDiagnosticReport(mockReport)

@@ -26,7 +26,7 @@ describe("Runtime WASM Loading Integration Test", () => {
 		})
 
 		// Get the WASM directory using the real function
-		wasmDirectory = getWasmDirectory()
+		wasmDirectory = await getWasmDirectory()
 		console.log(`WASM directory resolved to: ${wasmDirectory}`)
 
 		// Initialize the Parser

@@ -1,7 +1,7 @@
-import Parser = require("web-tree-sitter")
+import { Parser, Query, Tree, QueryCapture, Language } from "web-tree-sitter"
 
 export interface QueryExecutionResult {
-	captures: Parser.QueryCapture[]
+	captures: QueryCapture[]
 	tier: number
 }
 
@@ -13,10 +13,10 @@ export interface QueryExecutionResult {
  * Tier 3: Emergency Query (Identifiers and strings)
  */
 export function executeQueryWithFallback(
-	parser: Parser,
-	comprehensiveQuery: Parser.Query,
-	tree: Parser.Tree,
-	language: string,
+	language: Language,
+	comprehensiveQuery: Query,
+	tree: Tree,
+	languageName: string,
 ): QueryExecutionResult {
 	// Tier 1: Comprehensive Query
 	try {
@@ -25,31 +25,31 @@ export function executeQueryWithFallback(
 			return { captures, tier: 1 }
 		}
 	} catch (e) {
-		console.warn(`Tier 1 query failed for ${language}:`, e)
+		console.warn(`Tier 1 query failed for ${languageName}:`, e)
 	}
 
 	// Tier 2: Simplified Query
 	try {
-		const simplifiedSource = getSimplifiedQuery(language)
+		const simplifiedSource = getSimplifiedQuery(languageName)
 		if (simplifiedSource) {
-			const simplifiedQuery = parser.getLanguage().query(simplifiedSource)
+			const simplifiedQuery = language.query(simplifiedSource)
 			const captures = simplifiedQuery.captures(tree.rootNode)
 			if (captures.length > 0) {
 				return { captures, tier: 2 }
 			}
 		}
 	} catch (e) {
-		console.warn(`Tier 2 query failed for ${language}:`, e)
+		console.warn(`Tier 2 query failed for ${languageName}:`, e)
 	}
 
 	// Tier 3: Emergency Query
 	try {
-		const emergencySource = getEmergencyQuery(language)
-		const emergencyQuery = parser.getLanguage().query(emergencySource)
+		const emergencySource = getEmergencyQuery(languageName)
+		const emergencyQuery = language.query(emergencySource)
 		const captures = emergencyQuery.captures(tree.rootNode)
 		return { captures, tier: 3 }
 	} catch (e) {
-		console.error(`Tier 3 query failed for ${language}:`, e)
+		console.error(`Tier 3 query failed for ${languageName}:`, e)
 		return { captures: [], tier: 3 }
 	}
 }
